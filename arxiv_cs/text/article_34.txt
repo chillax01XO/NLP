@@ -1,0 +1,2043 @@
+arXiv:2505.21335v1  [cs.GR]  27 May 2025Structure from Collision
+Takuhiro Kaneko
+NTT Corporation
+Abstract
+Recent advancements in neural 3D representations, such
+as neural radiance fields (NeRF) and 3D Gaussian splat-
+ting (3DGS), have enabled the accurate estimation of 3D
+structures from multiview images. However, this capability
+is limited to estimating the visible external structure, and
+identifying the invisible internal structure hidden behind the
+surface is difficult. To overcome this limitation, we address
+a new task called Structure from Collision (SfC), which aims
+to estimate the structure (including the invisible internal
+structure) of an object from appearance changes during col-
+lision. To solve this problem, we propose a novel model
+called SfC-NeRF that optimizes the invisible internal struc-
+ture of an object through a video sequence under physical,
+appearance (i.e., visible external structure)-preserving, and
+keyframe constraints. In particular, to avoid falling into un-
+desirable local optima owing to its ill-posed nature, we pro-
+pose volume annealing; that is, searching for global optima
+by repeatedly reducing and expanding the volume. Exten-
+sive experiments on 115 objects involving diverse structures
+(i.e., various cavity shapes, locations, and sizes) and mate-
+rial properties revealed the properties of SfC and demon-
+strated the effectiveness of the proposed SfC-NeRF .1
+1. Introduction
+Learning 3D representations from multiview images is a
+fundamental problem in computer vision and graphics, with
+applications across various domains, including augmented
+and virtual reality, gaming, robotics, and autonomous driv-
+ing. Recent advancements in neural 3D representations,
+such as neural radiance fields (NeRF) [47] and 3D Gaus-
+sian splatting (3DGS) [32], have enabled the accurate esti-
+mation of 3D structures from multiview images and yielded
+impressive results in novel view synthesis.
+However, this benefit is limited to the estimation of the
+visible external structure, and it remains difficult to estimate
+theinvisible internal structure hidden behind the surface.2
+1The project page is available at https://www.kecl.ntt.co.
+jp/people/kaneko.takuhiro/projects/sfc/ .
+2More strictly, when an object is transparent or translucent, it is possi-
+ble to estimate the internal structure hidden behind the surface using a vol-
+ume rendering-based 3D representation learning model (e.g., NeRF [47])
+(a) (b) (c) (d)(1) Static (2) SfC  (proposed) 
+ (3) Ground truth 1.005
+0.1431.005
+0.094Figure 1. Concept of Structure from Collision (SfC) . (a) and (c)
+Examples of training images taken from a certain viewpoint. (b)
+and (d) Cross-sectional views of the internal structures cut per-
+pendicular to the viewpoint. The score indicates the chamfer dis-
+tance (×103↓) between the ground-truth and estimated particles
+(the smaller, the better). Here, two objects appear to be identical
+in static images (1) but actually have different internal structures
+(3). (1) A static 3D representation learning model cannot distin-
+guish the difference in internal structures (b)(d) because there is no
+difference in appearance in static images (a)(c). (2) To overcome
+this limitation, we address SfC. As shown in (a) and (c), changes in
+shape and appearance during collision are influenced by the inter-
+nal structure. We utilize this property to identify the internal struc-
+ture of the object. Although it is still difficult to identify perfectly
+owing to its ill-posed nature, the proposed method has succeeded
+in capturing the bias in the location of the holes (b)(d).
+For example, in Figure 1, the two objects have different
+internal structures, as shown in Figure 1(3)(b) and (3)(d).
+However, they are identical in the static images, as shown
+in Figure 1(1)(a) and (1)(c). Consequently, a standard static
+neural 3D representation learning model (e.g., the voxel-
+based NeRF [63] used in this example) learns the same in-
+because it represents appearance on the basis of cumulative volume densi-
+ties. However, this effect is limited when an object is not transparent. This
+study aims to identify the internal structure even in the latter case.
+1ternal structures (Figure 1(1)(b) and (1)(d)) and ignores the
+differences in the internal structures. This misestimation of
+the internal structure can cause issues in practical applica-
+tions, such as reproducing and simulating objects in virtual
+and augmented reality and controlling forces during inter-
+actions with objects in robotics.
+To overcome this limitation, we address a novel task
+called Structure from Collision (SfC) , the objective of which
+is to identify the structure (including the invisible internal
+structures) of an object based on observations at collision.
+This is motivated by the observation that changes in appear-
+ance and shape during collisions are influenced by the inter-
+nal structures. For example, as shown in Figure 1(2)(a) and
+(2)(c), when a hole exists inside the sphere on the left side
+(Figure 1(3)(b)) or on the upper side (Figure 1(3)(d)), the
+sphere crumples when it hits the ground. We use this prop-
+erty to identify the internal structure of the object.
+We formulated SfC to optimize the invisible internal
+structures of an object under physical ,appearance (i.e.,
+visible external structure)-preserving , and keyframe con-
+straints . Specifically, we implemented this approach using
+SfC-NeRF , which consists of four components.
+(1) Physical constraints. SfC is ill-posed because the
+observable data represent just one of many possible solu-
+tions. To address this issue, we narrow the solution space
+by incorporating physical constraints , specifically by using
+physics-augmented continuum NeRF (PAC-NeRF) [36].
+(2) Appearance-preserving constraints. Owing to the re-
+cent advancements in neural 3D representations, learning
+visible external structures is easier than learning invisible
+internal structures . Accordingly, we first learn the external
+structures using a standard static neural 3D representation
+learning model (voxel-based NeRF [63] in practice) using
+the first frame (Figure 1(1)). We then optimize the internal
+structures using a video sequence (Figure 1(2)). In the sec-
+ond step, to avoid damaging the external structures learned
+in the first step when fitting the entire video, we introduce
+appearance-preserving constraints that optimize the inter-
+nal structures while preserving the external structures.
+(3) Keyframe constraints. In a collision video, a specific
+frame (e.g., immediately after a collision) is effective in ex-
+plaining the shape change caused by the collision. Accord-
+ingly, we incorporate keyframe constraints to strengthen
+shape learning in the keyframe.
+(4) Volume annealing. To avoid becoming stuck in unde-
+sirable local optima owing to the existence of multiple solu-
+tions, we developed volume annealing , in which the global
+optimum is searched for through an annealing process that
+repeatedly reduces and expands the volume.
+We comprehensively evaluated the proposed method us-
+ing a dataset containing 115objects with diverse structures
+(i.e., various cavity shapes, locations, and sizes) and mate-
+rial properties. Our results reveal the properties of SfCand
+demonstrate the effectiveness of SfC-NeRF . Figure 1(2)(b)
+and (d) show examples of the results obtained using SfC-NeRF . Although it is challenging to perfectly match the in-
+ternal structures to the ground truth owing to the high de-
+grees of freedom in the solution, SfC-NeRF successfully
+identified the deviation of the hole inside the sphere.
+The contributions of this study are threefold:
+• We address a novel task called SfC, whose aim is to iden-
+tify structures (including the internal structures) from the
+appearance changes at collision.
+• To solve SfC, we propose SfC-NeRF , which consists of
+four components: physical ,appearance-preserving , and
+keyframe constraints , and volume annealing .
+• Through extensive experiments on 115 objects, we
+demonstrate the effectiveness of SfC-NeRF while clarify-
+ing the properties of SfC. We also provide detailed results
+and implementation details in the Appendices. Video
+samples are available at the project page.
+2. Related work
+Neural 3D representations. Learning 3D representations
+is a fundamental problem in computer vision and graphics.
+Recent advancements in neural 3D representations, such as
+NeRF [47] and 3DGS [32], have lead to significant break-
+throughs, and various derivative models have been pro-
+posed. These models can be roughly divided into three cate-
+gories, based on their objectives. (1) Improvement of quality
+of rendered images or reconstructed 3D data [4–6, 24, 27,
+37, 39, 43, 48, 67, 74, 79, 80], (2) improvement of efficiency ,
+i.e., speeding up and reducing memory usage in training or
+inference [3, 10, 12, 16, 19, 22, 23, 30, 34, 35, 42, 44, 49–
+51, 57, 58, 60, 62, 63, 68, 71, 78], and (3) incorporation of
+other modules or functionalities , such as generative mod-
+els [7–9, 11, 14, 18, 20, 29, 40, 52, 54, 59, 61, 64, 65, 70, 73,
+77, 81] and physics/dynamics [1, 2, 13, 15, 17, 21, 28, 31,
+36, 38, 45, 46, 53, 55, 56, 66, 72, 75, 76]. This study focuses
+on the third category, aiming to discover internal structures
+based on dynamic observations under physical constraints.
+Because these models are mutually developed, applying the
+proposed approach to other models presents an interesting
+direction for future research.
+Dynamic neural 3D representations. Dynamic neural 3D
+representations can be classified into two categories, based
+on whether they incorporate physics. (1) Non- (or weak)
+physics-informed models [17, 38, 45, 46, 53, 55, 66, 75, 76]
+and(2) physics-informed models [1, 2, 13, 15, 21, 28, 31,
+36, 56, 72]. The first category offers flexibility, and can
+be applied to scenes or objects that are difficult to describe
+physically. However, it requires a large amount of train-
+ing data and lacks interpretability because of its fully data-
+driven black-box nature. By introducing physics, the sec-
+ond category provides a better interpretability and narrows
+the solution space. However, they lose flexibility and are
+difficult to apply to scenes or objects that cannot be ex-
+plained by physics. This study adopts a physics-informed
+model (the second-category strategy) because SfCis an ill-
+posed problem, and physics plays an important role in nar-
+2rowing the solution space. However, in the future, it would
+be interesting to explore how the first-category strategy can
+be used by expanding data and developing new theories.
+Physics-informed neural 3D representations. Physics-
+informed neural 3D representations can be divided into two
+categories based on the problem setting. (1) Forward engi-
+neering [15, 28, 56, 72], where a physics-informed model
+is optimized to fit static scenes or objects, and then physics-
+informed dynamic simulations or interactive manipulations
+are performed. In most cases, the inside of the object is
+assumed to be filled , and internal factors, such as physical
+properties, are manually adjusted to achieve visually plau-
+sible results. (2) Reverse engineering [1, 2, 13, 21, 31, 36],
+which focuses on system identification—identifying inter-
+nal factors (e.g., physical properties) from dynamic obser-
+vations (i.e., video sequences). This study falls into the sec-
+ond category because it aims to reverse engineer the inter-
+nal structure , which is hidden but essential for describing
+the system, from collision videos.
+Reverse engineering is generally ill-posed because the
+observable data represent only one of the many possible so-
+lutions. To address this issue, the methods in this category
+typically impose assumptions on internal factors that are not
+optimized. Previous studies have made various assumptions
+regarding the internal structure, which is the main focus of
+this study. For example, [13] assumes that an object, such
+as smoke, is translucent , allowing part of the internal struc-
+ture to be visible . Other studies [1, 2, 21, 31, 36] consid-
+ered non-transparent objects but assumeed that the interior
+isfilled . Consequently, non-transparent and unfilled ob-
+jects have not been sufficiently explored. Therefore, this
+study focused on such objects. It is important to note that,
+as with conventional problems, solving SfCis challenging
+without making any assumptions. In this study, we assumed
+that certain internal factors, such as physical properties, are
+known in advance. Even with this assumption, as shown in
+Figure 1 (where physical properties, such as mass, Young’s
+modulus, and density, are identical), multiple solutions still
+exist, making SfCa challenging problem. Details of the
+problem settings are discussed in Section 3.1.
+3. Method
+3.1. Problem statement
+First, we define the SfC problem. Given a set of multi-
+view videos in which objects collide (e.g., Figure 1(2)(a)
+and (2)(c)), the objective of SfCis to identify the structure
+of the object, including its invisible internal structure, based
+on the appearance changes before and after the collision.
+Formally, the training data, i.e., a set of multiview videos,
+are defined as a collection of ground-truth color observa-
+tions ˆC(r, t). Here, r∈R3is a camera ray defined as
+r(s) =o+sd, where o∈R3is the camera origin, d∈S2
+is the view direction, and s∈[sn, sf]is the distance from o.
+During training, ris sampled from ˆR, which is a collectionof camera rays in the training dataset. t∈ {t0, . . . , t N−1}
+represents the time, where Nis the total number of frames.
+Given these data, we aim to estimate the 3D structure (both
+external and internal ones) of the object PP(t0), which cor-
+responds to the ground truth ˆPP(t0). Here, we represent the
+3D structures as particle sets, PP(t0)andˆPP(t0), as shown
+in Figure 1(b) and (d). During training, only the external ap-
+pearance ˆC(r, t)is observed; ˆPP(t0), which includes the
+internal structure, is not observable.
+As discussed in Sections 1 and 2, SfC is an ill-posed
+problem with multiple solutions. Internal structures and
+physical properties, such as Young’s modulus, have a mutu-
+ally dependent relationship because both can explain the re-
+lationship between strain and stress. For example, a highly
+elastic object can be created either by making it hollow
+or by using soft materials. To address this issue, PAC-
+NeRF [36] optimizes physical properties by assuming that
+the inside of the object is filled . In contrast, we address
+a complementary problem, namely optimizing the internal
+structure based on the assumption that the physical prop-
+erties are known . Specifically, we assume that the phys-
+ical properties related to the material (e.g., Young’s mod-
+ulus ˆE, Poisson’s ratio ˆν, and density ˆρ) and mass ˆmare
+known. Even with this assumption, SfCremains a challeng-
+ing problem because multiple internal structures can satisfy
+the same set of physical properties, as shown in Figure 1.
+3.2. Preliminary: PAC-NeRF
+As explained in the previous subsection, the problem set-
+tings differ between the PAC-NeRF study [36] and this
+study. However, because the proposed model uses PAC-
+NeRF to describe the physics, we briefly review PAC-NeRF
+here. PAC-NeRF is a variant of NeRF that bridges the Eule-
+rian grid-based scene representation [63] with a Lagrangian
+particle-based differentiable physical simulation [26] for
+continuum materials, such as elastic materials, plasticine,
+sand, and fluids. PAC-NeRF obtains this functionality us-
+ing three components: a continuum NeRF, a particle–grid
+interconverter, and a Lagrangian field.
+Continuum NeRF. Continuum NeRF is built on dynamic
+NeRF (NeRF for a dynamic scene) [55]. In the dynamic
+NeRF, the volume density and color fields for position x,
+view direction d, and time tare defined as σ(x, t)and
+c(x,d, t), respectively. On this basis, the color of each pixel
+C(r, t)is rendered using volume rendering [47]:
+C(r, t) =Zsf
+snTr(s, t)σ(r(s), t)c(r(s),d, t)ds, (1)
+Tr(s, t) = exp
+−Zs
+snσ(r(u), t)du
+. (2)
+This model can be trained using a pixel loss.
+Lpixel=1
+NN−1X
+i=01
+|ˆR|X
+r∈ˆR∥C(r, ti)−ˆC(r, ti)∥2
+2.(3)
+3Dynamic NeRF is extended to continuum NeRF to describe
+the dynamics of continuum materials. This is achieved by
+applying the conservation laws to σ(x, t)andc(x,d, t):
+Dσ
+Dt= 0,Dc
+Dt=0, (4)
+whereDϕ
+Dt=∂ϕ
+∂t+v· ∇ϕfor an arbitrary time-dependent
+fieldϕ(x, t). Here, vis the velocity field and obeys mo-
+mentum conservation for continuum materials:
+ρDv
+Dt=∇ ·T+ρg, (5)
+where ρis the physical density field, Tis the internal
+Cauchy stress tensor, and gis the gravitational accelera-
+tion. This equation can be solved differentially using the
+differentiable material point method (DiffMPM) [26].
+Particle–grid interconverter. DiffMPM is a particle-based
+method that conducts simulations in a Lagrangian space.
+However, these particles do not necessarily lie on the ray,
+which makes rendering difficult. Considering this, PAC-
+NeRF renders in an Eulerian grid space with voxel-based
+NeRF [63] and bridges these two spaces using grid-to-
+particle (G2P) and particle-to-grid (P2G) conversions:
+FP
+p≈X
+iwipFG
+i,FG
+i≈P
+pwipFP
+pP
+pwip, (6)
+where FX={σX(x, t),cX(x,d, t)}forX∈ {G, P}.
+Here, GandPrepresent the Eulerian and Lagrangian
+views, respectively. When FXis used with a subscript,
+that is, FX
+x(x∈ {i, p}), the subscripts iandpindicate
+the grid node and particle index, respectively. wipdenotes
+the weight of the trilinear shape function defined at iand
+evaluated at p.
+Lagrangian field. The physical simulation and rendering
+pipeline in PAC-NeRF proceeds as follows: (1) V olume
+densities and colors are initialized over the first frame of the
+video sequence in an Eulerian grid field, FG′(t0). Here, we
+use the superscript G′to distinguish FG′fromFGused in
+Step (4). (2) Using the G2P process, FG′(t0)is converted
+into a Lagrangian particle field, FP(t0). In this step, parti-
+clesPP(t0)are sampled at intervals of half the grid, that is,
+∆x
+2(where ∆xis the grid size), with random fluctuations.
+The alpha value (or amount of opacity) αP
+pis calculated
+for each particle using αP
+p= 1−exp(−softplus (σP
+p)), and
+a particle is removed if αP
+p< ϵ (ϵ= 10−3in practice).
+(3) The particle field in the next step, FP(t1), is calculated
+fromFP(t0)using DiffMPM [26], where t1=t0+δt, and
+δtis the duration of the time step. Similarly, the particle
+field at t,FP(t), is calculated for t∈ {t0, . . . , t N−1}. (4)
+Using the P2G process, FP(t)is converted into an Eulerian
+grid field, FG(t). (5)C(r, t)is rendered based on FG(t)
+by using voxel-based volume rendering [63].During training, two-step optimization is conducted. (i)
+FG′(t0)is initially optimized using the first frame of the
+video sequence by conducting processes (1)–(5) for t=
+t0. (ii) Physical properties, such as the Young’s mod-
+ulusEand Poisson’s ratio ν, are optimized for the en-
+tire video sequence by conducting processes (1)–(5) for
+t∈ {t0, . . . , t N−1}. In both optimizations, Lpixel(Equa-
+tion 3) is used as the objective function.
+3.3. Proposal: SfC-NeRF
+Similar to PAC-NeRF, SfC-NeRF performs two-step opti-
+mization, as shown in Figure 2. The first-step optimiza-
+tion (Figure 2(i)) is the same as that in PAC-NeRF, that is,
+FG′(t0)is initially optimized using the first frame of the
+video sequence. In this step, the filled object is learned,
+as shown in Figure 1(1). In contrast, the second step of
+the optimization (Figure 2(ii)) differs because of the dif-
+ference in the optimization target. In the PAC-NeRF, the
+physical properties are optimized in this step, whereas in
+theSfC-NeRF , the internal structure is optimized. Specif-
+ically, as explained in the previous section, we obtain par-
+ticlesPP(t0)based on σP(t0), which is calculated from
+σG′(t0)(Steps (1) and (2)). Therefore, we select σG′(t0)
+as the optimization target.3In particular, we formulate SfC
+as a problem of optimizing σG′(t0)under physical ,appear-
+ance (i.e., external structure)-preserving , and keyframe con-
+straints , along with volume annealing .
+Physical constraints. As discussed in Section 3.1, we as-
+sume that the physical properties related to the material
+(e.g., Young’s modulus ˆE, Poisson’s ratio ˆν, and density
+ˆρ) and mass ˆmare known. We utilize them to narrow the
+solution space of SfC.
+Physical constraints on material properties. We can reflect
+material-specific physical properties (e.g., Young’s modulus
+ˆE, Poisson’s ratio ˆν, and density ˆρ) explicitly when con-
+structing DiffMPM [26]. Motivated by this fact, we opti-
+mize σG′(t0)under the explicit material-specific physical
+constraints imposed by DiffMPM .
+Physical constraints on mass. Unlike physical material
+properties, mass is not determined only by the material and
+varies depending on the individual objects. Therefore, in-
+stead of explicitly representing the mass in DiffMPM, we
+constrain the mass using a mass loss .
+Lmass=∥log10(m)−log10( ˆm)∥2
+2, (7)
+m=X
+p∈PP(t0)ˆρ·∆x
+23
+·αP
+p, (8)
+3Note that Lagrangian particle optimization (LPO) [31] also consid-
+ers a similar optimization (i.e., optimizing FP(t0)orFG′(t0)through a
+video sequence) for few-shot (sparse view) learning. However, it aims to
+compensate for the external structure where the viewpoint is missing and
+has not sufficiently considered the components necessary for estimating
+the internal structures, which are discussed in the following paragraphs.
+We demonstrate the limitations of LPO in our experiments (Section 4).
+4FG(tk) FP(tk)
+G2P P2GrenderingV oxel volume 
+G2P P2GrenderingV oxel volume 
+P2G renderingV oxel volume Ground truth
+DiffMPM(i) Static optimization
+(ii) Dynamic optimizationFG(t0) FP(t0)
+FG(t0) FP(t0)FG(t0)
+FG(t0)samplingRandom
+samplingRandom
+ˆmm
+LmassLpixel
+Lpixel
+LpixelLpixel0
+LpixelkLdepth 0
+×λmass×λpres
+×λkey×λpreswdepth 
+Figure 2. Optimization pipelines of SfC-NeRF. (i) The grid field FG′(t0)is initially optimized using the first frame of the video sequence.
+(ii) Subsequently, the structure (i.e., volume density σG′(t0)∈ FG′(t0)) of the object is optimized through the entire video sequence with
+physical constraints ( Lmassand DiffMPM), appearance-preserving constraints (i.e., Lpixel0andLdepth0), and keyframe constraints ( Lpixelk)
+along with a standard pixel loss ( Lpixel).
+where mandˆmare the estimated and ground-truth masses,
+respectively. In Equation 8, mis computed by summarizing
+the mass of each particle indexed by p∈ PP(t0), where the
+mass of each particle is given by the product of the physical
+density ˆρ, the unit volume of a particle ∆x
+23, and the alpha
+value αP
+p. In Equation 7, we employ a logarithmic scale to
+prioritize scale matching.
+Appearance-preserving constraints. As mentioned
+above, we use two-step optimization: (i) FG′is initially
+optimized using the first frame of the video sequence (Fig-
+ure 2(i)). (ii) σG′is optimized through a video sequence
+(Figure 2(ii)). In Step (ii), the external structure (or surface)
+learned in Step (i) does not need to be changed, consider-
+ing that learning the external structure is easier than learning
+the internal structure. However, the physical constraints dis-
+cussed above are not sufficient to satisfy this requirement.
+Hence, we introduced appearance-preserving constraints at
+both the loss and training scheme levels.
+Appearance-preserving loss. The standard pixel loss (Equa-
+tion 3) treats the loss for each frame equally. This is insuffi-
+cient to prevent the external structure, which is well-learned
+in Step (i), from changing as a result of the fitting of the en-
+tire video sequence. Hence, we employ a pixel-preserving
+lossthat preserves the appearance of the initial frame.
+Lpixel0=1
+|ˆR|X
+r∈ˆR∥C(r, t0)−ˆC(r, t0)∥2
+2. (9)
+This is a variant of pixel loss (Equation 3) when N= 1.
+Because the constraints on the 2D projection plane aloneare insufficient for preserving the 3D structure (e.g., objects
+with reversed concavity may be learned), we also incorpo-
+rate a depth-preserving loss to encourage the preservation
+of the depth of the initial frame.
+Ldepth0=1
+|ˆR|X
+r∈ˆR(∥∆hZ(r, t0)−∆h˜Z(r, t0)∥2
+2,
++∥∆vZ(r, t0)−∆v˜Z(r, t0)∥2
+2),(10)
+where Z(r, t0)and˜Z(r, t0)are the depths predicted by
+the current model and the model before performing Step
+(ii), respectively. We use ˜Z(r, t0)because the ground-
+truth depth is not observable. Z(r, t0)is calculated by
+Z(r, t0) =Rsf
+snTr(s, t)σ(r(s), t)sds, and ˜Z(r, t0)is calcu-
+lated in a similar manner. ∆hand∆vare operations that
+calculate the horizontal and vertical differences between
+adjacent pixels, respectively. We compare the differences
+rather than the raw data to mitigate the negative effects of
+depth estimation errors.
+Appearance-preserving training. Ideally, when an object is
+non-transparent, its appearance is not expected to change,
+even if the internal volume density is changed. However,
+in preliminary experiments, we found that it is difficult to
+retain the appearance learned in Step (i) through a simple
+adaptation of the appearance-preserving losses. This mo-
+tivated us to employ appearance-preserving training , that
+is, reoptimizing FG′(t0)using the first frames of the video
+sequence every time after optimizing σG′(t0)for the entire
+video sequence.
+5Keyframe constraints. As mentioned in the explanation
+of appearance-preserving loss, the standard pixel loss treats
+the loss for each frame equally. However, in preliminary
+experiments, we found that certain frames, particularly the
+frame immediately after the collision, were useful for ex-
+plaining shape changes due to the internal structures. Based
+on this observation, we impose a keyframe pixel loss defined
+as follows:
+Lpixelk=1
+|ˆR|X
+r∈ˆR∥C(r, tk)−ˆC(r, tk)∥2
+2, (11)
+where kis the keyframe index (the frame immediately after
+the collision is used in practice).
+Volume annealing. As discussed previously, we begin the
+optimization from the state in which the interior of the ob-
+ject is filled (Figure 2(i)). The internal structure is then op-
+timized by reducing the volume using the aforementioned
+techniques (Figure 2(ii)). Owing to these learning dynam-
+ics, if the volume reduction goes in the wrong direction
+and leads to a local optimum, it becomes challenging to
+determine the global optimum. To address this issue, we
+introduce volume annealing , which involves alternating be-
+tween the volume reduction and expansion. This strategy
+facilitates the search for a global optimum. Specifically, we
+implement the volume expansion by successively perform-
+ing the G2P and P2G processes and replacing the obtained
+FG(t0)withFG′(t0).
+Full objective. The full objective used in Step (ii) is ex-
+pressed as follows:
+Lfull=Lpixel+λmassLmass
++λpres(Lpixel0+wdepthLdepth0) +λkeyLpixelk(12)
+where λmass,λpres,wdepth, and λkeyare the weighting hyper-
+parameters. The effect of each loss is analyzed using the
+ablation study presented in Section 4.
+4. Experiments
+4.1. Experimental setup
+We conducted three experiments to evaluate SfC-NeRF and
+explore the properties of SfC. First, we examined the impact
+of changes in the internal structure, focusing on the cav-
+ity sizes (Experiment I in Section 4.2) and locations (Ex-
+periment II in Section 4.3). We then explored the effect
+of the material properties in Experiment III (Section 4.4).
+The main results are summarized here, with the detailed
+results and implementation details provided in the Appen-
+dices. Video samples are available at the project page.
+Dataset. Because SfCis a new task and there is no es-
+tablished dataset, we created a new dataset called the SfC
+dataset based on the protocol of the PAC-NeRF study [36].
+We prepared 115objects by changing their external shapes,
+internal structures, and materials. Figure 3 shows examples
+(a) Sphere (b) Cube (c) Bicone (d) Cylinder (e) Diamond
+Figure 3. Examples of the data in the SfC dataset.
+of the data in this dataset. First, we prepared five exter-
+nal shapes: sphere ,cube ,bicone ,cylinder , and diamond .
+Regarding the internal structure and material, we set the de-
+fault values as follows: the cavity size rate for filled ob-
+ject,sc, was set to (2
+3)3, the cavity location, lc, was set at
+the center, and the material was defined as an elastic ma-
+terial with Young’s modulus ˆE= 106and Poisson’s ra-
+tioˆν= 0.3. Under these default properties, one of them
+was changed as follows: (a) Three differently sized cavities:
+sc∈ {0,(1
+2)3,(3
+4)3}. (b) Four different cavity locations:
+center lcis moved {up,down ,left,right}. (c) Eight different
+elastic materials: those with four different Young’s moduli
+ˆE∈ {2.5×105,5×105,2×106,4×106}and four different
+Poisson’s ratios ˆν∈ {0.2,0.25,0.35,0.4}. Seven different
+materials: two Newtonian fluids, two non-Newtonian flu-
+ids, two plasticines, and one sand. Their physical properties
+were derived from the PAC-NeRF dataset [36]. Thus, we
+created 5external shapes ×(1default + 3sizes + 4loca-
+tions + (8 + 7) materials) = 115 objects.
+Following the PAC-NeRF study [36], ground-truth data
+were generated using the MLS-MPM simulator [25], where
+each object fell freely under the influence of gravity and col-
+lided with the ground plane. Images were rendered under
+various environmental lighting conditions and ground tex-
+tures using a photorealistic renderer. Each scene was cap-
+tured from 11 viewpoints, including an object, using cam-
+eras spaced in the upper hemisphere.
+Preprocessing. Following the PAC-NeRF study [36], we
+made two assumptions and performed preprocessing to fo-
+cus on solving SfC. (1) The intrinsic and extrinsic parame-
+ters of the cameras are known. (2) Collision objects, such
+as the ground plane, are known. As mentioned in [36], the
+latter can be easily estimated from observed images. For
+preprocessing, we applied video matting [41] to exclude
+static background objects, and concentrated the computa-
+tion on the object of interest. This process provides a back-
+ground segmentation mask ˆB(r, t). NeRF can estimate a
+background segmentation mask B(r, t)using B(r, t) = 1−
+Tr(sf, t). Taking advantage of this property, we also used a
+background loss Lbg=∥B(r, t)−ˆB(r, t)∥2
+2when calculat-
+ing the pixel-related losses ( Lpixel,Lpixel0, andLpixelk) with
+a weighting hyperparameter of wbg. In the experiments, this
+technique was applied to all the models.
+Comparison models. Because there is no established
+method for SfC, we adapted previous methods to make them
+61.149 1.210(c) GO (d) GO mass
+0.118 0.0921.164
+0.285 0.107 0.067
+0.991 1.027(f) LPO mass (e) LPO 
+(h) SfC-NeRF 
+−APL (g) SfC-NeRF 
+−mass
+0.491(i) SfC-NeRF 
+−APT (j) SfC-NeRF 
+−key (k) SfC-NeRF 
+−VA (l) SfC-NeRF (a) GT (b) Static Training data 
+Figure 4. Comparison of learned structures for sphere objects with
+sc= (2
+3)3. The score under particles indicates the CD ( ×103↓).
+(c)–(f) GO/LPO failed to determine optimal learning directions.
+(g)–(k) The ablated models failed to avoid improper solutions. (l)
+The full model overcomes these issues and achieves the best CD.
+suitable for SfC. Specifically, we used grid optimization
+(GO) and Lagrangian particle optimization ( LPO ) [31] as
+baselines. GO and LPO are improved variants of PAC-
+NeRF that optimize FG′(t0)andFP(t0), respectively, us-
+ingLpixelacross a video sequence for few-shot learning.
+For a fair comparison with SfC-NeRF , GO and LPO were
+trained using the ground-truth physical properties. Al-
+though the original GO and LPO do not use the mass infor-
+mation for training, it may not be fair to apply it solely to the
+proposed method. Therefore, we also examined GO massand
+LPO mass, extensions of GO and LPO that incorporate Lmass.
+Furthermore, as an ablation study, we compared SfC-NeRF
+with various variants: SfC-NeRF −mass,SfC-NeRF −APL,SfC-
+NeRF −APT,SfC-NeRF −key, and SfC-NeRF −VA, in which the
+mass loss ( Lmass),4appearance-preserving losses ( Lpixel0
+andLdepth0), appearance-preserving training, keyframe loss
+(Lpixelk), and volume annealing were ablated, respectively.
+We also examined Stacic , a model trained using only the
+first frame of a video sequence, to assess the effect of opti-
+mization across videos.
+Evaluation metric. As mentioned in Section 3.1, we use
+particles PP(t0)to represent the structure (including the
+internal structure) of an object and estimate PP(t0)that
+matches the ground truth ˆPP(t0). Therefore, we evaluate
+the model by measuring the distance between PP(t0)and
+ˆPP(t0)using the chamfer distance (CD) . The smaller the
+value, the higher is the degree of matching.
+4.2. Experiment I: Influence of cavity size
+First, we investigated the influence of the cavity size in-
+side the object. Table 1 summarizes the quantitative results,
+and the qualitative results are presented in Figure 4, Ap-
+pendix B.1, and the project page. Our findings are threefold.
+(1) Limitations of GO and LPO [31] . GO, a simple voxel
+grid optimization using Lpixel, failed to determine an appro-
+priate optimization direction, which led to the deterioration
+ofPP(t0)as it fits the video. LPO showed a slight im-
+provement by moving particles within physical constraints
+4As explained in Appendix C.3, the mass information is not only used
+in the loss but also in adjusting the learning rate. In this experiment, we
+ablated both to simulate a case in which the mass is unknown.sc 0 (1
+2)3(2
+3)3(3
+4)3Avg.
+Static 0.093 0.294 0.920 1.574 0.720
+GO 0.091 0.301 0.941 1.586 0.730
+GO mass 0.081 0.319 1.244 2.291 0.984
+LPO 0.092 0.284 0.841 1.406 0.656
+LPO mass 0.087 0.284 0.876 1.477 0.681
+SfC-NeRF −mass 0.089 0.226 0.550 1.148 0.503
+SfC-NeRF −APL 0.106 0.423 0.898 1.326 0.688
+SfC-NeRF −APT 0.085 0.261 0.332 0.661 0.335
+SfC-NeRF −key 0.082 0.127 0.211 0.325 0.186
+SfC-NeRF −V A 0.146 0.293 0.370 0.456 0.316
+SfC-NeRF 0.081 0.122 0.195 0.262 0.165
+Table 1. Comparison of CD ( ×103↓) when varying the cavity size
+sc. The scores were averaged over five external shapes.
+lc left right up down Avg.
+Static 0.841 0.842 0.815 0.813 0.828
+GO 0.874 0.853 0.878 0.870 0.869
+GO mass 1.349 1.334 1.104 1.001 1.197
+LPO 0.791 0.787 0.796 0.743 0.779
+LPO mass 0.824 0.817 0.828 0.775 0.811
+SfC-NeRF −mass 0.513 0.485 0.705 0.479 0.545
+SfC-NeRF −APL 0.845 0.783 0.805 0.583 0.754
+SfC-NeRF −APT 0.624 0.428 0.384 0.464 0.475
+SfC-NeRF −key 0.308 0.296 0.307 0.313 0.306
+SfC-NeRF −V A 0.542 0.596 0.333 0.385 0.464
+SfC-NeRF0.303 0.258 0.274 0.291 0.281
+(0.367) (0.431) (0.448) (0.417) (0.416)
+Table 2. Comparison of CD ( ×103↓) when varying the cavity lo-
+cation lc. The gray score in parentheses indicates ACD ( ×103).
+via DiffMPM. However, its effectiveness was limited be-
+cause significant particle movement could alter the unit vol-
+ume density, making it difficult to find the optimal internal
+structure. Furthermore, in both GO and LPO, using mass
+knowledge with Lmass did not improve the performance,
+possibly because they lacked appearance-preserving mech-
+anisms, and forcing mclose to ˆmcan damage the overall
+structure. (2) Effectiveness of each component. The ab-
+lation study confirms the importance of each model com-
+ponent. (3) Increased difficulty with increased cavity size.
+Because optimization begins in the filled state, large cavity
+sizes require significant volume changes. We believe that
+this is the key reason for the deterioration in performance
+as the cavity size increases.
+4.3. Experiment II: Influence of cavity location
+Next, we examined the influence of the cavity location . Ta-
+ble 2 summarizes the quantitative results, and the qualita-
+tive results are presented in Appendix B.1 and project page.
+Similar to Experiment I, we observed two main findings:
+(1) Limitations of GO and LPO. (2) Effectiveness of each
+component . In addition, we discuss (3) how well SfC-NeRF
+captured the cavity location . A simple CD is insufficient
+for this evaluation because it does not account for the devi-
+ations. Therefore, we calculated the anti-chamfer distance
+7ˆE 2.5×1055.0×1051.0×1062.0×1064.0×106
+Static 0.920 0.921 0.920 0.920 0.920
+SfC-NeRF 0.289 0.254 0.195 0.314 0.374
+ˆν 0.2 0 .25 0 .3 0 .35 0 .4
+Static 0.920 0.919 0.920 0.920 0.921
+SfC-NeRF 0.196 0.198 0.195 0.207 0.224
+Table 3. Comparison of CD ( ×103↓) when varying Young’s
+moduls ˆEand Poisson’s ratio ˆν.
+Newtonian Non-Newtonian Plasticine Sand
+Static 0.921 0.919 0.920 0.920
+SfC-NeRF 0.196 0.218 0.230 0.222
+Table 4. Comparison of CD ( ×103↓) for various materials.
+(ACD) , which measures the chamfer distance between the
+predicted particles PP(t0)and the ground-truth particles
+˜PP(t0), where the cavity is placed on the opposite side.
+This distance is expected to be longer than the original CD.
+The results confirm that the original CD is smaller than the
+ACD. These findings suggests that SfC-NeRF can capture
+the positional deviation of a cavity.
+4.4. Experiment III: Influence of material
+Finally, we investigated the influence of the material prop-
+erties . Table 3 summarizes the quantitative results for elas-
+tic materials when ˆEandˆνwere varied. Table 4 sum-
+marizes the quantitative results for other materials. Ap-
+pendix B.2 and project page present the qualitative re-
+sults. These results demonstrate that SfC-NeRF improves
+the structure estimation compared with the initial state, re-
+gardless of the material. However, the rate of improvement
+depends on the material used. For example, when an object
+is soft, its shape changes significantly, making it difficult
+to capture dynamic changes. In contrast, when the object
+is hard, there are fewer shape changes that provide limited
+cues for estimating the internal structure, making learning
+more difficult. Thus, the proposed method is most effec-
+tive when the object is moderately soft or hard. As an ini-
+tial approach to address SfC, we proposed a general-purpose
+method in this study. However, in future studies, it would be
+interesting to develop methods that are specifically tailored
+to individual materials.
+4.5. Application to future prediction
+To demonstrate the practical importance of SfC, we inves-
+tigated the effectiveness of SfC-NeRF for future prediction.
+Specifically, the first 14 frames were used for training and
+the subsequent 14 frames were used for evaluation. We
+compared SfC-NeRF , which optimizes the internal struc-
+tures with fixed physical properties , with PAC-NeRF [36],
+which optimizes physical properties with fixed (filled) in-
+ternal structures . Table 5 summarizes the results. SfC-
+NeRF outperformed PAC-NeRF in terms of the peak-to-Internal structure PSNR ↑ SSIM↑
+PAC-NeRF Fixed (filled) 23.44 0.975
+SfC-NeRF Optimized 26.60 0.981
+Table 5. Results of future prediction. The scores were averaged
+over all cavity sizes and locations for the 40 objects examined in
+Experiments I and II.
+Error rate −30%−20%−10% 0% 10% 20% 30%
+Young’s modulus ˆE0.363 0.242 0.216 0.195 0.213 0.231 0.244
+Poisson’s ratio ˆν0.240 0.231 0.208 0.195 0.200 0.214 0.236
+Density ˆρ 0.798 0.533 0.289 0.195 0.207 0.259 0.308
+Table 6. Comparison of CD ( ×103↓) for inaccurate physical prop-
+erties. In the 0% case, an elastic material with default settings
+(sc= 2
+33,lc=center, ˆE= 106, and ˆν= 0.3) was used.
+signal ratio (PSNR) and structural similarity index measure
+(SSIM) [69]. These results indicate that the optimization of
+the internal structure is crucial in practical scenarios.
+5. Discussion
+Based on the above experiments, we obtained promising re-
+sults for SfC. However, the proposed method has some lim-
+itations. (1) Our approach assumes that the objects deform
+during collisions. Therefore, its performance depends on
+the type of material used. For example, it may be difficult
+to apply this method to metallic objects that do not deform.
+However, detecting small changes may help to overcome
+this issue. (2) Since SfCis a novel task, this study focused
+on evaluating its fundamental performance using simulation
+data, leaving the validation with real data as a challenge
+for future research. To explore its potential use with real
+data, we examined its robustness against inaccurate physical
+properties. Table 6 presents the results when errors exist in
+the physical properties. A significant error (e.g., −30%) in
+ˆρcauses a notable degradation owing to its negative impact
+on volume estimation in Lmass. However, in other cases,
+the degradation is moderate. All the scores exceed those of
+the baselines listed in Table 1 (e.g., 0.841 by LPO). These
+results indicate that the proposed method is robust against
+inaccurate physical properties. Additional challenges asso-
+ciated with real data are discussed in Appendix A.4.
+6. Conclusion
+We introduced SfCto identify the invisible internal struc-
+ture of an object—a task that remains challenging even with
+the latest neural 3D representations. We proposed SfC-
+NeRF as an initial model to address this challenge. SfC-
+NeRF solves SfCby optimizing the internal structures under
+physical ,appearance-preserving , and keyframe constraints ,
+along with volume annealing . As discussed in Section 5,
+the proposed method has certain limitations. Nonetheless,
+this study suggests a new direction for the development of
+neural 3D representations, and we believe that future devel-
+opments in this field will overcome these limitations.
+8References
+[1] Jad Abou-Chakra, Feras Dayoub, and Niko S ¨underhauf. Par-
+ticleNeRF: A particle-based encoding for online neural radi-
+ance fields. In WACV , 2024. 2, 3
+[2] Jad Abou-Chakra, Krishan Rana, Feras Dayoub, and Niko
+S¨underhauf. Physically embodied Gaussian splatting: Em-
+bedding physical priors into a visual 3D world model for
+robotics. In CoRL , 2024. 2, 3
+[3] Benjamin Attal, Jia-Bin Huang, Michael Zollhoefer, Jo-
+hannes Kopf, and Changil Kim. Learning neural light fields
+with ray-space embedding networks. In CVPR , 2022. 2
+[4] Jonathan T. Barron, Ben Mildenhall, Matthew Tancik, Pe-
+ter Hedman, Ricardo Martin-Brualla, and Pratul P. Srini-
+vasan. Mip-NeRF: A multiscale representation for anti-
+aliasing neural radiance fields. In ICCV , 2021. 2
+[5] Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P.
+Srinivasan, and Peter Hedman. Mip-NeRF 360: Unbounded
+anti-aliased neural radiance fields. In CVPR , 2022.
+[6] Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P.
+Srinivasan, and Peter Hedman. Zip-NeRF: Anti-aliased grid-
+based neural radiance fields. In ICCV , 2023. 2
+[7] Eric R. Chan, Marco Monteiro, Petr Kellnhofer, Jiajun Wu,
+and Gordon Wetzstein. pi-GAN: Periodic implicit genera-
+tive adversarial networks for 3D-aware image synthesis. In
+CVPR , 2021. 2
+[8] Eric R. Chan, Connor Z. Lin, Matthew A. Chan, Koki
+Nagano, Boxiao Pan, Shalini De Mello, Orazio Gallo,
+Leonidas J. Guibas, Jonathan Tremblay, Sameh Khamis,
+Tero Karras, and Gordon Wetzstein. Efficient geometry-
+aware 3D generative adversarial networks. In CVPR , 2022.
+[9] Eric R. Chan, Koki Nagano, Matthew A. Chan, Alexander W.
+Bergman, Jeong Joon Park, Axel Levy, Miika Aittala, Shalini
+De Mello, Tero Karras, and Gordon Wetzstein. Generative
+novel view synthesis with 3D-aware diffusion models. In
+ICCV , 2023. 2
+[10] Anpei Chen, Zexiang Xu, Andreas Geiger, Jingyi Yu, and
+Hao Su. TensoRF: Tensorial radiance fields. In ECCV , 2022.
+2
+[11] Rui Chen, Yongwei Chen, Ningxin Jiao, and Kui Jia. Fan-
+tasia3D: Disentangling geometry and appearance for high-
+quality text-to-3D content creation. In ICCV , 2023. 2
+[12] Yihang Chen, Qianyi Wu, Weiyao Lin, Mehrtash Harandi,
+and Jianfei Cai. HAC: Hash-grid assisted context for 3D
+Gaussian splatting compression. In ECCV , 2024. 2
+[13] Mengyu Chu, Lingjie Liu, Quan Zheng, Erik Franz, Hans-
+Peter Seidel, Christian Theobalt, and Rhaleb Zayer. Physics
+informed neural fields for smoke reconstruction with sparse
+data. ACM Trans. Graph. , 41(4), 2022. 2, 3
+[14] Yu Deng, Jiaolong Yang, Jianfeng Xiang, and Xin Tong.
+GRAM: Generative radiance manifolds for 3D-aware image
+generation. In CVPR , 2022. 2
+[15] Yutao Feng, Yintong Shang, Xuan Li, Tianjia Shao, Chen-
+fanfu Jiang, and Yin Yang. PIE-NeRF: Physics-based inter-
+active elastodynamics with NeRF. In CVPR , 2023. 2, 3
+[16] Sara Fridovich-Keil, Alex Yu, Matthew Tancik, Qinhong
+Chen, Benjamin Recht, and Angjoo Kanazawa. Plenoxels:
+Radiance fields without neural networks. In CVPR , 2022. 2[17] Guy Gafni, Justus Thies, Michael Zollhofer, and Matthias
+Nießner. Dynamic neural radiance fields for monocular 4D
+facial avatar reconstruction. In CVPR , 2021. 2
+[18] Ruiqi Gao, Aleksander Holynski, Philipp Henzler, Arthur
+Brussee, Ricardo Martin-Brualla, Pratul Srinivasan,
+Jonathan T. Barron, and Ben Poole. CAT3D: Create any-
+thing in 3D with multi-view diffusion models. In NeurIPS ,
+2024. 2
+[19] Stephan J. Garbin, Marek Kowalski, Matthew Johnson,
+Jamie Shotton, and Julien Valentin. FastNeRF: High-fidelity
+neural rendering at 200FPS. In ICCV , 2021. 2
+[20] Jiatao Gu, Lingjie Liu, Peng Wang, and Christian Theobalt.
+StyleNeRF: A style-based 3D-aware generator for high-
+resolution image synthesis. In ICLR , 2022. 2
+[21] Shanyan Guan, Huayu Deng, Yunbo Wang, and Xiaokang
+Yang. NeuroFluid: Fluid dynamics grounding with particle-
+driven neural radiance fields. In ICML , 2022. 2, 3
+[22] Peter Hedman, Pratul P. Srinivasan, Ben Mildenhall,
+Jonathan T. Barron, and Paul Debevec. Baking neural ra-
+diance fields for real-time view synthesis. In ICCV , 2021.
+2
+[23] Tao Hu, Shu Liu, Yilun Chen, Tiancheng Shen, and Jiaya Jia.
+EfficientNeRF: Efficient neural radiance fields. In CVPR ,
+2022. 2
+[24] Wenbo Hu, Yuling Wang, Lin Ma, Bangbang Yang, Lin Gao,
+Xiao Liu, and Yuewen Ma. Tri-MipRF: Tri-Mip represen-
+tation for efficient anti-aliasing neural radiance fields. In
+ICCV , 2023. 2
+[25] Yuanming Hu, Yu Fang, Ziheng Ge, Ziyin Qu, Yixin Zhu,
+Andre Pradhana, and Chenfanfu Jiang. A moving least
+squares material point method with displacement discontinu-
+ity and two-way rigid body coupling. ACM Trans. Graph. ,
+37(4), 2018. 6, 27
+[26] Yuanming Hu, Luke Anderson, Tzu-Mao Li, Qi Sun, Nathan
+Carr, Jonathan Ragan-Kelley, and Fr ´edo Durand. Diff-
+Taichi: Differentiable programming for physical simulation.
+InICLR , 2020. 3, 4, 16, 27
+[27] Yingwenqi Jiang, Jiadong Tu, Yuan Liu, Xifeng Gao, Xiaox-
+iao Long, Wenping Wang, and Yuexin Ma. GaussianShader:
+3D Gaussian splatting with shading functions for reflective
+surfaces. In CVPR , 2024. 2
+[28] Ying Jiang, Chang Yu, Tianyi Xie, Xuan Li, Yutao Feng,
+Huamin Wang, Minchen Li, Henry Lau, Feng Gao, Yin
+Yang, and Chenfanfu Jiang. VR-GS: A physical dynamics-
+aware interactive Gaussian splatting system in virtual reality.
+ACM Trans. Graph. , 78, 2024. 2, 3
+[29] Takuhiro Kaneko. AR-NeRF: Unsupervised learning of
+depth and defocus effects from natural images with aperture
+rendering neural radiance fields. In CVPR , 2022. 2
+[30] Takuhiro Kaneko. MIMO-NeRF: Fast neural rendering with
+multi-input multi-output neural radiance fields. In ICCV ,
+2023. 2
+[31] Takuhiro Kaneko. Improving physics-augmented continuum
+neural radiance field-based geometry-agnostic system iden-
+tification with Lagrangian particle optimization. In CVPR ,
+2024. 2, 3, 4, 7, 17
+9[32] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk ¨uhler,
+and George Drettakis. 3D Gaussian splatting for real-time
+radiance field rendering. ACM Trans. Graph. , 42(4), 2023.
+1, 2
+[33] Diederik P. Kingma and Jimmy Ba. Adam: A method for
+stochastic optimization. In ICLR , 2015. 27
+[34] Andreas Kurz, Thomas Neff, Zhaoyang Lv, Michael
+Zollh ¨ofer, and Markus Steinberger. AdaNeRF: Adaptive
+sampling for real-time rendering of neural radiance fields.
+InECCV , 2022. 2
+[35] Joo Chan Lee, Daniel Rho, Xiangyu Sun, Jong Hwan Ko,
+and Eunbyung Park. Compact 3D Gaussian representation
+for radiance field. In CVPR , 2024. 2
+[36] Xuan Li, Yi-Ling Qiao, Peter Yichen Chen, Krishna Murthy
+Jatavallabhula, Ming Lin, Chenfanfu Jiang, and Chuang
+Gan. PAC-NeRF: Physics augmented continuum neural ra-
+diance fields for geometry-agnostic system identification. In
+ICLR , 2023. 2, 3, 6, 8, 17, 25, 27
+[37] Yanyan Li, Chenyu Lyu, Yan Di, Guangyao Zhai, Gim Hee
+Lee, and Federico Tombari. GeoGaussian: Geometry-aware
+Gaussian splatting for scene rendering. In ECCV , 2024. 2
+[38] Zhengqi Li, Simon Niklaus, Noah Snavely, and Oliver Wang.
+Neural scene flow fields for space-time view synthesis of dy-
+namic scenes. In CVPR , 2021. 2
+[39] Zhihao Liang, Qi Zhang, Wenbo Hu, Ying Feng, Lei Zhu,
+and Kui Jia. Analytic-Splatting: Anti-aliased 3D Gaussian
+splatting via analytic integration. In ECCV , 2024. 2
+[40] Chen-Hsuan Lin, Jun Gao, Luming Tang, Towaki Takikawa,
+Xiaohui Zeng, Xun Huang, Karsten Kreis, Sanja Fidler,
+Ming-Yu Liu, and Tsung-Yi Lin. Magic3D: High-resolution
+text-to-3D content creation. In CVPR , 2023. 2
+[41] Shanchuan Lin, Andrey Ryabtsev, Soumyadip Sengupta,
+Brian L. Curless, Steven M. Seitz, and Ira Kemelmacher-
+Shlizerman. Real-time high-resolution background matting.
+InCVPR , 2021. 6, 13
+[42] David B. Lindell, Julien N. P. Martel, and Gordon Wetzstein.
+AutoInt: Automatic integration for fast neural volume ren-
+dering. In CVPR , 2021. 2
+[43] Jiayue Liu, Xiao Tang, Freeman Cheng, Roy Yang, Zhihao
+Li, Jianzhuang Liu, Yi Huang, Jiaqi Lin, Shiyong Liu, Xi-
+aofei Wu, Songcen Xu, and Chun Yuan. MirrorGaussian:
+Reflecting 3D Gaussians for reconstructing mirror reflec-
+tions. In ECCV , 2024. 2
+[44] Lingjie Liu, Jiatao Gu, Kyaw Zaw Lin, Tat-Seng Chua, and
+Christian Theobalt. Neural sparse voxel fields. In NeurIPS ,
+2020. 2
+[45] Zhicheng Lu, Xiang Guo, Le Hui, Tianrui Chen, Min Yang,
+Xiao Tang, Feng Zhu, and Yuchao Dai. 3D geometry-aware
+deformable Gaussian splatting for dynamic view synthesis.
+InCVPR , 2024. 2
+[46] Jonathon Luiten, Georgios Kopanas, Bastian Leibe, and
+Deva Ramanan. Dynamic 3D Gaussians: Tracking by per-
+sistent dynamic view synthesis. In 3DV, 2024. 2
+[47] Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik,
+Jonathan T. Barron, Ravi Ramamoorthi, and Ren Ng. NeRF:
+Representing scenes as neural radiance fields for view syn-
+thesis. In ECCV , 2020. 1, 2, 3[48] Ben Mildenhall, Peter Hedman, Ricardo Martin-Brualla,
+Pratul P. Srinivasan, and Jonathan T. Barron. NeRF in the
+dark: High dynamic range view synthesis from noisy raw
+images. In CVPR , 2022. 2
+[49] Thomas M ¨uller, Alex Evans, Christoph Schied, and Alexan-
+der Keller. Instant neural graphics primitives with a multires-
+olution hash encoding. ACM Trans. Graph. , 41(4), 2022. 2
+[50] Thomas Neff, Pascal Stadlbauer, Mathias Parger, Andreas
+Kurz, Joerg H. Mueller, Chakravarty R. Alla Chaitanya, An-
+ton Kaplanyan, and Markus Steinberger. DONeRF: Towards
+real-time rendering of compact neural radiance fields using
+depth oracle networks. Comput. Graph. Forum , 40(4), 2021.
+[51] Simon Niedermayr, Josef Stumpfegger, and R ¨udiger West-
+ermann. Compressed 3D Gaussian splatting for accelerated
+novel view synthesis. In CVPR , 2024. 2
+[52] Michael Niemeyer and Andreas Geiger. GIRAFFE: Rep-
+resenting scenes as compositional generative neural feature
+fields. In CVPR , 2021. 2
+[53] Keunhong Park, Utkarsh Sinha, Jonathan T. Barron, Sofien
+Bouaziz, Dan B. Goldman, Steven M. Seitz, and Ricardo
+Martin-Brualla. Nerfies: Deformable neural radiance fields.
+InICCV , 2021. 2
+[54] Ben Poole, Ajay Jain, Jonathan T. Barron, and Ben Milden-
+hall. DreamFusion: Text-to-3D using 2D diffusion. In ICLR ,
+2023. 2
+[55] Albert Pumarola, Enric Corona, Gerard Pons-Moll, and
+Francesc Moreno-Noguer. D-NeRF: Neural radiance fields
+for dynamic scenes. In CVPR , 2021. 2, 3
+[56] Ri-Zhao Qiu, Ge Yang, Weijia Zeng, and Xiaolong Wang.
+Feature Splatting: Language-driven physics-based scene
+synthesis and editing. In ECCV , 2024. 2, 3
+[57] Daniel Rebain, Wei Jiang, Soroosh Yazdani, Ke Li,
+Kwang Moo Yi, and Andrea Tagliasacchi. DeRF: Decom-
+posed radiance fields. In CVPR , 2021. 2
+[58] Christian Reiser, Songyou Peng, Yiyi Liao, and Andreas
+Geiger. KiloNeRF: Speeding up neural radiance fields with
+thousands of tiny MLPs. In ICCV , 2021. 2
+[59] Katja Schwarz, Yiyi Liao, Michael Niemeyer, and Andreas
+Geiger. GRAF: Generative radiance fields for 3D-aware im-
+age synthesis. In NeurIPS , 2020. 2
+[60] Vincent Sitzmann, Semon Rezchikov, Bill Freeman, Josh
+Tenenbaum, and Fredo Durand. Light field networks: Neu-
+ral scene representations with single-evaluation rendering. In
+NeurIPS , 2021. 2
+[61] Ivan Skorokhodov, Sergey Tulyakov, Yiqun Wang, and Peter
+Wonka. EpiGRAF: Rethinking training of 3D GANs. In
+NeurIPS , 2022. 2
+[62] Mohammed Suhail, Carlos Esteves, Leonid Sigal, and
+Ameesh Makadia. Light field neural rendering. In CVPR ,
+2022. 2
+[63] Cheng Sun, Min Sun, and Hwann-Tzong Chen. Direct voxel
+grid optimization: Super-fast convergence for radiance fields
+reconstruction. In CVPR , 2022. 1, 2, 3, 4, 27
+[64] Jiaxiang Tang, Zhaoxi Chen, Xiaokang Chen, Tengfei Wang,
+Gang Zeng, and Ziwei Liu. LGM: Large multi-view Gaus-
+sian model for high-resolution 3D content creation. In
+ECCV , 2024. 2
+10[65] Jiaxiang Tang, Jiawei Ren, Hang Zhou, Ziwei Liu, and Gang
+Zeng. DreamGaussian: Generative Gaussian splatting for
+efficient 3D content creation. In ICLR , 2024. 2
+[66] Edgar Tretschk, Ayush Tewari, Vladislav Golyanik, Michael
+Zollh ¨ofer, Christoph Lassner, and Christian Theobalt. Non-
+rigid neural radiance fields: Reconstruction and novel view
+synthesis of a dynamic scene from monocular video. In
+ICCV , 2021. 2
+[67] Dor Verbin, Peter Hedman, Ben Mildenhall, Todd Zickler,
+Jonathan T. Barron, and Pratul P. Srinivasan. Ref-NeRF:
+Structured view-dependent appearance for neural radiance
+fields. In CVPR , 2022. 2
+[68] Huan Wang, Jian Ren, Zeng Huang, Kyle Olszewski, Men-
+glei Chai, Yun Fu, and Sergey Tulyakov. R2L: Distilling
+neural radiance field to neural light field for efficient novel
+view synthesis. In ECCV , 2022. 2
+[69] Zhou Wang, Alan C. Bovik, Hamid R. Sheikh, and Eero P.
+Simoncelli. Image quality assessment: From error visibility
+to structural similarity. IEEE Trans. Image Process. , 13(4),
+2004. 8
+[70] Zhengyi Wang, Cheng Lu, Yikai Wang, Fan Bao, Chongxuan
+Li, Hang Su, and Jun Zhu. ProlificDreamer: High-fidelity
+and diverse text-to-3D generation with variational score dis-
+tillation. In NeurIPS , 2023. 2
+[71] Suttisak Wizadwongsa, Pakkapon Phongthawee, Jiraphon
+Yenphraphai, and Supasorn Suwajanakorn. NeX: Real-time
+view synthesis with neural basis expansion. In CVPR , 2021.
+2
+[72] Tianyi Xie, Zeshun Zong, Yuxing Qiu, Xuan Li, Yutao Feng,
+Yin Yang, and Chenfanfu Jiang. PhysGaussian: Physics-
+integrated 3D Gaussians for generative dynamics. In CVPR ,
+2024. 2, 3
+[73] Yang Xue, Yuheng Li, Krishna Kumar Singh, and Yong Jae
+Lee. GIRAFFE HD: A high-resolution 3D-aware generative
+model. In CVPR , 2022. 2
+[74] Zhiwen Yan, Weng Fei Low, Yu Chen, and Gim Hee Lee.
+Multi-scale 3D Gaussian splatting for anti-aliased rendering.
+InCVPR , 2024. 2
+[75] Ziyi Yang, Xinyu Gao, Wen Zhou, Shaohui Jiao, Yuqing
+Zhang, and Xiaogang Jin. Deformable 3D Gaussians for
+high-fidelity monocular dynamic scene reconstruction. In
+CVPR , 2024. 2
+[76] Zeyu Yang, Hongye Yang, Zijie Pan, and Li Zhang. Real-
+time photorealistic dynamic scene representation and render-
+ing with 4D Gaussian splatting. In ICLR , 2024. 2
+[77] Taoran Yi, Jiemin Fang, Junjie Wang, Guanjun Wu, Lingxi
+Xie, Xiaopeng Zhang, Wenyu Liu, Qi Tian, and Xinggang
+Wang. GaussianDreamer: Fast generation from text to 3D
+Gaussians by bridging 2D and 3D diffusion models. In
+CVPR , 2024. 2
+[78] Alex Yu, Ruilong Li, Matthew Tancik, Hao Li, Ren Ng, and
+Angjoo Kanazawa. PlenOctrees for real-time rendering of
+neural radiance fields. In ICCV , 2021. 2
+[79] Zehao Yu, Anpei Chen, Binbin Huang, Torsten Sattler, and
+Andreas Geiger. Mip-Splatting: Alias-free 3D Gaussian
+splatting. In CVPR , 2024. 2[80] Kai Zhang, Gernot Riegler, Noah Snavely, and Vladlen
+Koltun. NeRF++: Analyzing and improving neural radiance
+fields. arXiv preprint arXiv:2010.07492 , 2020. 2
+[81] Shijie Zhou, Zhiwen Fan, Dejia Xu, Haoran Chang,
+Pradyumna Chari, Tejas Bharadwaj, Suya You, Zhangyang
+Wang, and Achuta Kadambi. DreamScene360: Uncon-
+strained text-to-3D scene generation with panoramic Gaus-
+sian splatting. In ECCV , 2024. 2
+11Contents
+1. Introduction 1
+2. Related work 2
+3. Method 3
+3.1. Problem statement . . . . . . . . . . . . . . 3
+3.2. Preliminary: PAC-NeRF . . . . . . . . . . . 3
+3.3. Proposal: SfC-NeRF . . . . . . . . . . . . . 4
+4. Experiments 6
+4.1. Experimental setup . . . . . . . . . . . . . . 6
+4.2. Experiment I: Influence of cavity size . . . . 7
+4.3. Experiment II: Influence of cavity location . 7
+4.4. Experiment III: Influence of material . . . . 8
+4.5. Application to future prediction . . . . . . . 8
+5. Discussion 8
+6. Conclusion 8
+A . Detailed analyses and discussions 12
+A.1 . Detailed ablation studies . . . . . . . . . . . 12
+A.1.1. Effect of each appearance-preserving
+loss . . . . . . . . . . . . . . . . . 12
+A.1.2. Effect of keyframe selection . . . . . 13
+A.1.3. Effect of background loss . . . . . . 13
+A.2 . Extended experiments . . . . . . . . . . . . 14
+A.2.1. Experiment IV: Influence of collision
+angle . . . . . . . . . . . . . . . . 14
+A.3 . Evaluation from multiple perspectives . . . . 14
+A.3.1. Evaluation through video sequences . 14
+A.3.2. Evaluation per external shape . . . . 16
+A.4 . Possible challenges with real data . . . . . . 16
+B . Qualitative results 17
+B.1. Qualitative results of Experiments I and II . . 17
+B.2. Qualitative results of Experiment III . . . . . 17
+B.3. Qualitative results of Experiment IV . . . . . 17
+C . Implementation details 27
+C.1. Dataset . . . . . . . . . . . . . . . . . . . . 27
+C.2. Model . . . . . . . . . . . . . . . . . . . . . 27
+C.3. Training settings . . . . . . . . . . . . . . . 27
+C.4. Evaluation metrics . . . . . . . . . . . . . . 28
+A. Detailed analyses and discussions
+A.1. Detailed ablation studies
+Owing to space limitations in the main text, we conducted
+an ablation study that focused only on the selected key com-
+ponents. In this appendix, we present detailed ablation
+studies that further assess the effectiveness of the proposedLpixel0Ldepth00 (1
+2)3(2
+3)3(3
+4)3Avg.
+0.106 0.423 0.898 1.326 0.688
+✓ 0.105 0.142 0.334 0.342 0.231
+✓ 0.079 0.313 0.314 0.287 0.248
+✓ ✓ 0.081 0.122 0.195 0.262 0.165
+Table 7. Results of the detailed ablation study of APLs when the
+cavity size scis varied. The score indicates CD ( ×103↓). A check-
+mark✓indicates that the corresponding loss was used.
+Lpixel0Ldepth0left right up down Avg.
+0.845 0.783 0.805 0.583 0.754
+✓ 0.295 0.451 0.325 0.311 0.345
+✓ 0.362 0.299 0.348 0.389 0.349
+✓ ✓ 0.303 0.258 0.274 0.291 0.281
+Table 8. Results of the detailed ablation study of APLs when the
+cavity location lcis varied. The score indicates CD ( ×103↓). A
+checkmark ✓indicates that the corresponding loss was used.
+method from multiple perspectives. Specifically, we ex-
+amine the effects of each appearance-preserving loss (Ap-
+pendix A.1.1), keyframe selection (Appendix A.1.2), and
+background loss (Appendix A.1.3).
+A.1.1. Effect of each appearance-preserving loss
+As explained in Section 3.3, regarding appearance-
+preserving constraints, we adopted two appearance-
+preserving losses (APLs): pixel-preserving loss Lpixel0
+(Equation 9) and depth-preserving loss Ldepth0(Equa-
+tion 10). These losses help prevent the degradation of the
+external structure, which is effectively learned from the first
+frame of the video sequence during the fitting process across
+the entire video sequence. In the ablation study presented
+in Sections 4.2 and 4.3, we ablated both losses simultane-
+ously to examine the overall effect of APLs. For a more
+detailed ablation study, we assessed the performance when
+each APL was individually ablated.
+Results. Table 7 summarizes the results when the cavity
+sizescis varied, and Table 8 summarizes the results when
+the cavity location lcis varied. Our findings are threefold:
+(1) No APL vs. either Lpixel0orLdepth0.Both SfC-NeRF
+with only Lpixel0and SFC-NeRF with only Ldepth0outper-
+formed SfC-NeRF without APL in all cases. These results
+indicate that both Lpixel0andLdepth0effectively enhance the
+performance of SfC.
+(2) Full APLs vs. either Lpixel0orLdepth0.SfC-NeRF
+with both Lpixel0andLdepth0outperformed SfC-NeRF with
+onlyLpixel0and SFC-NeRF with only Ldepth0in most cases.
+These results indicate that Lpixel0andLdepth0contribute to
+improving the performance of SfCfrom different perspec-
+tives and are most effective when used together.
+(3)Lpixel0vsLdepth0.The superiority or inferiority of each
+loss depends on the cavity settings. This is related to the
+12(a)sc=0 (b)sc=3
+43(c)lc=left (d)lc=up (1) t0 (2) t6 (3) t9
+ (4) Structure Figure 5. Comparison of appearances for objects with different
+internal structures when tis varied within {t0, t6, t9}.
+learnability of 3D appearance, and further detailed analyses
+will be an interesting direction for future research.
+A.1.2. Effect of keyframe selection
+As discussed in Section 3.3, regarding keyframe constraints,
+we employed a keyframe pixel loss Lpixelk(Equation 11) to
+effectively capture shape changes caused by internal struc-
+tures. Specifically, we selected the frame immediately af-
+ter the collision as the keyframe ( k= 6, where kis the
+keyframe index) for the experiments described in the main
+text. An important question is whether the choice of kis op-
+timal. To investigate this, we evaluated the change in perfor-
+mance by varying the value of k, specifically within {6,9}.
+Figure 5 compares the appearances of objects with different
+internal structures in these keyframes. For reference, we
+also provide scores for the model without keyframe pixel
+loss (denoted by k=None ).
+Results. Table 9 summarizes the results when the cavity
+sizescis varied, and Table 10 summarizes the results when
+the cavity location lcis varied. Our findings are twofold:
+(1)Lpixel6vs.Lpixel9.SfC-NeRF with Lpixel6outperformed
+that with Lpixel9in most cases. As shown in Figure 5, im-
+mediately after the collision (at t6(2)), the difference in
+the shapes of the objects is noticeable. However, as time
+progressed after the collision (at t9(3)), the difference in
+the shapes of the objects decreased, whereas the difference
+in their positions became more pronounced. We consider
+this to be the main reason why SfC-NeRF with Lpixel6per-
+formed better than that with Lpixel9.
+(2)Lpixel6/Lpixel9vs. None. We found that SfC-NeRF with
+Lpixel6orLpixel9outperformed SfC-NeRF without keyframek 0 (1
+2)3(2
+3)3(3
+4)3Avg.
+None 0.082 0.127 0.211 0.325 0.186
+6 0.081 0.122 0.195 0.262 0.165
+9 0.082 0.120 0.208 0.290 0.175
+Table 9. Analysis of the effect of keyframe selection when the
+cavity size scis varied. The score indicates CD ( ×103↓). When
+k=None, a keyframe pixel loss Lpixelkwas not used. In contrast,
+when k∈ {6,9},Lpixelkwas used.
+k left right up down Avg.
+None 0.308 0.296 0.307 0.313 0.306
+6 0.303 0.258 0.274 0.291 0.281
+9 0.296 0.296 0.313 0.303 0.302
+Table 10. Analysis of the effect of keyframe selection when the
+cavity location lcis varied. The score indicates CD ( ×103↓).
+When k=None, a keyframe pixel loss Lpixelkwas not used. In
+contrast, when k∈ {6,9},Lpixelkwas used.
+pixel loss in most cases. These results indicate that strate-
+gically weighing frames is more effective than treating all
+frames equally.
+A.1.3. Effect of background loss
+As mentioned in the explanation of preprocessing in Sec-
+tion 4.1, we use a background loss Lbgby leveraging the fact
+that the background segmentation has been obtained. For
+example, when an image with a white background is given,
+this background loss is useful for distinguishing whether the
+white part belongs to the background or a foreground ob-
+ject. We used a background segmentation that is not created
+manually but is predicted from a given image using a DNN-
+based image matting model [41]. Therefore, this setting is
+not unrealistic. However, it is important to investigate the
+effectiveness of the background loss. To this end, we inves-
+tigated the performance of SfC-NeRF −bg, where the back-
+ground loss ( Lbg) was ablated. In this setting, the perfor-
+mance of a model trained using only the first frame of the
+video sequence (Step (i) in Figure 2(a)) also changes be-
+cause the background loss is ablated in this step. We refer
+to this model as Static−bg. We compared the scores of these
+models with those of the original models (i.e., SfC-NeRF
+andStatic ).
+Results. Table 11 summarizes the results when the cavity
+sizescis varied, and Table 12 summarizes the results when
+the cavity location lcis varied. Our findings are twofold:
+(1) SfC-NeRF vs. SfC-NeRF −bg.SfC-NeRF outperformed
+SfC-NeRF −bgin most cases. As mentioned above, the
+background loss is useful for distinguishing between back-
+ground and foreground objects, allowing for a more accu-
+rate capture of external structures. The movements of an
+object are affected by its external and internal structures.
+Therefore, if the external structure can be estimated more
+130 (1
+2)3(2
+3)3(3
+4)3Avg.
+Static 0.093 0.294 0.920 1.574 0.720
+SfC-NeRF 0.081 0.122 0.195 0.262 0.165
+Static−bg 0.093 0.290 0.906 1.545 0.708
+SfC-NeRF −bg 0.101 0.149 0.222 0.279 0.188
+Table 11. Results of the ablation study of background loss when
+the cavity size scis varied. The score indicates CD ( ×103↓).
+left right up down Avg.
+Static 0.841 0.842 0.815 0.813 0.828
+SfC-NeRF 0.303 0.258 0.274 0.291 0.281
+Static−bg 0.831 0.830 0.799 0.800 0.815
+SfC-NeRF −bg 0.324 0.210 0.361 0.277 0.293
+Table 12. Results of the ablation study of background loss when
+the cavity location lcis varied. The score indicates CD ( ×103↓).
+accurately, the internal structure can also be estimated more
+accurately.
+(2) SfC-NeRF −bgvs Static −bg.SfC-NeRF −bgoutperformed
+Static −bgexcept when dealing with filled objects ( sc= 0in
+Table 11).5These results indicate that the proposed method
+is effective for improving the performance of SfC, even
+without the use of advanced techniques, such as background
+loss.
+A.2. Extended experiments
+A.2.1. Experiment IV: Influence of collision angle
+In the above experiments, the collision angle was fixed, as
+shown in Figures 6–13, regardless of the internal structure
+and physical properties, to focus on comparisons related to
+the internal structures and physical properties. For com-
+pleteness, we investigated the influence of collision angle θc
+on the performance of SfC. Specifically, we selected objects
+with default settings ( sc= (2
+3)3,lc=center, and elastic
+material defined by ˆE= 1.0×106andˆν= 0.3) as the ob-
+jects of investigation and examined their performance when
+only the collision angles were altered. The objects were ro-
+tated in the depth direction, as shown in Figure 14. The col-
+lision angle θcwas chosen from {0°,22.5°,45°,67.5°,90°}.
+We compared the performance of Static andSfC-NeRF .
+Results. Table 13 summarizes the quantitative results.
+Figure 14 shows the qualitative results. Our findings are
+twofold:
+(1) SfC-NeRF vs. Static. SfC-NeRF outperformed Static in
+5When handling a filled object, inaccurate estimation of external struc-
+ture is problematic because it causes a difference between the actual and
+estimated masses. In this situation, if the estimated mass is encouraged to
+approach the ground-truth mass using a mass loss while maintaining the
+external appearance using APLs, the internal structure must be changed
+unnecessarily. Consequently, SfC-NeRF −bgdegrades the performance of
+SfCwhen handling filled objects. An accurate estimation of the external
+structure using a background loss is effective for addressing this issue.Sphere 0° 22.5° 45° 67.5° 90°
+Static 1.164 1.163 1.163 1.162 1.160
+SfC-NeRF 0.067 0.068 0.066 0.067 0.066
+Cube 0° 22.5° 45° 67.5° 90°
+Static 0.775 0.776 0.848 0.768 0.776
+SfC-NeRF 0.201 0.173 0.627 0.201 0.201
+Bicone 0° 22.5° 45° 67.5° 90°
+Static 0.933 0.925 0.918 0.921 0.926
+SfC-NeRF 0.144 0.194 0.187 0.146 0.154
+Cylinder 0° 22.5° 45° 67.5° 90°
+Static 0.891 0.905 0.915 0.905 0.964
+SfC-NeRF 0.342 0.288 0.311 0.209 0.639
+Diamond 0° 22.5° 45° 67.5° 90°
+Static 0.837 0.830 0.833 0.819 0.838
+SfC-NeRF 0.220 0.300 0.222 0.163 0.209
+Table 13. Comparison of CD ( ×103↓) when collision angle θcis
+varied.
+all cases. These results indicate that optimizing the inter-
+nal structure through a video sequence using the proposed
+method is beneficial, regardless of the collision angle.
+(2) Effect of collision angle. We found that the collision an-
+gle influenced the performance of SfC. The strength of this
+effect depends on the object shape. There are three pos-
+sible reasons for this performance variation: (i) Changes
+in estimation accuracy of external structures. The internal
+structure was optimized under the constraint that the exter-
+nal structure, learned from the first frame, should be main-
+tained. Therefore, when the accuracy of the external struc-
+ture estimation changed, the accuracy of the internal struc-
+ture estimation also changed. (ii) Difference in amount of
+deformation. The amount of deformation varied depending
+on the collision angle. This factor also affected the ease of
+estimating the internal structure. (iii) Asymmetry. When an
+object was not symmetrical relative to the collision angle,
+its behavior after the collision became asymmetrical. Con-
+sequently, the ease of estimating the internal structure also
+became asymmetrical.
+A.3. Evaluation from multiple perspectives
+A.3.1. Evaluation through video sequences
+In the main experiments, we evaluated the models using
+the chamfer distance between the ground-truth particles
+ˆPP(t0)and estimated particles PP(t0)in the first frame of
+the video sequence, i.e., at t=t0. For the multidimen-
+sional analysis, we investigated the chamfer distance be-
+tween the ground-truth particles ˆPP(t)and estimated parti-
+clesPP(t), averaged over the entire video sequence , i.e.,
+t∈ {t0, . . . , t N−1}. For clarity, we refer to the former
+140 (1
+2)3(2
+3)3(3
+4)3Avg.
+Static 0.093 0.104 0.294 0.309 0.920 1.057 1.574 1.964 0.720 0.859
+GO 0.091 0.092 0.301 0.301 0.941 0.944 1.586 1.612 0.730 0.737
+GO mass 0.081 0.083 0.319 0.325 1.244 1.266 2.291 2.367 0.984 1.010
+LPO 0.092 0.091 0.284 0.282 0.841 0.833 1.406 1.380 0.656 0.646
+LPO mass 0.087 0.087 0.284 0.283 0.876 0.868 1.477 1.451 0.681 0.672
+SfC-NeRF −mass 0.089 0.090 0.226 0.225 0.550 0.544 1.148 1.112 0.503 0.493
+SfC-NeRF −APL 0.106 0.108 0.423 0.421 0.898 0.886 1.326 1.307 0.688 0.680
+SfC-NeRF −APT 0.085 0.101 0.261 0.279 0.332 0.337 0.661 0.680 0.335 0.349
+SfC-NeRF −key 0.082 0.086 0.127 0.131 0.211 0.213 0.325 0.325 0.186 0.189
+SfC-NeRF −V A 0.146 0.269 0.293 0.338 0.370 0.407 0.456 0.485 0.316 0.375
+SfC-NeRF 0.081 0.085 0.122 0.126 0.195 0.196 0.262 0.258 0.165 0.166
+Table 14. Comparison of CD ( ×103↓) when the cavity size scis varied. This is an extended version of Table 1. For each condition, the left
+score indicates CD static, the chamfer distance between P(t0)andˆP(t0)at the first frame, i.e., t=t0, and the right score indicates CD video,
+the chamfer distance between P(t)andˆP(t)averaged over the entire video sequence, i.e., t∈ {t0, . . . , t N−1}.
+left right up down Avg.
+Static0.841 1.159 0.842 1.306 0.815 1.731 0.813 1.241 0.828 1.359
+(0.841) (1.294) (0.843) (1.154) (0.814) (1.246) (0.813) (1.727) (0.828) (1.355)
+GO0.874 0.879 0.853 0.870 0.878 0.875 0.870 1.035 0.869 0.915
+(0.872) (2.606) (0.856) (2.549) (0.881) (1.471) (0.870) (1.673) (0.870) (2.075)
+GO mass1.349 1.386 1.334 1.375 1.104 1.141 1.001 1.370 1.197 1.318
+(1.340) (3.134) (1.344) (3.126) (1.127) (1.866) (1.004) (1.805) (1.204) (2.483)
+LPO0.791 0.789 0.787 0.787 0.796 0.776 0.743 0.721 0.779 0.768
+(0.802) (2.493) (0.800) (2.507) (0.819) (1.468) (0.737) (1.471) (0.790) (1.985)
+LPO mass0.824 0.822 0.817 0.818 0.828 0.806 0.775 0.753 0.811 0.800
+(0.833) (2.529) (0.832) (2.556) (0.847) (1.497) (0.771) (1.538) (0.821) (2.030)
+SfC-NeRF −mass0.513 0.520 0.485 0.491 0.705 0.689 0.479 0.457 0.545 0.539
+(0.858) (2.502) (0.878) (2.661) (0.747) (1.506) (0.956) (1.762) (0.860) (2.108)
+SfC-NeRF −APL0.845 0.840 0.783 0.788 0.805 0.786 0.583 0.580 0.754 0.749
+(1.069) (2.885) (1.083) (2.943) (0.934) (1.764) (0.883) (1.750) (0.992) (2.335)
+SfC-NeRF −APT0.624 0.631 0.428 0.604 0.384 0.461 0.464 0.514 0.475 0.553
+(0.588) (1.920) (0.586) (1.486) (0.579) (1.196) (0.646) (1.305) (0.600) (1.477)
+SfC-NeRF −key0.308 0.307 0.296 0.326 0.307 0.306 0.313 0.343 0.306 0.321
+(0.372) (1.854) (0.396) (1.746) (0.387) (1.291) (0.389) (1.105) (0.386) (1.499)
+SfC-NeRF −V A0.542 0.611 0.596 0.767 0.333 0.389 0.385 0.421 0.464 0.547
+(0.639) (2.304) (0.757) (2.265) (0.445) (1.338) (0.549) (1.339) (0.597) (1.811)
+SfC-NeRF0.303 0.308 0.258 0.313 0.274 0.273 0.291 0.307 0.281 0.300
+(0.367) (1.821) (0.431) (1.647) (0.448) (1.262) (0.417) (1.204) (0.416) (1.483)
+Table 15. Comparison of CD and ACD ( ×103↓) when the cavity location lcis varied. This is an extended version of Table 2. For each
+condition, the left score indicates CD static, the chamfer distance between P(t0)andˆP(t0)at the first frame, i.e., t=t0, and the right score
+indicates CD video, the chamfer distance between P(t)andˆP(t)averaged over the entire video sequence, i.e., t∈ {t0, . . . , t N−1}. The
+gray score in parentheses indicates the ACD. For each condition, the left score indicates ACD static, the anti-chamfer distance at the first
+frame, and the right score indicates ACD video, the anti-chamfer distance averaged over the entire video sequence. It is expected that each
+original CD is smaller than the corresponding ACD.
+(chamfer distance for the first static frame) as CD static and
+the latter (chamfer distance for the entire video sequence)
+asCD video. In the evaluation of the influence of cavity lo-
+cation (Section 4.3), we introduce anti-chamfer distance,
+which is the chamfer distance between the predicted par-
+ticlesPP(t0)and ground-truth particles ˜PP(t0), where the
+cavity is placed on the opposite side, in the first frame of the
+video sequence to evaluate how well the cavity location is
+captured. For further analysis, we calculated and averaged
+similar scores for the entire video sequence . For clarity, werefer to the former (anti-chamfer distance for the first static
+frame) as ACD staticand the latter (anti-chamfer distance for
+the entire video sequence) as ACD video.
+Results. Table 14 summarizes the results when the cavity
+sizescis varied, and Table 15 summarizes the results when
+the cavity location lcis varied. Our findings are fourfold:
+(1) CD static vs. CD video.The relative values of CD static
+and CD video vary across different cases. When calculating
+CD staticin the first frame, the locations of the ground-truth
+and synthesized objects were well aligned, allowing us to
+15focus on the differences in shapes. In contrast, when calcu-
+lating CD video for the entire video sequence, we must con-
+sider not only the differences in shapes but also the differ-
+ences in absolute locations. Misalignments accumulate over
+time because the locations must vary within the allowance
+of the physical constraints via DiffMPM [26]. Because the
+objective of this study was to correctly predict the shape
+rather than the location, CD staticis a more valid evaluation
+than CD videofor this purpose.
+(2) Comparison of CD staticand CD videoamong models. Al-
+though there was some variation in the superiority of the
+models depending on the metric used, the general trend re-
+mained consistent: SfC-NeRF achieved the best score in
+most cases. The two exceptions are CD video forsc= 0
+in Table 14 and CD video forlc=left in Table 15. How-
+ever, the difference from the best score is small (less than
+0.002). These results validate the effectiveness of the pro-
+posed method compared to the baseline and ablated models
+according to both metrics.
+(3) ACD static vs. ACD video.Comparing ACD static with
+ACD video, ACD static is smaller than ACD video. This is be-
+cause the difference in location gradually increased after
+the collision when the cavity was located on the opposite
+side. As the objective of this study was to correctly predict
+the shape rather than the location, ACD staticis a more valid
+evaluation than ACD videofor this purpose.
+(4) Comparison of CD static and ACD static among models.
+When comparing the models, the baselines (i.e., the GO-
+and LPO-based models) tended to obtain similar CD static
+and ACD staticvalues because they struggled to determine the
+optimization direction, as shown in Figures 6–10. In con-
+trast, the proposed models (i.e., the SfC-NeRF-based mod-
+els, including the ablated models) tended to obtain a smaller
+CD staticthan ACD static. These results indicate that the pro-
+posed models effectively capture the positional bias of the
+cavity. Notably, a larger ACD staticdoes not indicate better
+performance unless CD staticis adequately small because it
+is possible to increase ACD staticwhile sacrificing CD static.
+A.3.2. Evaluation per external shape
+In Experiments I (Section 4.2) and II (Section 4.3), we re-
+ported the scores averaged over external shapes (i.e., sphere,
+cube, bicone, cylinder, and diamond objects). For a dif-
+ferent evaluation perspective, this appendix presents the
+scores for each external shape, averaged over other con-
+ditions, i.e., either sc∈ {0,(1
+2)3,(2
+3)3,(3
+4)3}orlc∈
+{left,right,up,down}.
+Results. Table 16 summarizes the results when the cavity
+sizescis varied (related to the results in Table 1), and Ta-
+ble 17 summarizes the results when the cavity location lc
+is varied (related to the results in Table 2). Although the
+scores were affected by the external shape, the same trends
+observed previously regarding the superiority or inferioritySphere Cube Bicone Cylinder Diamond
+Static 0.897 0.612 0.724 0.697 0.671
+GO 0.889 0.637 0.704 0.756 0.663
+GO mass 0.934 1.345 0.760 1.218 0.663
+LPO 0.774 0.564 0.639 0.678 0.622
+LPO mass 0.796 0.605 0.656 0.726 0.622
+SfC-NeRF −mass 0.561 0.500 0.455 0.447 0.553
+SfC-NeRF −APL 0.303 1.082 0.579 0.885 0.591
+SfC-NeRF −APT 0.178 0.375 0.286 0.502 0.331
+SfC-NeRF −key 0.081 0.173 0.159 0.288 0.230
+SfC-NeRF −V A 0.113 0.279 0.363 0.558 0.268
+SfC-NeRF 0.067 0.163 0.138 0.264 0.193
+Table 16. Comparison of CD ( ×103↓) when the cavity size scis
+varied. The scores were averaged over cavity sizes.
+Sphere Cube Bicone Cylinder Diamond
+Static 1.006 0.719 0.824 0.818 0.772
+GO 0.991 0.809 0.847 0.898 0.799
+GO mass 1.065 1.528 0.934 1.332 1.125
+LPO 0.954 0.673 0.764 0.804 0.701
+LPO mass 0.980 0.723 0.796 0.845 0.711
+SfC-NeRF −mass 0.695 0.480 0.424 0.595 0.533
+SfC-NeRF −APL 0.548 1.064 0.373 1.194 0.592
+SfC-NeRF −APT 0.318 0.502 0.374 0.730 0.451
+SfC-NeRF −key 0.189 0.371 0.235 0.448 0.286
+SfC-NeRF −V A 0.240 0.418 0.790 0.534 0.338
+SfC-NeRF0.152 0.342 0.231 0.393 0.289
+(0.417) (0.386) (0.365) (0.491) (0.420)
+Table 17. Comparison of CD ( ×103↓) when the cavity location
+lcis varied. The scores were averaged over cavity locations. The
+gray score in parentheses indicates ACD ( ×103). It is expected
+that the original CD is smaller than this.
+of the models were maintained. In particular, SfC-NeRF
+outperformed both the baseline and ablated models in most
+cases.
+A.4. Possible challenges with real data
+As discussed in Section 5, because SfCis a novel task, this
+study focused on evaluating its fundamental performance
+using simulation data, leaving validation with real data a
+challenge for future research. However, it is both feasible
+and important to discuss the potential challenges associated
+with real data, which we address in this appendix. Three
+potential challenges are outlined below:
+(1) Difficulty in accurately estimating external structures.
+Although significant progress has been made in the estima-
+tion of 3D external structures in recent years, it is not yet
+possible to accurately estimate them for all objects in all
+situations. The proposed method assumes that the external
+structure learned in the first frame of the video sequence
+is accurate. Therefore, if this estimation fails, the overall
+performance is degraded. We believe that incorporating the
+concept of a physics-informed model, particularly in chal-
+16lenging scenarios (e.g., sparse views), such as Lagrangian
+particle optimization [31], could provide a solution to this
+issue.
+(2) Gap between real physics and the physics used in
+the simulation. Despite recent advancements in physi-
+cal simulation models, discrepancies between real-world
+physics and the physics underlying the simulation still per-
+sist. We believe that refining the proposed method along-
+side physics-informed models (e.g., those discussed in Sec-
+tion 2) could help alleviate this problem.
+(3) Difficulty in accurately estimating physical properties.
+As mentioned in Section 3.1, we address SfC under the
+assumption that the ground-truth physical properties are
+available in advance to mitigate the chicken-and-egg prob-
+lem between the physical properties and internal structures.
+This assumption is reasonable if the material can be identi-
+fied; however, obtaining perfectly accurate values for phys-
+ical properties in real-world scenarios is challenging. Al-
+though the issue of solving the chicken-and-egg problem
+remains, an appearance-based physical property estimation
+method has already been proposed (e.g., PAC-NeRF [36]).
+Combining the proposed approach with previous methods
+for the simultaneous optimization of physical properties
+and internal structures is an exciting direction for future re-
+search.
+B. Qualitative results
+This appendix presents the qualitative results. The corre-
+sponding demonstration videos are available at https:
+/ / www . kecl . ntt . co . jp / people / kaneko .
+takuhiro/projects/sfc/ .
+B.1. Qualitative results of Experiments I and II
+We provide the qualitative results of Experiments I (Sec-
+tion 4.2) and II (Section 4.3) in Figures 6–10.
+B.2. Qualitative results of Experiment III
+We provide the qualitative results of Experiment III (Sec-
+tion 4.4) in Figures 11–13.
+B.3. Qualitative results of Experiment IV
+We provide the qualitative results of Experiment IV (Ap-
+pendix A.2.1) in Figure 14.
+171.164
+0.063 0.062 0.062 0.062 0.063 0.062
+0.328
+2.035
+1.0051.005
+1.005
+1.0080.991
+1.0270.063 0.063
+0.302 0.305
+1.741
+1.789
+1.030 1.0630.940 0.959
+0.936 0.959
+0.912 0.9401.149 1.2100.062 0.062
+0.327 0.337
+2.019
+2.126
+0.994 1.0450.980 1.086
+0.990 1.084
+0.999 1.0450.118 0.092 0.285 0.107 0.0670.146 0.072 0.409 0.391 0.065
+0.125 0.099 0.455 0.153 0.073
+0.169 0.153 0.899 0.188 0.0940.241 0.155 0.471 0.340 0.143
+0.350 0.266 0.475 0.500 0.218
+0.201 0.183 0.345 0.245 0.150
+(h) LPOmass (g) LPO (e) GO (f) GO mass (j) SfC-NeRF
+−APL(a) Before
+collision(b) After
+collision(c) Ground
+truth(k) SfC-NeRF
+−APT(l) SfC-NeRF
+−key(d) Static (m) SfC-NeRF
+−VA(n) S fC-NeRF(1)sc=0 (2)sc=1
+23(3)sc=2
+33(4)sc=3
+43(5)lc=left (6)lc=right (7)lc=up (8)lc=bottom(i) SfC-NeRF
+−mass
+0.092
+0.4910.203
+1.459
+1.0870.578
+0.759
+0.358Figure 6. Comparison of learned internal structures for sphere objects. (a) and (b) Examples of training images. The images are zoomed in
+for easy viewing. (a) Examples of training images before collision. As shown in this column, the appearances of the objects are the same
+across all scenes (1)–(8). Consequently, it is difficult to distinguish the internal structures based solely on these appearances. (b) Examples
+of training images after collision. To overcome the difficulty mentioned above, we address SfC, in which we aim to identify the internal
+structures based on appearance changes before and after collision, as shown in (a) and (b). (c)–(n) Internal structures visualized through
+cross-sectional views perpendicular to the ground. In (d)–(n), the score below each image indicates CD ( ×103↓).(c) Ground-truth internal
+structures. As shown in this column, although the external appearances are the same in (a), the internal structures are different. (d) Internal
+structures learned from the first frames of the video sequences. The same internal structures (i.e., filled objects) were learned because the
+appearances were the same before the collision (a). (e)–(h) Internal structures learned using the baselines (GO- and LPO-based models).
+These models struggled to determine optimal learning directions. (i)–(m) Internal structures learned using the ablated models. The ablated
+models are insufficient to prevent convergence to improper solutions. (n) Internal structures learned using SfC-NeRF (full model). The full
+model overcomes the above drawbacks and achieved the best CD.
+18(h) LPOmass (g) LPO (e) GO (f) GO mass (j) SfC-NeRF
+−APL(a) Before
+collision(b) After
+collision(c) Ground
+truth(k) SfC-NeRF
+−APT(l) SfC-NeRF
+−key(d) Static (m) SfC-NeRF
+−VA(n) S fC-NeRF(1)sc=0 (2)sc=1
+23(3)sc=2
+33(4)sc=3
+43(5)lc=left (6)lc=right (7)lc=up (8)lc=bottom(i) SfC-NeRF
+−mass
+0.775
+0.096
+0.262
+1.315
+0.7250.715
+0.720
+0.7170.722
+0.7720.101 0.098
+0.261 0.262
+1.170
+1.286
+0.678 0.7360.676 0.726
+0.688 0.729
+0.652 0.7000.813 1.6340.104 0.103
+0.281 0.399
+1.351
+3.245
+0.857 1.5500.790 1.506
+0.758 1.510
+0.831 1.5450.425 0.203 1.263 0.378 0.2010.118 0.086 0.183 0.085 0.094
+0.232 0.127 0.514 0.138 0.152
+0.339 0.278 2.367 0.901 0.205
+0.417 0.545 0.945 0.499 0.3930.528 0.305 1.199 0.665 0.336
+0.325 0.339 1.020 0.465 0.328
+0.402 0.296 1.092 0.379 0.311
+0.7100.077
+0.225
+0.987
+0.9030.314
+0.234
+0.469
+Figure 7. Comparison of learned internal structures for cube objects. The view in the figure is the same as that of Figure 6.
+19(h) LPOmass (g) LPO (e) GO (f) GO mass (j) SfC-NeRF
+−APL(a) Before
+collision(b) After
+collision(c) Ground
+truth(k) SfC-NeRF
+−APT(l) SfC-NeRF
+−key(d) Static (m) SfC-NeRF
+−VA(n) S fC-NeRF(1)sc=0 (2)sc=1
+23(3)sc=2
+33(4)sc=3
+43(5)lc=left (6)lc=right (7)lc=up (8)lc=bottom(i) SfC-NeRF
+−mass
+0.933
+0.070
+0.280
+1.612
+0.7700.878
+0.877
+0.7700.819
+0.8550.071 0.071
+0.271 0.277
+1.396
+1.423
+0.733 0.7620.807 0.846
+0.803 0.832
+0.716 0.7420.916 0.9800.069 0.067
+0.279 0.287
+1.552
+1.705
+0.765 0.8080.888 1.065
+0.868 1.058
+0.866 0.8050.224 0.159 0.912 0.237 0.1440.197 0.066 0.066 0.083 0.066
+0.580 0.144 0.312 0.242 0.078
+0.449 0.268 1.027 0.583 0.264
+0.260 0.183 0.499 0.171 0.1601.155 0.290 0.475 0.696 0.291
+1.186 0.163 0.323 0.215 0.197
+0.559 0.305 0.193 0.416 0.277
+0.4080.082
+0.153
+1.179
+0.3630.574
+0.338
+0.422
+Figure 8. Comparison of learned internal structures for bicone objects. The view in the figure is the same as that of Figure 6.
+20(h) LPOmass (g) LPO (e) GO (f) GO mass (j) SfC-NeRF
+−APL(a) Before
+collision(b) After
+collision(c) Ground
+truth(k) SfC-NeRF
+−APT(l) SfC-NeRF
+−key(d) Static (m) SfC-NeRF
+−VA(n) S fC-NeRF(1)sc=0 (2)sc=1
+23(3)sc=2
+33(4)sc=3
+43(5)lc=left (6)lc=right (7)lc=up (8)lc=bottom(i) SfC-NeRF
+−mass
+0.891
+0.089
+0.285
+1.524
+0.8010.833
+0.837
+0.8010.891
+0.9360.089 0.087
+0.286 0.295
+1.446
+1.585
+0.809 0.8430.828 0.875
+0.823 0.873
+0.756 0.7890.995 1.5510.086 0.083
+0.316 0.290
+1.627
+2.948
+1.003 1.3420.904 1.619
+0.878 1.530
+0.808 0.8360.738 0.360 1.243 0.544 0.3420.250 0.078 0.102 0.080 0.076
+0.313 0.153 0.478 0.357 0.166
+0.932 0.563 1.718 1.029 0.474
+0.392 0.384 0.939 0.737 0.4530.473 0.461 1.502 0.829 0.390
+0.765 0.499 1.453 0.625 0.331
+0.505 0.447 0.882 0.729 0.396
+0.5200.079
+0.244
+0.944
+0.4350.685
+0.742
+0.519
+Figure 9. Comparison of learned internal structures for cylinder objects. The view in the figure is the same as that of Figure 6.
+21(h) LPOmass (g) LPO (e) GO (f) GO mass (j) SfC-NeRF
+−APL(a) Before
+collision(b) After
+collision(c) Ground
+truth(k) SfC-NeRF
+−APT(l) SfC-NeRF
+−key(d) Static (m) SfC-NeRF
+−VA(n) S fC-NeRF(1)sc=0 (2)sc=1
+23(3)sc=2
+33(4)sc=3
+43(5)lc=left (6)lc=right (7)lc=up (8)lc=bottom(i) SfC-NeRF
+−mass
+0.837
+0.148
+0.315
+1.383
+0.7730.774
+0.773
+0.7700.780
+0.7890.133 0.114
+0.297 0.282
+1.279
+1.303
+0.732 0.7370.703 0.713
+0.686 0.690
+0.682 0.7040.835 0.8450.135 0.091
+0.301 0.285
+1.382
+1.432
+0.771 0.7740.808 1.467
+0.771 1.486
+0.845 0.7710.342 0.242 0.785 0.396 0.2200.101 0.119 0.116 0.115 0.106
+0.193 0.141 0.403 0.175 0.151
+0.435 0.417 1.062 0.640 0.296
+0.426 0.272 0.743 0.325 0.2670.311 0.328 0.577 0.591 0.352
+0.353 0.210 0.642 0.335 0.217
+0.261 0.332 0.405 0.554 0.322
+0.6190.114
+0.307
+1.171
+0.7350.415
+0.355
+0.626
+Figure 10. Comparison of learned internal structures for diamond objects. The view in the figure is the same as that of Figure 6.
+22(h) Ground
+tru
+th(c) Ground
+truth
+(a) Before
+coll
+ision(b) After
+collision(d) Static (e) SfC-NeRF
+1.164 0.0671.163 0.0951.162 0.101
+1.163 0.317
+1.161 0.309
+0.933 0.1440.933 0.2470.933 0.265
+0.932 0.226
+0.932 0.209(f) Before
+coll
+ision(g) After
+collision(i) Static (j) SfC-NeRFˆE= 2.5×105(1) ˆE= 5.0×105(2) ˆE= 1.0×106(3) ˆE= 2.0×106(4) ˆE= 4.0×106(5)
+ˆE= 2.5×105(1) ˆE= 5.0×105(2) ˆE= 1.0×106(3) ˆE= 2.0×106(4) ˆE= 4.0×106(5)Figure 11. Comparison of learned internal structures for sphere objects (left) and bicone objects (right) when Young’s modulus ˆEis varied.
+Young’s modulus is a measure of elasticity and quantifies tensile or compressive stiffness when force is applied. Here, we discuss the
+results for the sphere objects because the same tendencies were observed for the bicone objects. As shown in (a) and (c), the external
+appearances before collision (a) and internal structures (c) are the same in all cases (1)–(5). However, as shown in (b), the shapes after
+collision differ because of variations in Young’s modulus ˆE∈ {2.5×105,5.0×105,1.0×106,2.0×106,4.0×106}. In particular,
+as Young’s modulus increases from top to bottom, the object becomes stiffer, and the amount of shape change decreases. In the Static
+model (b), the internal structure was learned from the first frame, which looks the same in all cases. As a result, the same internal structure
+was learned across all variations. In contrast, in SfC-NeRF (e), the internal structure was learned using video sequences with different
+appearances. In this example, the same internal structure is expected to be learned in all cases. However, the varying appearances after
+collision (b), which provide a clue for solving the problem, lead to different outcomes. As shown in (1)(b) and (2)(b), when the object
+is soft, it deforms significantly after collision. This makes it difficult to capture the internal structure consistently, as shown in (1)(e) and
+(2)(e). In contrast, as shown in (4)(b) and (5)(b), when the object is stiffer, the shape change is limited. This narrows the range within which
+internal structures can be estimated, as shown in (4)(e) and (5)(e). Because SfCis an ill-posed problem with multiple possible solutions,
+the obtained results are considered reasonable. However, further improvement remains a topic for future work.
+23(h) Ground
+tru
+th(c) Ground
+truth(a) Before
+collision(b) After
+collision(d) Static (e) SfC-NeRF (f) Before
+collision(g) After
+collision(i) Static (j) SfC-NeRF
+1.164 0.0671.160 0.0681.163 0.069
+1.163 0.066
+1.165 0.071
+0.775 0.2010.772 0.2250.775 0.223
+0.775 0.234
+0.776 0.213
+ˆν= 0.2 (1) (2)ˆν= 0.25 (3)ˆν= 0.3 (4)ˆν= 0.35 (5)ˆν= 0.4
+ˆν= 0.2 (1) (2)ˆν= 0.25 (3)ˆν= 0.3 (4)ˆν= 0.35 (5)ˆν= 0.4Figure 12. Comparison of learned internal structures for sphere objects (left) and cube objects (right) when Poisson’s ratio ˆνis var-
+ied. Poisson’s ratio is a measure of the Poisson effect and quantifies how much a material deforms in a direction perpendicular to the
+direction in which force is applied. We varied Poisson’s ratio ˆνwithin the range of values commonly observed in real materials, i.e.,
+ˆν∈ {0.2,0.25,0.3,0.35,0.4}. As shown in (b) and (g), this physical property does not significantly affect the appearance after the colli-
+sion compared to the results when Young’s modulus is varied (Figure 11). As a result, the learned internal structures are almost identical,
+as shown in (e) and (j).
+24(h) Ground
+tru
+th(c) Ground
+truth
+(a) Before
+coll
+ision(b) After
+collision(d) Static (e) SfC-NeRF
+1.163 0.0911.164 0.0711.162 0.071
+1.162 0.115
+1.163 0.106
+0.836 0.2250.839 0.2760.838 0.206
+0.837 0.226
+0.838 0.310(f) Before
+coll
+ision(g) After
+collision(i) Static (j) SfC-NeRF
+(1) Droplet (2) LetterNewtonian fluid
+(3) Cream (4) ToothpasteNon-Newtonian fluid
+(5) Playdoh (6) Cat (7) TrophyPlasticine Sand
+(1) Droplet (2) LetterNewtonian fluid
+(3) Cream (4) ToothpasteNon-Newtonian fluid
+(5) Playdoh (6) Cat (7) TrophyPlasticine Sand
+1.163 0.068
+1.163 0.075
+0.837 0.207
+0.838 0.231Figure 13. Comparison of learned internal structures for sphere objects (left) and diamond objects (right) with varying materials. The
+physical properties were based on the PAC-NeRF dataset [36]. Specifically: (1) Newtonian fluid with the “Droplet” setting (fluid viscosity
+ˆµ= 200 and bulk modulus ˆκ= 105). (2) Newtonian fluid with the “Letter” setting ( ˆµ= 100 andˆκ= 105). (3) Non-Newtonian fluid
+with the “Cream” setting (shear modulus ˆµ= 104, bulk modulus ˆκ= 106, yield stress ˆτY= 3×103, and plasticity viscosity ˆη= 10 ).
+(4) Non-Newtonian fluid with the “Toothpaste” setting ( ˆµ= 5×103,ˆκ= 105,ˆτY= 200 , and ˆη= 10 ). (5) Plasticine with the “Playdoh”
+setting (Young’s modulus ˆE= 2×106, Poisson’s ratio ˆν= 0.3, and yield stress ˆτY= 1.54×104). (6) Plasticine with the “Cat” setting
+(ˆE= 106,ˆν= 0.3, and ˆτY= 3.85×103). (7) Sand with the “Trophy” setting ( ˆθfric= 40 °). These results demonstrate that SfC-NeRF
+((e) and (j)) improves structure estimation compared to Static ((d) and (i)), regardless of the material. However, the improvement rate
+depends on the material. As an initial approach to address SfC, we proposed a general-purpose method. However, it would be interesting
+to develop methods specifically tailored to individual materials in future work.
+25(h) Ground
+tru
+th(c) Ground
+truth(a) Before
+collision(b) After
+collision(d) Static (e) SfC-NeRF (f) Before
+collision(g) After
+collision(i) Static (j) SfC-NeRF
+0.918 0.1870.925 0.1940.933 0.144
+0.921 0.146
+0.926 0.154
+0.915 0.3110.905 0.2880.891 0.342
+0.905 0.209
+0.964 0.639
+(1)θc= 0° θc= 22. 5° (2) θc= 45° (3) θc= 67. 5° (4) θc= 90° (5)
+(1)θc= 0° θc= 22. 5° (2) θc= 45° (3) θc= 67. 5° (4) θc= 90° (5)Figure 14. Comparison of learned internal structures for bicone objects (left) and cylinder objects (right) when collision angle θcis varied.
+We varied collision angle θc∈ {0°,22.5°,45°,67.5°,90°}. We found that the effect of collision angle on the estimation of the internal
+structure depends on the object shape. (a)–(e) In the case of an object such as bicone , where the object is entirely visible regardless of the
+collision angle, the estimation performance remains relatively stable across different collision angles. (f)–(j) In contrast, in the case of an
+object, such as cylinder , where the visible area varies greatly depending on the collision angle, the estimation performance also changes
+with the collision angle. For example, in (5)(g), the bottom of the object is not visible when it collides with the ground. As a result, a hole
+is generated at the bottom of the object in (5)(j). This issue may be alleviated by improving camera placement. Other possible factors that
+affect estimation performance are discussed in Appendix A.2.1.
+26C. Implementation details
+C.1. Dataset
+Because SfC is a new task and no established dataset is
+available, we created a new dataset called the SfC dataset
+based on the protocol of PAC-NeRF [36], which is a pio-
+neering study on geometry-agnostic system identification.
+In the main experiments presented in Section 4, we pre-
+pared 115 objects by changing their external shapes, in-
+ternal structures, and materials. Figure 3 shows examples
+of the data in this dataset. First, we prepared five exter-
+nal shapes: sphere ,cube ,bicone ,cylinder , and diamond .
+Regarding the internal structure and material, we set the de-
+fault values as follows: the cavity size rate for the filled
+object, sc, was set to (2
+3)3, the cavity location, lc, was set
+to the center, and the material was defined as an elastic ma-
+terial with Young’s modulus ˆE= 106and Poisson’s ratio
+ˆν= 0.3. Under these default properties, one of them was
+changed as follows:
+(a) Three different sized cavities :sc∈ {0,(1
+2)3,(3
+4)3}.
+(b) Four different locations of cavities : the center lcis
+moved {up,down ,left,right}.
+(c-1) Eight different elastic materials : those with four dif-
+ferent Young’s moduli ˆE∈ {2.5×105,5×105,2×
+106,4×106}and four different Poisson’s ratios ˆν∈
+{0.2,0.25,0.35,0.4}.
+(c-2) Seven different materials : two Newtonian fluids,
+two non-Newtonian fluids, two plasticines, and one sand.
+Their physical properties were derived from the PAC-NeRF
+dataset [36]. Specifically, the two Newtonian fluids in-
+cluded one with the “Droplet” setting (fluid viscosity ˆµ=
+200 and bulk modulus ˆκ= 105) and one with the “Let-
+ter” setting ( ˆµ= 100 andˆκ= 105). The two non-
+Newtonian fluids included one with the “Cream” setting
+(shear modulus ˆµ= 104, bulk modulus ˆκ= 106, yield
+stress ˆτY= 3×103, and plasticity viscosity ˆη= 10 ) and
+one with the “Toothpaste” setting ( ˆµ= 5×103,ˆκ= 105,
+ˆτY= 200 , and ˆη= 10 ). The two plasticines included one
+with the “Playdoh” setting (Young’s modulus ˆE= 2×106,
+Poisson’s ratio ˆν= 0.3, and yield stress ˆτY= 1.54×104)
+and one with the “Cat” setting ( ˆE= 106,ˆν= 0.3, and
+ˆτY= 3.85×103). The sand had the “Trophy” setting
+(ˆθfric= 40 °).
+Thus, we created 5external shapes ×(1default + 3sizes
++ 4locations + (8 + 7) materials) = 115 objects.
+We also prepared 20objects for the extended experi-
+ments described in Appendix A.2. Specifically, we con-
+sidered four collision angles: θc∈ {22.5°,45°,67.5°,90°}.
+Thus, in this appendix, we created 5external shapes ×4
+collision angles = 20 objects. The total number of objects
+created in the main text and this appendix is 115+20 = 135 .
+Following the PAC-NeRF study [36], the ground-truthdata were generated using the MLS-MPM simulator [25],
+where each object fell freely under the influence of grav-
+ity and collided with the ground plane. Images were ren-
+dered under various environmental lighting conditions and
+ground textures using a photorealistic renderer. Each scene
+was captured from 11 viewpoints using cameras spaced in
+the upper hemisphere including an object.
+C.2. Model
+We implemented the models based on the official PAC-
+NeRF code [36].6PAC-NeRF represents an Eulerian
+grid-based scene representation using voxel-based NeRF
+(specifically, direct voxel grid optimization (DVGO) [63])
+and conducts a Lagrangian particle-based differentiable
+physical simulation using a differentiable MPM simulator
+(specifically, DiffTaichi [26]). More specifically, DVGO
+represents a volume density field σG′using a 3D dense
+voxel grid and represents a color field cG′using a combi-
+nation of a 4D dense voxel grid and a two-layer multi-layer
+perceptron (MLP) with a hidden dimension of 128. When
+the MLP is employed, positional embedding in the viewing
+direction dis used as an additional input. We set the reso-
+lutions of σG′andcG′to match those in PAC-NeRF [36].
+C.3. Training settings
+We performed static optimization (Figure 2(i)) using the
+same settings as those used for PAC-NeRF. Specifically, we
+trained the model for 6000 iterations using the Adam opti-
+mizer [33] with learning rates of 0.1for the volume density
+and color grids and a learning rate of 0.001for the MLP.
+The momentum terms β1andβ2were set to 0.9and0.999,
+respectively. In the dynamic optimization (Figure 2(ii)), we
+trained the model for 1000 iterations using the Adam opti-
+mizer [33] with a default learning rate of 6.4for the volume
+density grid. The momentum terms β1andβ2were set to
+0.9and0.999, respectively. We found that a high learning
+rate is useful for efficiently reducing the volume density;
+however, this is not necessary when the estimated mass m
+sufficiently approaches the ground-truth mass ˆm. There-
+fore, we divided the learning rate by 2(with a minimum of
+0.1) as long as the estimated mass mwas below the ground-
+truth mass ˆm. Conversely, we multiplied the learning rate
+by2(with a maximum of 6.4) as long as the estimated mass
+mexceeded the ground-truth mass ˆm.
+We conducted volume annealing every 100iteration dur-
+ing the dynamic optimization. When the estimated mass
+mwas significantly larger than the ground-truth mass ˆm
+(specifically, when the difference exceeded 10in practice),
+the expansion process was skipped to prevent mfrom devi-
+ating further from ˆm.
+In appearance-preserving training, static optimization
+was performed using settings similar to those mentioned
+6https://github.com/xuan-li/PAC-NeRF
+27above (i.e., static optimization in Step (i) (Figure 2(i))), but
+the number of iterations was reduced to 10.
+We empirically set the hyperparameters for the full ob-
+jective Lfull(Equation 12) to λmass= 1 ,λpres= 100 ,
+wdepth= 0.01, and λkey= 10 . The hyperparameter for
+background loss Lbgwas set to wbg= 0.2.
+C.4. Evaluation metrics
+As mentioned in Section 3.1, we use particles PP(t0)to
+represent the structure (including the internal structure) of
+an object and estimate PP(t0)to match the ground-truth
+particles ˆPP(t0). Therefore, we evaluated the model by
+measuring the distance between PP(t0)andˆPP(t0)us-
+ing the chamfer distance (CD) . The smaller the value, the
+higher the degree of matching. As mentioned in Section 4.3,
+we also used the anti-chamfer distance (ACD) , which is the
+chamfer distance between the predicted particles PP(t0)
+and ground-truth particles ˜PP(t0), where the cavity was
+placed on the opposite side, to evaluate the capture of the
+cavity location.
+28

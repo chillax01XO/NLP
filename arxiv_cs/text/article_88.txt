@@ -1,0 +1,2263 @@
+arXiv:2505.21012v1  [cs.LG]  27 May 2025FEDERATED INSTRUMENTAL VARIABLE ANALYSIS VIA
+FEDERATED GENERALIZED METHOD OF MOMENTS
+Geetika, Somya Tyagi, Bapi Chatterjee∗
+Department of Computer Science and Engineering, IIIT Delhi
+New Delhi, India
+{geetikai, somya23005, bapi}@iiitd.ac.in
+ABSTRACT
+Instrumental variables (IV) analysis is an important applied tool for areas such as healthcare and
+consumer economics. For IV analysis in high-dimensional settings, the Generalized Method of
+Moments (GMM) using deep neural networks offers an efficient approach. With non-i.i.d. data
+sourced from scattered decentralized clients, federated learning is a popular paradigm for training
+the models while promising data privacy. However, to our knowledge, no federated algorithm
+for either GMM or IV analysis exists to date. In this work, we introduce federated instrumental
+variables analysis ( FEDIV) via federated generalized method of moments ( FEDGMM ). We formulate
+FEDGMM as a federated zero-sum game defined by a federated non-convex non-concave minimax
+optimization problem, which is solved using federated gradient descent ascent ( FEDGDA ) algorithm.
+One key challenge arises in theoretically characterizing the federated local optimality. To address
+this, we present properties and existence results of clients’ local equilibria via FEDGDA limit points.
+Thereby, we show that the federated solution consistently estimates the local moment conditions of
+every participating client. The proposed algorithm is backed by extensive experiments to demonstrate
+the efficacy of our approach.
+Keywords Federated Learning ·Generalized Method of Moments ·Instrumental Variables Analysis ·Causal Inference
+1 Introduction
+Federated Learning (FL) (McMahan et al., 2017) over scattered clients without data sharing is now an established
+paradigm for training Machine Learning (ML) models. The data privacy makes it attractive for applications to healthcare
+(Nguyen et al., 2022; Antunes et al., 2022; Oh and Nadkarni, 2023), finance and banking (Byrd and Polychroniadou,
+2020; Long et al., 2020), smart cities and mobility (Zheng et al., 2022; Gecer and Garbinato, 2024), drug discovery
+(Oldenhof et al., 2023) and many others (Ye et al., 2023). However, the existing research in FL primarily focuses on
+supervised learning (Kairouz et al., 2021), which struggles to predict the outcomes due to confounding variables not
+observed in training data.
+For example, consider the Nature Medicine report by Dayan et al. (2021) on a global-scale FL to predict the effectiveness
+of oxygen administration (a treatment variable) to COVID-19 patients in the emergency rooms while maintaining their
+privacy. It is known that COVID-19 revival rates are highly influenced by lifestyle-related factors such as obesity and
+diabetes (Wang, Sato, and Sakuraba, 2021), other co-morbidities (Russell, Lone, and Baillie, 2023), and the patients’
+conditions at the emergency care admission time (Izcovich et al., 2020). Arguably, the Dayan et al. (2021)’s approach
+may over- or under-estimate the effects of oxygen treatment.
+∗This work is supported in part by the Indo-French Centre for the Promotion of Advanced Research (IFCPAR/CEFIPRA)
+through the FedAutoMoDL project, the Infosys Center for Artificial Intelligence (CAI) at IIIT-Delhi through the Scalable Federated
+Learning project. Geetika is partially supported by the INSPIRE fellowship No: DST/INSPIRE Fellowship/[IF220579] offered by
+the Department of Science & Technology (DST), Government of India. Bapi Chatterjee also acknowledges support by Anusandhan
+National Research Foundation under project SRG/2022/002269.Federated IV Analysis via Federated GMM, Geetika et al.
+One can address the above issue by observing and accommodating every confounding latent factor that may influence
+the outcome. Thus, it may require that obesity, diabetes, overall health at the time of admission, and even genetic
+factors are accommodated; for example, using a technique such as matching (Kallus, 2020b; Kallus, 2020a). It may
+potentially render the treatment variable undergo a randomized controlled trial such as A/B testing (Kohavi et al., 2013)
+on decentralized, scattered, and possibly private data. However, to our knowledge, these techniques are yet unexplored
+in the realms of FL.
+Alternatively, one could assume conditional independence between unobserved confounders and the treatment variable,
+for example, the works by Shalit, Johansson, and Sontag (2017) and Imai and Li (2023), etc. However, this may not be
+a fair approach for an application such as the federated estimation of effectiveness of oxygen therapy (Dayan et al.,
+2021). To elaborate, Liang et al. (2023) suggests the hypoxia-inducible factors (HIF) – a protein that controls the
+rate of transcription of genetic information from DNA to messenger RNA by binding to a specific DNA sequence
+(Latchman, 1993) – plays a vital role in oxygen consumption at the cellular level. The machine learning model developed
+by FL implementation of Dayan et al. (2021) would miss the crucial counterfactual scenarios, such as HIF levels
+among patients undergoing oxygen therapy impacting morbidity outcomes, should it assume conditional independence
+between effects of oxygen treatment and every confounder. Such variables can be often traced in applications such as
+industry-scale federated drug discovery by AstraZeneca (Oldenhof et al., 2023).
+Instrumental variables (IV) provide a workaround to both the above issues under the assumption that the latent
+confounding factor influences only the treatment variable but does not directly affect the outcome. In the above example,
+the measure of HIF works as an instrumental variable that affects oxygen treatment as in its effective organ-level
+consumption but does not directly affect the mortality of the COVID-19 patient (Dayan et al., 2021). IV can play an
+important role in a federated setting as the influence assumption between the confounders and the treatment variables
+will remain local to the clients.
+IV analysis has been comprehensively explored in econometrics (Angrist and Krueger, 2001; Angrist and Pischke, 2009)
+with several decades of history such as works of Wright (1928) and Reiersøl (1945). Its efficiency is now accepted
+for learning even high-dimensional complex causal relationships such as one in image datasets (Hartford et al., 2017;
+Bennett, Kallus, and Schnabel, 2019). Naturally, the growing demand of FL entails designing methods for federated IV
+analysis, which, to our knowledge, is yet unexplored.
+In the centralized deep learning setting, Hartford et al. (2017) introduced an IV analysis framework, namely D EEPIV,
+which uses two stages of neural networks training – first for the treatment prediction and the second with a loss function
+involving integration over the conditional treatment distribution. The two-stage process has precursors in applying least
+square regressions in the two phases (Angrist and Pischke, 2009)[4.1.1].
+In the same setting, another approach for IV analysis applies the generalized method of moments (GMM) (Wooldridge,
+2001). GMM is a celebrated estimation approach in social sciences and economics. It was introduced by Hansen (1982),
+for which he won a Nobel Prize in Economics (Steif et al., 2014). Building on (Wooldridge, 2001), Bennett, Kallus,
+and Schnabel (2019) introduced deep learning models to GMM estimation; they named their method DEEPGMM .
+Empirically, DEEPGMM outperformed DEEPIV.DEEPGMM is solved as a smooth zero-sum game formulated as a
+minimax optimization problem.
+Prior to DEEPGMM , Lewis and Syrgkanis (2018) also employed neural networks for GMM estimation. Their method,
+called the adversarial generalized method of moments ( AGMM ), also formulated the problem as a minimax optimization
+to fit a GMM criterion function over a finite set of unconditional moments. DEEPGMM differs from AGMM in using a
+weighted norm to define the objective function. The experiments in (Bennett, Kallus, and Schnabel, 2019) showed that
+DEEPGMM outperformed AGMM for IV analysis, and both won against DEEPIV. Nonetheless, to our knowledge,
+none of these methods have a federated counterpart.
+Minimax optimization has been studied in federated settings (Sharma et al., 2022; Wu et al., 2024), which potentially
+provides an underpinning for federated GMM. However, beyond the algorithm and its convergence results, there are a
+few key challenges:
+(A)For non-i.i.d. client-local data, describing common federated GMM estimators is not immediate. It requires
+characterizing a synchronized model state that fit moment conditions of every client.
+(B)To show that the dynamics of federated minimax optimization retrieves an equilibrium solution of the federated
+zero-sum game as a limit point. And,
+(C)Under heterogeneity, to establish that the federated game equilibria also satisfies the equilibrium requirements of
+every client thereby consistently estimating the clients’ local moments.
+In this work, we address the above challenges. Our contributions are summarized as the following:
+2Federated IV Analysis via Federated GMM, Geetika et al.
+1.We introduce FEDIV: federated IV analysis. To our knowledge, FEDIVis the first work on IV analysis in a
+federated setting.
+2. We present FEDDEEPGMM2– a federated adaptation of D EEPGMM of Bennett, Kallus, and Schnabel (2019) to
+solve F EDIV. F EDDEEPGMM is implemented as a federated smooth zero-sum game.
+3.We show that the limit points of a federated gradient descent ascent ( FEDGDA ) algorithm include the equilibria of
+the zero-sum game.
+4.We show that an equilibrium solution of the federated game obtained at the server consistently estimates the moment
+conditions of every client.
+5.We experimentally validate our algorithm. The experiments show that even for heterogenous data, FEDDEEPGMM
+has convergent dynamics analogous to the centralized D EEPGMM algorithm.
+1.1 Related work
+The federated supervised learning has received algorithmic advancements guided by factors such as tackling the system
+and statistical heterogeneities, better sample and communication complexities, model personalization, differential
+privacy, etc. An inexhaustible list includes FEDPROX (Li et al., 2020), SCAFFOLD (Karimireddy et al., 2020), FEDOPT
+(Reddi et al., 2020), LPP-SGD (Chatterjee, Kungurtsev, and Alistarh, 2024), PFEDME(T Dinh, Tran, and Nguyen,
+2020), DP-SCAFFOLD (Noble, Bellet, and Dieuleveut, 2022), and others.
+By contrast, federated learning with confounders, which typically forms a causal learning setting, is a relatively
+under-explored research area. V o et al. (2022a) presented a method to learn the similarities among the data sources
+translating a structural causal model (Pearl, 2009) to federated setting. They transform the loss function by utilizing
+Random Fourier Features into components associated with the clients. Thereby they compute individual treatment
+effects (ITE) and average treatment effects (ATE) by a federated maximization of evidence lower bound (ELBO). V o
+et al. (2022b) presented another federated Bayesian method to estimate the posterior distributions of the ITE and ATE
+using a non-parametric approach.
+Xiong et al. (2023) presented maximum likelihood estimator (MLE) computation in a federated setting for ATE
+estimation. They showed that the federated MLE consistently estimates the ATE parameters considering the combined
+data across clients. However, it is not clear if this approach is applicable to consistent local moment conditions
+estimation for the participating clients. Almodóvar, Parras, and Zazo (2024) applied FedAvg to variational autoencoder
+(Kingma, Welling, et al., 2019) based treatment effect estimation TEDV AE (Zhang, Liu, and Li, 2021). However, their
+work mainly focused on comparing the performance of vanilla FedAvg with a propensity score-weighted FedAvg in the
+context of federated implementation of TEDV AE.
+Our work differs from the above related works in the following:
+(a)we introduce IV analysis in federated setting, and, we introduce federated GMM estimators, which has applications
+for various empirical research (Wooldridge, 2001),
+(b)specifically, we adopt a non-Bayesian approach based on a federated zero-sum game, wherein we focus on
+analysing the dynamics of the federated minimax optimization and characterize the global equilibria as a consistent
+estimator of the clients’ moment conditions.
+Our work also differs from federated minimax optimization algorithms: Sharma et al. (2022), Shen et al. (2024), Wu
+et al. (2024), and Zhu et al. (2024), where the motivation is to analyse and improve the non-asymptotic convergence
+under various analytical assumptions on the objective functions. We primarily focus on deriving the equilibrium via the
+limit points of the federated GDA algorithm.
+2 Preliminaries
+We model our basic terminologies after (Bennett, Kallus, and Schnabel, 2019) for a client-local setting. Consider a
+distributed system as a set of Nclients [N]with datasets Si={(xi
+j, yi
+j)}ni
+j=1,∀i∈[N]. We assume that for a client i∈
+[N], the treatment and outcome variables xi
+jandyi
+j, respectively, are related by the process Yi=gi
+0(Xi)+ϵi, i∈[N].
+We assume that each client-local residual ϵihas zero mean and finite variance, i.e. E[ϵi] = 0,E[(ϵi)2]<∞.Furthermore,
+we assume that the treatment variables Xiare endogenous on the clients, i.e. E[ϵi|Xi]̸= 0,and therefore, gi
+0(Xi)̸=
+E[Yi|Xi].
+We assume that the treatment variables are influenced by instrumental variables Zi,∀i∈[N]so that
+P(Xi|Zi)̸=P(Xi). (1)
+2Wu et al. (2023) used F EDGMM as an acronym for federated Gaussian mixture models.
+3Federated IV Analysis via Federated GMM, Geetika et al.
+Furthermore, the instrumental variables do not directly influence the outcome variables Yi,∀i∈[N]:
+E[ϵi|Zi] = 0. (2)
+Note that, assumptions 1, 2 are local to the clients, thus, honour the data-privacy requirements of a federated learning
+task. In this setting, we aim to discover a common or global causal response function that would fit the data generation
+processes of each client without centralizing the data. More specifically, we learn a parametric function g0(.)∈G:=
+{g(., θ)|θ∈Θ}expressed as g0:=g(., θ0)forθ0∈Θ, defined by
+g(., θ0) =1
+NNX
+i=1gi(., θ0). (3)
+The learning process essentially involves estimating the true parameter θ0byˆθ. To measure the performance of the
+learning procedure, we use the MSE of the estimate ˆg:=g(.,ˆθ)against the true g0averaged over the clients.
+3 Federated Deep Generalized Method of Moments
+We adapt DEEPGMM (Bennett, Kallus, and Schnabel, 2019) in the local setting of a client i∈[N]. For a self-contained
+reading, we include the description here.
+3.1 Client-local Deep Generalized Method of Moments (D EEPGMM)
+GMM estimates the parameters of the causal response function using a certain number of moment conditions . Define the
+moment function on a client i∈[N]as a vector-valued function fi:R|Z|→Rmwith components fi
+1, fi
+2, . . . , fi
+m. We
+consider the moment conditions as parametrized functions {fi
+j}m
+j=1∀i∈[N]with the assumption that their expectation
+is zero at the true parameter values. More specifically, using equation (2), we have
+E[fi
+j(Zi)ϵi] = 0,∀j∈[m],∀i∈[N], (4)
+We assume that mmoment conditions {fi
+j}m
+j=1at each client i∈[N]are sufficient to identify a unique federated
+estimate ˆθtoθ0. With (4), we define the moment conditions on a client i∈[N]as
+ψ(fi
+j;θ) = 0 ,∀j∈[m],where (5)
+ψ(fi;θ) =E[fi(Zi)ϵi] =E[fi(Zi)(Yi−gi(Xi;θ)).
+In empirical terms, the sample moments for the i-th client with nisamples are given by
+ψni(fi;θ) =Eni[fi(Z)ϵi] =1
+niniX
+k=1fi(Zi
+k)(Yi
+k−gi(Xi
+k;θ)), (6)
+where ψni(fi;θ) = 
+ψni(fi
+1;θ), ψni(fi
+2;θ), . . . , ψ ni(fi
+m;θ)
+is the moment condition vector, and
+ψni(fi
+j;θ) =1
+niniX
+k=1fi
+j(Zi
+k)(Yi
+k−gi(Xi
+k;θ)). (7)
+Thus, for empirical estimation of the causal response function gi
+0at client i∈[N], it needs to satisfy
+ψni(fi
+j;θ0) = 0 ,∀i∈[N]andj∈[m] (8)
+atθ=θ0. Equation (8) is reformulated as an optimization problem given by
+min
+θ∈Θ∥ψni(fi
+1;θ), ψni(fi
+2;θ), . . . , ψ ni(fi
+m;θ)∥2, (9)
+where we use the Euclidean norm ∥w∥2=wTw. Drawing inspiration from Hansen (1982), DEEPGMM used a
+weighted norm, which yields minimal asymptotic variance for a consistent estimator ˜θ, to cater to the cases of (finitely)
+large number of moment conditions. We adapt their weighted norm ∥w∥2
+˜θ=wTC−1
+˜θw, to a client-local setting via the
+covariance matrix C˜θdefined by
+
+C˜θ
+jl=1
+niniX
+k=1fi
+j(Zi
+k)fi
+l(Zi
+k)(Yi
+k−gi(Xi
+k;˜θ))2. (10)
+4Federated IV Analysis via Federated GMM, Geetika et al.
+Now considering the vector space Vof real-valued functions, ψni(fi;θ) = 
+ψni(fi
+1;θ), ψni(fi
+2;θ), . . . , ψ ni(fi
+m;θ)
+is a linear operator on Vand
+C˜θ(fi, hi) =1
+niniX
+k=1fi(Zi
+k)hi(Zi
+k)(Yi
+k−gi(Xi
+k;˜θ))2(11)
+is a bilinear form. With that, for any subset Fi⊂ V, we define a function
+Ψni(θ,Fi,˜θ) = sup
+fi∈Fiψni(fi;θ)−1
+4C˜θ(fi, fi),
+which leads to the following optimization problem.
+Lemma 1 (Lemma 1 of (Bennett, Kallus, and Schnabel, 2019)) .With the weighted norm defined by equation (10), and
+forFi=span({fi
+j}m
+j=1)
+∥ψni(fi
+1;θ), ψni(fi
+2;θ), . . . , ψ ni(fi
+m;θ)∥2
+˜θ= Ψ ni(θ,Fi,˜θ). (12)
+Thus, a weighted reformulation of (9) is given by
+θGMM∈arg min
+θ∈ΘΨni(θ,Fi,˜θ). (13)
+As the data-dimension grows, the function class Fiis replaced with a class of neural networks of a certain architecture,
+i.e.Fi={fi(z, τ) :τ∈ T } . Similarly, let Gi={gi(x, θ) :θ∈Θ}be another class of neural networks with varying
+weights. With that, define
+Ui
+˜θ(θ, τ) :=1
+niniX
+k=1fi(Zi
+k, τ) 
+Yi
+k−gi(Xi
+k;θ)
+−1
+4niniX
+k=1 
+fi(Zi
+k, τ)2 
+Yi
+k−gi(Xi
+k;θ)2(14)
+Then (13) is reformulated as the following
+θDGMM∈arg min
+θ∈Θsup
+τ∈TUi
+˜θ(θ, τ).(15)
+Equation (15) forms a zero-sum game, whose equilibrium solution is shown to be a true estimator to θ0under a set of
+standard assumptions; see Theorem 2 in (Bennett, Kallus, and Schnabel, 2019).
+3.2 Federated Deep GMM (F EDDEEPGMM)
+The federated generalized method moment ( FEDDEEPGMM ) needs to find the global moment estimators for the causal
+response function to fit data on each client. Thus, the federated counterpart of equation (5) is given by
+ψ(f;θ) =Ei[E[fi(Zi)(Yi
+k−gi(Xi;θ)]] = 0 , (16)
+where the expectation Eiis over the clients. In this work, we consider full client participation . Thus, for the empirical
+federated moment estimation, we formulate:
+ψn(f;θ) =1
+NNX
+i=1ψni(fi;θ) =1
+NNX
+i=11
+niniX
+k=1fi(Zi
+k)(Yi
+k−gi(Xi
+k;θ)) (17)
+With that, the federated moment estimation problem following (13) is formulated as:
+θFedDeepGMM∈arg min
+θ∈Θ∥ψn(f;θ)∥2
+˜θ, (18)
+where ∥w∥˜θ=w⊤C−1
+˜θxis the previously defined weighted-norm with inverse covariance as weights. In general cases,
+we do not have explicit knowledge of the moment conditions of various clients. We propose FEDDEEPGMM , a “deep"
+reformulation of the federated optimization problem based on the neural networks of a given architecture shared among
+clients and is shown to have the same solution as the federated GMM problem formulated earlier.
+Lemma 2. LetF=span{fi
+j|i∈[N], j∈[m]}. An equivalent objective function for the federated moment estimation
+optimization problem (18) is given by:
+∥ψN(f;θ)∥2
+˜θ= sup
+fi∈F
+∀i∈[N]1
+NNX
+i=1
+ψni(fi;θ)−1
+4C˜θ(fi;fi)
+,where (19)
+ψni(fi;θ) :=1
+niniX
+k=1fi(Zi
+k)(Yi
+k−gi(Xi
+k;θ)),andC˜θ(fi, fi) :=1
+niniX
+k=1(fi(Zi
+k))2(Yi
+k−gi(Xi
+k;˜θ))2.
+5Federated IV Analysis via Federated GMM, Geetika et al.
+The detailed proof is similar to Lemma 1 and is given in Appendix C.1. The federated zero-sum game is then defined
+by:
+ˆθFedDeepGMM∈arg min
+θ∈Θsup
+τ∈TU˜θ(θ, τ) :=1
+NNX
+i=1Ui
+˜θ(θ, τ), (20)
+where Ui
+˜θ(θ, τ)is defined in equation (14). The federated GMM formulation by a zero-sum game defined by a federated
+minimax optimization problem (20) provides the global estimator as its equilibrium solution. We solve (20) using the
+federated gradient descent ascent (F EDGDA) algorithm described next.
+3.3 Federated Gradient Descent Ascent (F EDGDA) Algorithm
+An adaptation of the standard gradient descent ascent algorithm to federated setting is well-explored: (Deng and
+Mahdavi, 2021; Sharma et al., 2022; Shen et al., 2024; Wu et al., 2024). The clients run the gradient descent ascent
+algorithm for several local updates and then the orchestrating server synchronizes them by collecting the model states,
+averaging them, and broadcasting it to the clients. A detailed description is included as a pseudocode in Appendix B.
+Similar to (Bennett, Kallus, and Schnabel, 2019), we note that the federated minimax optimization problem (20) is not
+convex-concave on (θ, τ). The convergence results of variants of FEDGDA (Sharma et al., 2022; Shen et al., 2024; Wu
+et al., 2024) assume that U˜θ(θ, τ)is non-convex on θand satisfies a µ−Polyak Łojasiewicz (PL) inequality on τ, see
+assumption 4 in (Sharma et al., 2022). PL condition is known to be satisfied by over-parametrized neural networks
+(Charles and Papailiopoulos, 2018; Liu, Zhu, and Belkin, 2022). The convergence results of our method will follow
+(Sharma et al., 2022). We include a formal statement in Appendix B. However, beyond convergence, we primarily aim
+to show that an optimal solution will consistently estimate the moment conditions of the clients, which we do next.
+4 Federated Equilibrium Solutions
+In this section, we present our main results, which establish the existence and characterize the federated equilibrium
+solution.
+4.1 Federated Sequential Game
+As minimax is not equal to maximin in general for a non-convex-non-concave problem, it is important to model the
+federated game as a sequential game (Jin, Netrapalli, and Jordan, 2020) whose outcome would depend on what move –
+maximization or minimization – is taken first. We use some results from Jin, Netrapalli, and Jordan (2020), which we
+include here for a self-contained reading. We start with the following assumptions:
+Assumption 1. Client-local objective Ui
+˜θ(θ, τ)∀i∈[N]is twice continuously differentiable for both θandτ. Thus,
+the global objective U˜θ(θ, τ)is also a twice continuously differentiable function.
+Assumption 2 (Smoothness) .The gradient of each client’s local objective, ∇Ui
+˜θ(θ, τ), is Lipschitz continuous with
+respect to both θandτ. For all i∈[N], there exist constants L >0such that:
+∥∇θUi
+˜θ(θ1, τ1)− ∇ θUi
+˜θ(θ2, τ2)∥ ≤L∥(θ1, τ1)−(θ2, τ2)∥,and
+∥∇τUi
+˜θ(θ1, τ1)− ∇ τUi
+˜θ(θ2, τ2)∥ ≤L∥(θ1, τ1)−(θ2, τ2)∥,
+∀(θ1, τ1),(θ2, τ2). Thus, U˜θ(θ, τ)isL-Lipschitz smooth.
+Assumption 3 (Gradient Dissimilarity) .The heterogeneity of the local gradients with respect to (w.r.t.) θandτis
+bounded as follows:
+∥∇θUi
+˜θ(θ, τ)− ∇ θU˜θ(θ, τ)∥ ≤ζi
+θ ∥∇τUi
+˜θ(θ, τ)− ∇ τU˜θ(θ, τ)∥ ≤ζi
+τ,
+where ζi
+θ, ζi
+τ≥0are the bounds that quantify the degree of gradient dissimilarity at client i∈[N].
+Assumption 4 (Hessian Dissimilarity) .The heterogeneity in terms of hessian w.r.t. θandτis bounded as follows:
+∥∇2
+θθUi
+˜θ(θ, τ)− ∇2
+θθU˜θ(θ, τ)∥σ≤ρi
+θ, ∥∇2
+ττUi
+˜θ(θ, τ)− ∇2
+ττU˜θ(θ, τ)∥σ≤ρi
+τ,
+∥∇2
+θτUi
+˜θ(θ, τ)− ∇2
+θτU˜θ(θ, τ)∥σ≤ρi
+θτ, ∥∇2
+τθUi
+˜θ(θ, τ)− ∇2
+τθU˜θ(θ, τ)∥σ≤ρi
+τθ,
+where ρi
+θ, ρi
+τ, ρi
+θτ,andρi
+τθ≥0quantify the degree of hessian dissimilarity at client i∈[N]by spectral norm ∥.∥σ.
+6Federated IV Analysis via Federated GMM, Geetika et al.
+Assumptions 3 and 4 provide a measure of data heterogeneity across clients in a federated setting. We assume that ζ′s
+andρ′sare bounded. In the special case, when ζandρ’s are all 0, then the data is homogeneous across clients.
+We adopt the notion of Stackelberg equilibrium for pure strategies, as discussed in (Jin, Netrapalli, and Jordan, 2020),
+to characterize the solution of the minimax federated optimization problem for a non-convex non-concave function
+U˜θ(θ, τ)for the sequential game where min-player goes first and the max-player goes second.
+To avoid ambiguity between the adjectives of the terms global/local objective functions in federated learning and the
+global/local nature of minimax points in optimization, we refer to a global objective as the federated objective and a
+local objective as the client’s objective.
+Definition 1 (Local minimax point) .[Definition 14 of (Jin, Netrapalli, and Jordan, 2020)] Let U(θ, τ)be a function
+defined over Θ× T and let hbe a function satisfying h(δ)→0asδ→0. There exists a δ0, such that for any
+δ∈(0, δ0],and any (θ, τ)such that ∥θ−ˆθ∥ ≤δand∥τ−ˆτ∥ ≤δ, then a point (ˆθ,ˆτ)is a local minimax point of U, if
+∀(θ, τ)∈Θ× T, it satisfies:
+U˜θ(ˆθ, τ)≤U˜θ(ˆθ,ˆτ)≤ max
+τ′:∥τ′−ˆτ∥≤h(δ)U˜θ(θ, τ′), (21)
+With that, the first-order & second-order necessary conditions for local minimax points are as below.
+Lemma 3 (Propositions 18, 19, 20 of (Jin, Netrapalli, and Jordan, 2020)) .Under assumption 1, any local minimax
+point satisfies the following conditions:
+•First-order Necessary Condition: A local minimax point (θ, τ)satisfies: ∇θU˜θ(θ, τ) = 0 and∇τU˜θ(θ, τ) = 0 .
+•Second-order Necessary Condition: A local minimax point (θ, τ)satisfies: ∇2
+ττU˜θ(θ, τ)⪯0.Moreover, if
+∇2
+ττU˜θ(θ, τ)≺0, thenh
+∇2
+θθU˜θ− ∇2
+θτU˜θ 
+∇2
+ττU˜θ−1∇2
+τθU˜θi
+(θ, τ)⪰0.
+•Second-order Sufficient Condition: A stationary point (θ, τ)that satisfies ∇2
+ττU˜θ(θ, τ)≺0, and
+h
+∇2
+θθU˜θ− ∇2
+θτU˜θ 
+∇2
+ττU˜θ−1∇2
+τθU˜θi
+(θ, τ)≻0
+guarantees that (θ, τ)is a strict local minimax.
+Now, in order to define the federated approximate equilibrium solutions, we first define an approximate local minimax
+point.
+Definition 2 (Approximate Local minimax point) .[An adaptation of definition 34 of (Jin, Netrapalli, and Jordan,
+2020)] Let U(θ, τ)be a function defined over Θ×T and let hbe a function satisfying h(δ)→0asδ→0. There exists
+aδ0, such that for any δ∈(0, δ0],and any (θ, τ)such that ∥θ−ˆθ∥ ≤δand∥τ−ˆτ∥ ≤δ, then a point (ˆθ,ˆτ)is an
+ε-approximate local minimax point of U, if it satisfies:
+U˜θ(ˆθ, τ)−ε≤U˜θ(ˆθ,ˆτ)≤ max
+τ′:∥τ′−ˆτ∥≤h(δ)U˜θ(θ, τ′) +ε, (22)
+We aim to achieve approximate local minimax points for every client as a solution of the federated minimax optimization.
+With that, we characterize the federated solution as the following.
+Definition 3 (E-Approximate Federated Equilibrium Solutions) .LetE={εi}N
+i=1be the approximation error vector for
+clients [N]. LetUi
+˜θ(θ, τ)be a function defined over Θ×T for a client i∈[N]. AnE-approximate federated equilibrium
+point (ˆθ,ˆτ)that is an εi-approximate local minimax point for every clients’ objective Ui
+˜θ, where the federated objective
+isU˜θ(θ, τ) :=1
+NPN
+i=1Ui
+˜θ(θ, τ), must follow the conditions below:
+1.εi- First-order Necessary Condition: The point (ˆθ,ˆτ)must be an εistationary point for every client i∈[N], i.e.,
+∥∇θUi
+˜θ(ˆθ,ˆτ)∥ ≤εi,and ∥∇τUi
+˜θ(ˆθ,ˆτ)∥ ≤εi.
+2.Second-Order εiNecessary Condition: The point (ˆθ,ˆτ)must satisfy the second-order conditions:
+∇2
+ττUi
+˜θ(ˆθ,ˆτ)⪯ −εiI, andh
+∇2
+θθUi
+˜θ− ∇2
+θτUi
+˜θ 
+∇2
+ττU˜θ−1∇2
+τθUi
+˜θi
+(ˆθ,ˆτ)⪰εiI.
+7Federated IV Analysis via Federated GMM, Geetika et al.
+3.Second-Order εiSufficient Condition: Anεistationary point (θ, τ)that satisfies ∇2
+ττUi
+˜θ(ˆθ,ˆτ)≺ −εiI, and
+h
+∇2
+θθU˜θ− ∇2
+θτU˜θ 
+∇2
+ττU˜θ−1∇2
+τθU˜θi
+(ˆθ,ˆτ)≻εiI
+guarantees that (ˆθ,ˆτ)is a strict local minimax point ∀i∈[N]that satisfies εiapproximate equilibrium as in
+definition 2.
+We now state the main theoretical result of our work in the following theorem.
+Theorem 1. Under assumptions 1, 2, 3 and 4, a minimax solution (ˆθ,ˆτ)of federated optimization problem (20) that
+satisfies the equilibrium condition as in definition 1:
+U˜θ(ˆθ, τ)≤U˜θ(ˆθ,ˆτ)≤ max
+τ′:∥τ′−ˆτ∥≤h(δ)U˜θ(θ, τ′),
+is anE-approximate federated equilibrium solution as defined in 3, where the approximation error εifor each client
+i∈[N]lies in:
+max{ζi
+θ, ζi
+τ} ≤εi≤min{α−ρi
+τ, β−Bi}
+for ρi
+τ < α and Bi> β , such that α :=λmax
+∇2
+ττU˜θ(ˆθ,ˆτ),β :=
+λminh
+∇2
+θθU˜θ− ∇2
+θτU˜θ 
+∇2
+ττU˜θ−1∇2
+τθU˜θi
+(ˆθ,ˆτ)
+andBi:=ρi
+θ+Lρi
+θτ1
+|λmax(∇2ττUi
+˜θ)|+Lρi
+τθ1
+|λmax(∇2ττUi
+˜θ)|+
+L2ρi
+τ1
+|λmax(∇2ττUi
+˜θ)·λmax(∇2ττU˜θ)|.
+The proof of theorem 1 is given in Appendix C.2. Note that when data is homogeneous (i.e., for each client i,ζi
+θ,ζi
+τ,ρi
+τ
+andBiare all zeroes), each client satisfies an exact local minimax equilibrium.
+Remark 1. In Theorem 1, note that if the interval [max{ζi
+θ, ζi
+τ},min{α−ρi
+τ, β−Bi}]is empty, i.e. max{ζi
+θ, ζi
+τ}>
+min{α−ρi
+τ, β−Bi}, then no such εiexists and (ˆθ,ˆτ)fails to be a local εiapproximate equilibrium point for that
+clients. It may happen in two cases:
+1.The gradient dissimilarity ζi
+θ, ζi
+τis too large indicating high heterogeneity, then (ˆθ,ˆτ)- the solution to the federated
+objective would fail to become an approximate equilibrium point for the clients. It is a practical consideration for a
+federated convergence facing difficulty against high heterogeneity.
+2.Ifα≈ρi
+τorβ≈Bi, indicating that the client’s local curvature structure significantly differs from the global
+curvature. In this case, the clients’ objectives may be flatter or even oppositely curved compared to the global model,
+that is, the objectives are highly heterogeneous.
+Now we state the result on the consistency of the estimator of the clients’ moment conditions.
+Theorem 2 (Consistency) .[Adaptation of Theorem 2 of (Bennett, Kallus, and Schnabel, 2019)] Let ˜θnbe a data-
+dependent choice for the federated objective that has a limit in probability. For each client i∈[N], define
+mi(θ, τ,˜θ) := fi(Zi;τ)(Yi−g(Xi;θ))−1
+4fi(Zi;τ)2(Yi−g(Xi;˜θ))2,Mi(θ) = supτ∈TE[mi(θ, τ,˜θ)]and
+ηi(ϵ) := infd(θ,θ0)≥ϵMi(θ)−Mi(θ0)for every ϵ >0. Let (ˆθn,ˆτn)be a solution that satisfies the approximate
+equilibrium for each of the client i∈[N]as
+sup
+τ∈TUi
+˜θ(ˆθn, τ)−εi−op(1)≤Ui
+˜θ(ˆθn,ˆτn)≤inf
+θ∈Θmax
+τ′:∥τ′−ˆτn∥≤h(δ)Ui
+˜θ(θ, τ′) +εi+op(1),
+for some δ0, such that for any δ∈(0, δ0],and any θ, τsuch that ∥θ−ˆθ∥ ≤δand∥τ−ˆτ∥ ≤δand a function
+h(δ)→0asδ→0. Then, under similar assumptions as in Assumptions 1 to 5 of (Bennett, Kallus, and Schnabel,
+2019), the global solution ˆθnis a consistent estimator to the true parameter θ0, i.e. ˆθnp− →θ0when the approximate
+error εi<ηi(ϵ)
+2for every ϵ >0for each client i∈[N].
+The assumptions and the proof of Theorem 2 are included in Appendix C.3.
+Remark 2. Theorem 2 formalizes a tradeoff between data heterogeneity and the consistency of the global estimator in
+federated learning. If the approximation error εiis large for a client i∈[N], then the solution ˆθnmay fail to consistently
+estimate the true parameter of client i. In contrast, when data across clients have similar distribution (i.e., case for low
+heterogeneity), the federated optimal model ˆθnis consistent across clients.
+Now, we discuss that the limit points of FEDGDA will retrieve the local minimax points of the federated optimization
+problem.
+8Federated IV Analysis via Federated GMM, Geetika et al.
+4.2 Limit Points of F EDGDA
+Letα1=η
+γ, α2=ηbe the learning rates for gradient updates to θandτ, respectively. For details, refer to Algorithm 1
+in Appendix B. Without loss of generality the F EDGDA updates are:
+θt+1=θt−η1
+γ1
+NX
+i∈[N]RX
+r=1∇θUi
+˜θ(θi
+t,r, τi
+t,r)andτt+1=τt+η1
+NX
+i∈[N]RX
+r=1∇τUi
+˜θ(θi
+t,r, τi
+t,r) (23)
+We call it γ-FEDGDA , where γis the ratio of α1toα2. Asη→0corresponds to FEDGDA -flow, under the smoothness
+ofUi
+˜θ, Assumption 3 and for some fixed R, FEDGDA-flow becomes:
+dθ
+dt=−1
+γR∇θU˜θ(θ, τ) +OR
+γζθ
+,anddτ
+dt=R∇τU˜θ(θ, τ) +O(Rζτ). (24)
+We further elaborate on F EDGDA-flow in Appendix D.1.
+Proposition 1. Given the Jacobian matrix for γ−FEDGDA flow as
+J=−1
+γR∇2
+θθU˜θ(θ, τ)−1
+γR∇2
+θτU˜θ(θ, τ)
+R∇2
+τθU˜θ(θ, τ) R∇2
+ττU˜θ(θ, τ)
+,
+a point (θ, τ)is a strictly linearly stable equilibrium of the γ−FEDGDA flow if and only if the real parts of all
+eigenvalues of Jare negative, i.e., Re(Λ j)<0for all j.
+Proposition 1 essentially defines a strictly linearly stable equilibrium of the γ−FEDGDA flow. The proof follows a
+strategy similar to (Jin, Netrapalli, and Jordan, 2020).
+With that, let γ-FGDA be the set of strictly linearly stable points of the γ-FEDGDA flow,LocMinimax be the set of
+local minimax points of the federated zero-sum game. Define
+∞ − FGDA := lim sup
+γ→∞γ− FGDA :=∩γ0>0∪γ>γ 0γ− FGDA ,and
+∞ − FGDA := lim inf
+γ→∞γ− FGDA :=∪γ0>0∩γ>γ 0γ− FGDA .
+We now state the theorem that establishes the stable limit points of ∞-FGDA as local minimax points, up to some
+degenerate cases. This theorem ensures that solutions to a minimax problem obtained using FEDGDA in the limit
+γ→ ∞ correspond to equilibrium points.
+Theorem 3. Under Assumption 1, LocMinimax ⊂ ∞ − FGDA ⊂∞ − FGDA ⊂ L ocMinimax ∪ A, where
+A:={(θ, τ)|(θ, τ)is stationary and ∇2
+ττU˜θ(θ, τ)is degenerate }. Moreover, if the hessian ∇2
+ττU˜θ(θ, τ)is smooth,
+thenAhas measure zero in Θ× T ⊂ Rd×Rk.
+Essentially, Theorem 3 states that the limit points of FEDGDA are the local minimax solutions, and thereby the
+equilibrium solution of the federated zero-sum game at the server, up to some degenerate cases with measure 0. The
+proof of Theorem 3 is included in Appendix D.2.
+Theorems 1, 2, and 3 together complete the theoretical foundation of the pipeline in our work. Obtaining the equilibrium
+solution of the federated zero-sum game at the server via the FEDGDA limit points, using Theorem 1 we get E-
+approximate federated equilibrium solutions, wherefrom we obtain clients’ approximate local minimax. Finally,
+applying Theorem 2 we retrieve the consistent estimators for GMM at the clients.
+5 Experiments
+In the experiments, we extend the experimental evaluations of (Bennett, Kallus, and Schnabel, 2019) to a federated
+setting. We discuss this benchmark choice further in Appendix A. More specifically, we evaluate the ability of
+FEDGMM to fit low and high dimensional data to demonstrate that it converges analogous to the centralized algorithm
+DEEPGMM. Similar to (Bennett, Kallus, and Schnabel, 2019), we assess two scenarios in regards to ((X, Y), Z):
+(a)The instrumental and treatment variables ZandXare both low-dimensional. In this case, we use 1-
+dimensional synthetic datasets corresponding to the following functions: (a) Absolute :g0(x) =|x|, (b) Step :
+g0(x) = 1 {x≥0}, (c)Linear :g0(x) =x.
+9Federated IV Analysis via Federated GMM, Geetika et al.
+To generate the synthetic data, similar to (Bennett, Kallus, and Schnabel, 2019; Lewis and Syrgkanis, 2018) we
+apply the following generation process:
+Y=g0(X) +e+δ andX=Z(1)+Z(2)+e+γ (25)
+(Z(1), Z(2))∼Uniform ([−3,3]2) ande∼ N(0,1), γ, δ ∼ N(0,0.1) (26)
+(b)ZandXare low-dimensional or high-dimensional or both. First, ZandXare generated as in (25,26). Then
+for high-dimensional data, we map ZandXto an image using the mapping:
+Image (x) =Dataset (round (min (max(1 .5x+ 5,0),9))),
+where (round (min(max(1 .5x+ 5,0),9))) returns an integer between 0 and 9. Essentially, the function Dataset
+(.)randomly selects an image following its index. We use datasets FEMNIST (Federated Extended MNIST) and
+CIFAR10 (Caldas et al., 2018) for images of size 28×28and3×32×32, respectively. Thus, we have the
+following cases: (a) Dataset z:X=Xlow, Z=Image (Zlow), (b)Dataset x:Z=Zlow, X=Image (Xlow),
+and (c) Dataset x,z:Z=Image (Zlow),X=Image (Xlow), where Dataset takes values FEMNIST and
+CIFAR10 and the superscript lowindicates the values generated using the process in low-dimensional case.
+(Bennett, Kallus, and Schnabel, 2019) used Optimistic Adam ( OA DAM ), a variant of Adam (Kingma, 2015) based
+stochastic gradient descent ascent algorithm (Daskalakis et al., 2018), which applies mirror descent based gradient
+updates. It guarantees the last iteration convergence of a GAN (Goodfellow et al., 2014) training problem. It is known
+that a well-tuned SGDoutperforms Adam in over-parametrized settings (Wilson et al., 2017), closely resembling
+ourFEDGMM implementation, where the size of neural networks often exceeds the data available on the clients.
+Considering that, we explored the comparative performance of GDA andSGDA against OA DAM for a centralized
+DEEPGMM implementation. Note that GDA also aligns with the analytical discussion presented in Section (4). We
+then implemented the federated versions of each of these methods and benchmarked them for solving the federated
+minimax optimization problem for the FEDDEEPGMM algorithm. For high-dimensional scenarios, we implement a
+Actual Causal Effect
+DeepGMM-OAdam
+DeepGMM-SGDA
+FedDeepGMM-SGDA
+DeepGMM-GDA
+FedDeepGMM-GDA
+(a)Absolute
+ (b)Step
+ (c)Linear
+Figure 1: Estimated ˆgcompared to true gin low-dimensional scenarios
+convolutional neural network (CNN) architecture to process images, while for low-dimensional scenarios, we use a
+multilayer perceptron (MLP). Code is available at https://github.com/dcll-iiitd/FederatedDeepGMM .
+Estimations DEEPGMM -
+OAdamDEEPGMM -
+GDAFDEEPGMM -
+GDADEEPGMM -
+SGDAFDEEPGMM -
+SGDA
+Absolute 0.03±0.01 0.013±.01 0.4±0.01 0.009±0.01 0.2±0.00
+Step 0.3±0.00 0.03±0.00 0.04±0.01 0.112±0.00 0.23±0.01
+Linear 0.01±0.00 0.02±0.00 0.01±0.00 0.03±0.00 0.04±0.00
+FEMNIST x 0.50±0.00 1.11±0.01 0.21±0.02 0.40±0.01 0.19±0.01
+FEMNIST x,z0.24±0.00 0.46±0.09 0.19±0.03 0.14±0.02 0.20±0.00
+FEMNIST z 0.10±0.00 0.42±0.01 0.24±0.01 0.11±0.02 0.23±0.01
+CIFAR10 x 0.55±0.30 0.19±0.01 0.25±0.03 0.20±0.08 0.22±0.08
+CIFAR10 x,z 0.40±0.11 0.24±0.00 0.24±0.03 0.19±0.03 0.22±0.02
+CIFAR10 z 0.13±0.03 0.13±0.01 1.70±2.60 0.24±0.01 0.52±0.60
+Table 1: The averaged Test MSE with standard deviation on the low- and high-dimensional scenarios.
+Non-i.i.d. data. We sample the train, test and validation sets similar to (Bennett, Kallus, and Schnabel, 2019). For
+the low-dimensional scenario, we sample n= 20000 points for each train, validation, and test set, while, for the
+10Federated IV Analysis via Federated GMM, Geetika et al.
+high-dimensional scenario, we have n= 20000 for the train set and n= 10000 for the validation and test set. To
+set up a non-i.i.d. distribution of data between clients, samples were divided amongst the clients using a Dirichlet
+distribution DirS(α)(Wang et al., 2019), where αdetermines the degree of heterogeneity across Sclients. We used
+DirS(α) = 0 .3for each train, test, and validation samples.
+Hyperparameters. We perform extensive grid-search to tune the learning rate. For FEDSGDA , we use a minibatch-size
+of 256. To avoid numerical instability, we standardize the observed Yvalues by removing the mean and scaling to unit
+variance. We perform five runs of each experiment and present the mean and standard deviation of the results.
+Observations and Discussion. In figure (1), we first observe that SGDA andGDA algorithms perform at par with
+OA DAM to fit the DEEPGMM estimator. It establishes that hyperparameter tuning is effective. With that, we further
+observe that the federated algorithms efficiently fit the estimated function to the true data-generating process competitive
+to the centralized algorithms even though the data is decentralized and non-i.i.d.. Thus, it shows that the federated
+algorithm converges effectively. In Table 1 we present the test mean squared error (MSE) values. The MSE values
+indicate that the federated implementation achieves competitive convergence to their centralized counterpart. These
+experiments establish the efficacy of our method.
+An Open Problem
+In this work, we characterized the equilibrium solutions of federated zero-sum games in consideration of local minimax
+solutions for non-convex non-concave minimax optimization problems. Regardless of the analytical assumptions over
+the objective, the mixed strategy solutions for zero-sum games exist. However, unlike the pure strategy solutions,
+where the standard heterogeneity considerations over gradients and Hessians across clients, translates a local minimax
+solution for the federated objective to approximate local solutions for the clients, it is not immediate how a mixed
+strategy solution as a probability measure can be translated to that for clients. It leaves an interesting open problem to
+characterize the mixed startegy solutions for federated zero-sum games.
+References
+Almodóvar, Alejandro, Juan Parras, and Santiago Zazo (2024). “Propensity Weighted federated learning for treatment
+effect estimation in distributed imbalanced environments”. In: Computers in Biology and Medicine 178, p. 108779
+(cit. on p. 3).
+Angrist, Joshua D and Alan B Krueger (2001). “Instrumental variables and the search for identification: From supply
+and demand to natural experiments”. In: Journal of Economic perspectives 15.4, pp. 69–85 (cit. on p. 2).
+Angrist, Joshua D and Jörn-Steffen Pischke (2009). Mostly harmless econometrics: An empiricist’s companion . Princeton
+university press (cit. on p. 2).
+Antunes, Rodolfo Stoffel et al. (2022). “Federated learning for healthcare: Systematic review and architecture proposal”.
+In:ACM Transactions on Intelligent Systems and Technology (TIST) 13.4, pp. 1–23 (cit. on p. 1).
+Bennett, Andrew, Nathan Kallus, and Tobias Schnabel (2019). “Deep generalized method of moments for instrumental
+variable analysis”. In: Advances in neural information processing systems 32 (cit. on pp. 2–6, 8–10, 16, 22).
+Byrd, David and Antigoni Polychroniadou (2020). “Differentially private secure multi-party computation for federated
+learning in financial applications”. In: Proceedings of the First ACM International Conference on AI in Finance ,
+pp. 1–9 (cit. on p. 1).
+Caldas, Sebastian et al. (2018). “Leaf: A benchmark for federated settings”. In: arXiv preprint arXiv:1812.01097 (cit. on
+p. 10).
+Charles, Zachary and Dimitris Papailiopoulos (2018). “Stability and generalization of learning algorithms that converge
+to global optima”. In: International conference on machine learning . PMLR, pp. 745–754 (cit. on p. 6).
+Chatterjee, Bapi, Vyacheslav Kungurtsev, and Dan Alistarh (2024). “Federated SGD with Local Asynchrony”. In: 2024
+IEEE 44th International Conference on Distributed Computing Systems (ICDCS) . IEEE, pp. 857–868 (cit. on p. 3).
+Daskalakis, Constantinos et al. (2018). “Training GANs with Optimism”. In: International Conference on Learning
+Representations (cit. on p. 10).
+11Federated IV Analysis via Federated GMM, Geetika et al.
+Dayan, Ittai et al. (2021). “Federated learning for predicting clinical outcomes in patients with COVID-19”. In: Nature
+medicine 27.10, pp. 1735–1743 (cit. on pp. 1, 2).
+Deng, Yuyang and Mehrdad Mahdavi (2021). “Local stochastic gradient descent ascent: Convergence analysis and
+communication efficiency”. In: International Conference on Artificial Intelligence and Statistics . PMLR, pp. 1387–
+1395 (cit. on pp. 6, 17).
+Gecer, Melike and Benoit Garbinato (2024). “Federated Learning for Mobility Applications”. In: ACM Computing
+Surveys 56.5, pp. 1–28 (cit. on p. 1).
+Goodfellow, Ian et al. (2014). “Generative adversarial nets”. In: Advances in neural information processing systems 27
+(cit. on p. 10).
+Hansen, Lars Peter (1982). “Large sample properties of generalized method of moments estimators”. In: Econometrica:
+Journal of the econometric society , pp. 1029–1054 (cit. on pp. 2, 4).
+Hartford, Jason et al. (2017). “Deep IV: A flexible approach for counterfactual prediction”. In: International Conference
+on Machine Learning . PMLR, pp. 1414–1423 (cit. on p. 2).
+Hill, Jennifer L (2011). “Bayesian nonparametric modeling for causal inference”. In: Journal of Computational and
+Graphical Statistics 20.1, pp. 217–240 (cit. on p. 16).
+Horn, Roger A. and Charles R. Johnson (2012). Matrix Analysis . 2nd ed. Cambridge University Press (cit. on p. 20).
+Imai, Kosuke and Michael Lingzhi Li (2023). “Experimental evaluation of individualized treatment rules”. In: Journal
+of the American Statistical Association 118.541, pp. 242–256 (cit. on p. 2).
+Izcovich, Ariel et al. (2020). “Prognostic factors for severity and mortality in patients infected with COVID-19: A
+systematic review”. In: PloS one 15.11, e0241955 (cit. on p. 1).
+Jin, Chi, Praneeth Netrapalli, and Michael Jordan (July 2020). “What is Local Optimality in Nonconvex-Nonconcave
+Minimax Optimization?” In: Proceedings of the 37th International Conference on Machine Learning . Ed. by Hal
+Daumé III and Aarti Singh. V ol. 119. Proceedings of Machine Learning Research. PMLR, pp. 4880–4889. URL:
+https://proceedings.mlr.press/v119/jin20e.html (cit. on pp. 6, 7, 9, 28).
+Kairouz, Peter et al. (2021). “Advances and open problems in federated learning”. In: Foundations and trends ®in
+machine learning 14.1–2, pp. 1–210 (cit. on p. 1).
+Kallus, Nathan (2020a). “Deepmatch: Balancing deep covariate representations for causal inference using adversarial
+training”. In: International Conference on Machine Learning . PMLR, pp. 5067–5077 (cit. on p. 2).
+– (2020b). “Generalized optimal matching methods for causal inference”. In: Journal of Machine Learning Research
+21.62, pp. 1–54 (cit. on p. 2).
+Karimireddy, Sai Praneeth et al. (2020). “Scaffold: Stochastic controlled averaging for federated learning”. In: Interna-
+tional conference on machine learning . PMLR, pp. 5132–5143 (cit. on p. 3).
+Kingma, Diederik P (2015). “Adam: A method for stochastic optimization”. In: ICLR (cit. on p. 10).
+Kingma, Diederik P, Max Welling, et al. (2019). “An introduction to variational autoencoders”. In: Foundations and
+Trends® in Machine Learning 12.4, pp. 307–392 (cit. on p. 3).
+Kohavi, Ron et al. (2013). “Online controlled experiments at large scale”. In: Proceedings of the 19th ACM SIGKDD
+international conference on Knowledge discovery and data mining , pp. 1168–1176 (cit. on p. 2).
+Latchman, David S (1993). “Transcription factors: an overview.” In: International journal of experimental pathology
+74.5, p. 417 (cit. on p. 2).
+Lewis, Greg and Vasilis Syrgkanis (2018). Adversarial Generalized Method of Moments . arXiv: 1803 . 07164
+[econ.EM] .URL:https://arxiv.org/abs/1803.07164 (cit. on pp. 2, 10).
+12Federated IV Analysis via Federated GMM, Geetika et al.
+Li, Tian et al. (2020). “Federated optimization in heterogeneous networks”. In: Proceedings of Machine learning and
+systems 2, pp. 429–450 (cit. on p. 3).
+Liang, Yafen et al. (2023). “Interplay of hypoxia-inducible factors and oxygen therapy in cardiovascular medicine”. In:
+Nature Reviews Cardiology 20.11, pp. 723–737 (cit. on p. 2).
+Liu, Chaoyue, Libin Zhu, and Mikhail Belkin (2022). “Loss landscapes and optimization in over-parameterized non-
+linear systems and neural networks”. In: Applied and Computational Harmonic Analysis 59, pp. 85–116 (cit. on
+p. 6).
+Long, Guodong et al. (2020). “Federated learning for open banking”. In: Federated learning: privacy and incentive .
+Springer, pp. 240–254 (cit. on p. 1).
+Louizos, Christos et al. (2017). “Causal effect inference with deep latent-variable models”. In: Advances in neural
+information processing systems 30 (cit. on p. 16).
+McMahan, Brendan et al. (2017). “Communication-efficient learning of deep networks from decentralized data”. In:
+Artificial intelligence and statistics . PMLR, pp. 1273–1282 (cit. on p. 1).
+Nguyen, Dinh C et al. (2022). “Federated learning for smart healthcare: A survey”. In: ACM Computing Surveys (Csur)
+55.3, pp. 1–37 (cit. on p. 1).
+Noble, Maxence, Aurélien Bellet, and Aymeric Dieuleveut (2022). “Differentially private federated learning on
+heterogeneous data”. In: International Conference on Artificial Intelligence and Statistics . PMLR, pp. 10110–10145
+(cit. on p. 3).
+Oh, Wonsuk and Girish N Nadkarni (2023). “Federated learning in health care using structured medical data”. In:
+Advances in kidney disease and health 30.1, pp. 4–16 (cit. on p. 1).
+Oldenhof, Martijn et al. (2023). “Industry-scale orchestrated federated learning for drug discovery”. In: Proceedings of
+the aaai conference on artificial intelligence . V ol. 37. 13, pp. 15576–15584 (cit. on pp. 1, 2).
+Pearl, Judea (2009). “Causal inference in statistics: An overview”. In: (cit. on p. 3).
+Reddi, Sashank et al. (2020). “Adaptive federated optimization”. In: arXiv preprint arXiv:2003.00295 (cit. on p. 3).
+Reiersøl, Olav (1945). “Confluence analysis by means of instrumental sets of variables”. PhD thesis. Almqvist &
+Wiksell (cit. on p. 2).
+Russell, Clark D, Nazir I Lone, and J Kenneth Baillie (2023). “Comorbidities, multimorbidity and COVID-19”. In:
+Nature medicine 29.2, pp. 334–343 (cit. on p. 1).
+Shalit, Uri, Fredrik D Johansson, and David Sontag (2017). “Estimating individual treatment effect: generalization
+bounds and algorithms”. In: International conference on machine learning . PMLR, pp. 3076–3085 (cit. on pp. 2, 16).
+Sharma, Pranay et al. (2022). “Federated minimax optimization: Improved convergence analyses and algorithms”. In:
+International Conference on Machine Learning . PMLR, pp. 19683–19730 (cit. on pp. 2, 3, 6, 17).
+Shen, Wei et al. (2024). “Stochastic Smoothed Gradient Descent Ascent for Federated Minimax Optimization”. In:
+International Conference on Artificial Intelligence and Statistics . PMLR, pp. 3988–3996 (cit. on pp. 3, 6).
+Steif, Alison Etheridge et al. (2014). “Nobel Prize in Economics”. In: IMS Bulletin 43.1 (cit. on p. 2).
+T Dinh, Canh, Nguyen Tran, and Josh Nguyen (2020). “Personalized federated learning with moreau envelopes”. In:
+Advances in neural information processing systems 33, pp. 21394–21405 (cit. on p. 3).
+V o, Thanh Vinh et al. (2022a). “An adaptive kernel approach to federated learning of heterogeneous causal effects”. In:
+Advances in Neural Information Processing Systems 35, pp. 24459–24473 (cit. on pp. 3, 16).
+V o, Thanh Vinh et al. (2022b). “Bayesian federated estimation of causal effects from observational data”. In: Uncertainty
+in Artificial Intelligence . PMLR, pp. 2024–2034 (cit. on pp. 3, 16).
+13Federated IV Analysis via Federated GMM, Geetika et al.
+Wang, Hongyi et al. (2019). “Federated Learning with Matched Averaging”. In: International Conference on Learning
+Representations (cit. on p. 11).
+Wang, Jingzhou, Toshiro Sato, and Atsushi Sakuraba (2021). “Worldwide association of lifestyle-related factors and
+COVID-19 mortality”. In: Annals of medicine 53.1, pp. 1531–1536 (cit. on p. 1).
+Wilson, Ashia C et al. (2017). “The marginal value of adaptive gradient methods in machine learning”. In: Advances in
+neural information processing systems 30 (cit. on p. 10).
+Wooldridge, Jeffrey M (2001). “Applications of generalized method of moments estimation”. In: Journal of Economic
+perspectives 15.4, pp. 87–100 (cit. on pp. 2, 3).
+Wright, Philip Green (1928). The tariff on animal and vegetable oils . 26. Macmillan (cit. on p. 2).
+Wu, Xidong et al. (2024). “Solving a class of non-convex minimax optimization in federated learning”. In: Advances in
+Neural Information Processing Systems 36 (cit. on pp. 2, 3, 6).
+Wu, Yue et al. (2023). “Personalized federated learning under mixture of distributions”. In: International Conference on
+Machine Learning . PMLR, pp. 37860–37879 (cit. on p. 3).
+Xiong, Ruoxuan et al. (2023). “Federated causal inference in heterogeneous observational data”. In: Statistics in
+Medicine 42.24, pp. 4418–4439 (cit. on p. 3).
+Ye, Mang et al. (2023). “Heterogeneous federated learning: State-of-the-art and research challenges”. In: ACM
+Computing Surveys 56.3, pp. 1–44 (cit. on p. 1).
+Zedek, Mishael (1965). “Continuity and Location of Zeros of Linear Combinations of Polynomials”. In: Proceedings of
+the American Mathematical Society 16.1, pp. 78–84. ISSN : 00029939, 10886826. URL:http://www.jstor.org/
+stable/2034005 (visited on 02/10/2025) (cit. on p. 28).
+Zhang, Weijia, Lin Liu, and Jiuyong Li (2021). “Treatment effect estimation with disentangled latent factors”. In:
+Proceedings of the AAAI Conference on Artificial Intelligence . V ol. 35. 12, pp. 10923–10930 (cit. on pp. 3, 16).
+Zheng, Zhaohua et al. (2022). “Applications of federated learning in smart cities: recent advances, taxonomy, and open
+challenges”. In: Connection Science 34.1, pp. 1–28 (cit. on p. 1).
+Zhu, Miaoxi et al. (2024). “Stability and generalization of the decentralized stochastic gradient descent ascent algorithm”.
+In:Advances in Neural Information Processing Systems 36 (cit. on p. 3).
+14Federated IV Analysis via Federated GMM, Geetika et al.
+APPENDIX
+A The Experimental Benchmark Design 16
+B Federated Gradient Descent Ascent Algorithm Description 16
+C Proofs 17
+C.1 Proof of Lemma 2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+C.2 Proof of Theorem 1 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+C.3 Consistency . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+C.3.1 Assumptions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+C.3.2 Proof of Theorem 2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+D Limit Points of F EDGDA 25
+D.1 F EDGDA Flow . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25
+D.2 Proof of Theorem 3 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27
+15Federated IV Analysis via Federated GMM, Geetika et al.
+A The Experimental Benchmark Design
+It is standard in this area to perform experimental analysis on synthetic datasets for unavailability of ground truth for
+causal inference; for example see Section 4.1.1 of V o et al. (2022b). Nonetheless, an experimental comparison of our
+work with recent works on federated methods for causal effect estimations is not direct. More specifically, see the
+following:
+(i)CAUSAL RFF (Vo et al., 2022a) and FEDCI(Vo et al., 2022b). The aim of CAUSAL RFF (V o et al., 2022a) is to
+estimate the conditional average treatment effect (CATE) and average treatment effect (ATE), whereas FEDCI(V o
+et al., 2022b) aims to estimate individual treatment effect (ITE) and ATE. For this, (V o et al., 2022a) consider a
+setting of Y,W, andXto be random variables denoting the outcome, treatment, and proxy variable, respectively.
+Along with that, they also consider a confounding variable Z. However, their causal dependency builds on the
+dependence of each of Y,W, and XonZbesides dependency of YonW. Consequently, to compute CATE
+and ATE, they need to estimate the conditional probabilities p(wi|xi),p(yi|xi, wi),p(zi|xi, yi, wi),p(yi|wi, zi),
+where the superscript irepresents a client. Their experiments compare the estimates of CATE and ATE with the
+Bayesian baselines (Hill, 2011), (Shalit, Johansson, and Sontag, 2017), (Louizos et al., 2017), etc. in a centralized
+setting without any consideration of data decentralization or heterogeneity native to federated learning. Further,
+they compare against the same baselines in a one-shot federated setting, where at the end of training on separate
+data sources independently, the predicted treatment effects are averaged. Similar is the experimental evaluation
+of (V o et al., 2022b).
+By contrast, the setting of IV analysis as in our work does not consider dependency of the outcome variable Yon
+the confounder Z, though the treatment variable Xcould be endogenous and depend on Z. For us, computing
+the treatment effects and thereby comparing it against these works is not direct. Furthermore, it is unclear,
+if the approach of (V o et al., 2022a) and (V o et al., 2022b), where the predicted inference over a number of
+datasets is averaged as the final result, would be comparable to our approach where the problem is solved using a
+federated maximin optimization with multiple synchronization rounds among the clients. For us, the federated
+optimization subsumes the experimental of comparing the average predicted values after independent training
+with the predicted value over the entire data. This is the reason that our centralized counterpart i.e. DEEPGMM
+(Bennett, Kallus, and Schnabel, 2019), do not experimentally compare against the baselines of (V o et al., 2022a)
+and (V o et al., 2022b).
+In summary, for us the experimental benchmarks were guided by showing the efficient fit of the GMM estimator
+in a federated setting.
+(ii)TEDVAE (Zhang, Liu, and Li, 2021). As mentioned above, their aim was to showcase the advantage of a
+weighted averaging over the vanilla averaging of FedAvg. By contrast, our experiments tried to showcase that
+even in a federated setting, the maximin optimization converges analogous to the centralized counterpart.
+B Federated Gradient Descent Ascent Algorithm Description
+Algorithm 1 FEDGDA running on a federated learning server to solve the minimax problem (20)
+Server Input : initial global estimate θ1, τ1; constant local learning rate α1, α2; total Nclients
+Output : global model states θT+1, τT+1
+1:forsynchronization round t= 1, . . . , T do
+2: server sends θt, τtto all clients
+3: foreachi∈[N]in parallel do
+4: θi
+t,1←θt,τi
+t,1←τt
+5: forr= 1,2, . . . , R do
+6: θi
+t,r+1=θi
+t,r−α1∇θfi(θi
+t,r, τi
+t,r)
+7: τi
+t,r+1=τi
+t,r+α2∇τfi(θi
+t,r, τi
+t,r)
+8: end for
+9: (∆θi
+t,∆τt)←(θi
+t,R+1−θt, τi
+t,R+1−τt)
+10: end for
+11: (∆θt,∆τt)←1
+NP
+i∈[N](∆θi
+t,∆τi
+t)
+12: θt+1←(θt+ ∆θt),τt+1←(τt+ ∆τt)
+13:end for
+14:return θT+1;τT+1
+16Federated IV Analysis via Federated GMM, Geetika et al.
+We adapt the proof of Theorem 1 in (Sharma et al., 2022) for the SGDA algorithm proposed in (Deng and Mahdavi,
+2021) for the F EDGDA algorithm 1 for smooth non-convex- PL problems.
+Assumption 5 (Polyak Łojaisiewicz (PL) condition in τ).The function U˜θsatisfyies µ−PLcondition in τ,µ >0, if
+for any fixed θ,arg maxτ′U˜θ(θ, τ′)̸=ϕand∥∇τU˜θ(θ, τ)∥2≥2µ 
+max τ′U˜θ(θ, τ′)−U˜θ(θ, τ)
+.
+Theorem 4. Let the local loss functions Ui
+˜θfor all i∈ {1,2, . . . , N }satisfy assumption 2 and 3. The federated
+objective function satisfies assumption 5. Suppose α2≤1
+8LR,α1
+α2≤1
+8κ2,where κ=L
+µis the condition number. Let
+¯θT+1is drawn uniformly at random from {θt}T+1
+t=1, then the following holds:
+∥∇˜Φ(¯θT+1)∥2≤ O
+κ2∆˜Φ
+α2R(T+ 1)
++O 
+κ2(R−1)2[α2
+2ζ2
+τ+α2
+1ζ2
+θ]
+,
+where ∇˜Φ(.) := max τU˜θ(., τ)is the envelope function, ∆˜Φ:=˜Φ(θ0)−minθ˜Φ(θ),andζθ:=1
+NPN
+i=1ζi
+θ, ζτ:=
+1
+NPN
+i=1ζi
+τ. Using α1=O
+1
+κ2q
+N
+R(T+1)
+,α2=Oq
+N
+R(T+1)
+,∥∇˜Φ(¯θT+1)∥2can be bounded as
+O 
+κ2∆˜Φp
+NR(T+ 1)+κ2(R−1)2NR(ζ2
+θ+ζ2
+τ)
+R(T+ 1)!
+.
+Although the original assumption uses the supremum of average squared deviations, say ζ′
+θandζ′
+τ, we use per-client
+dissimilarity bounds ζi
+θ, ζi
+τand upper bound their quantity as ζ′
+θ2≤1
+NPN
+i=1(ζi
+θ)2:=ζθ2andζ′
+τ2≤1
+NPN
+i=1(ζi
+τ)2:=
+ζτ2. Since there is no stochasticity, we used the bounded variance σ= 0. For details, refer to proof of Theorem 1 in
+(Sharma et al., 2022).
+C Proofs
+C.1 Proof of Lemma 2
+Lemma 4 (Restatement of Lemma 2) .LetF=span{fi
+j|i∈[N], j∈[m]}. An equivalent objective function for the
+federated moment estimation optimization problem (18) is given by:
+∥ψN(f;θ)∥2
+˜θ= sup
+fi∈F
+∀i∈[N]1
+NNX
+i=1
+ψni(fi;θ)−1
+4C˜θ(fi;fi)
+,where (27)
+ψni(fi;θ) :=1
+niniX
+k=1fi(Zi
+k)(Yi
+k−gi(Xi
+k;θ)),andC˜θ(fi, fi) :=1
+niniX
+k=1(fi(Zi
+k))2(Yi
+k−gi(Xi
+k;˜θ))2.
+Proof. Letψ= (1
+NPN
+i=1ψni(fi
+1;θ),1
+NPN
+i=1ψni(fi
+2;θ), . . . ,1
+NPN
+i=1ψni(fi
+m;θ)).
+We know that ∥v∥2=v⊤C−1
+˜θvand the associated dual norm is obtained as ∥v∥∗= sup∥v∥≤1v⊤v=v⊤C˜θv.
+Using the definition of the dual norm,
+∥ψ∥= sup
+∥v∥∗≤1v⊤ψ
+∥ψ∥2= sup
+∥v∥∗≤∥ψ∥v⊤ψ
+∥ψ∥2= sup
+v⊤C˜θv≤∥ψ∥2v⊤ψ. (28)
+We now find the equivalent dual optimization problem for (28).
+The Lagrangian of the constrained maximization problem (28) is given as
+L(v, λ) =v⊤ψ+λ(v⊤C˜θv− ∥ψ∥2),where λ≤0.
+To maximize L(v, λ)w.r.t. v, put∂L
+∂v=ψ+ 2λC˜θv= 0to obtain v=−1
+2λC−1
+˜θψ.
+17Federated IV Analysis via Federated GMM, Geetika et al.
+When ∥ψ∥>0,v= 0satisfies the Slater’s condition as a strictly feasible interior point of the constraint v⊤C˜θv−
+∥ψ∥2≤0. Thus, strong duality holds. Substituting v=−1
+2λC−1
+˜θψin the Lagrangian gives
+L∗(λ) =−1
+2λψ⊤C−1
+˜θψ+1
+4λψ⊤C−1
+˜θψ−λ∥ψ∥2
+=−∥ψ∥2
+4λ−λ∥ψ∥2.
+Hence, the dual becomes ∥ψ∥2=infλ<0{L∗(λ)}. Thus, the equivalent dual optimization problem for (28) is given as
+∥ψ∥2= inf
+λ<0
+−∥ψ∥2
+4λ−λ∥ψ∥2
+. (29)
+Putting∂L
+∂λ=∥ψ∥2
+4λ2− ∥ψ∥2= 0gives λ=−1
+2.Thus, due to strong duality ∥ψ∥2= supvL(v,−1
+2) = supvv⊤ψ−
+1
+2(v⊤C˜θv− ∥ψ∥2).
+Rewriting it1
+2∥ψ∥2= supvv⊤ψ−1
+2v⊤C˜θvand substituting u= 2v
+∥ψ∥2= sup
+uu⊤ψ−1
+4u⊤C˜θu.
+Using change of variables u→v
+∥ψ∥2= sup
+vv⊤ψ−1
+4v⊤C˜θv.
+Now, we want to find a function form for the optimization problem mentioned above.
+Consider a finite-dimensional functional spaces Fi=span{fi
+1, fi
+2, . . . , fi
+m}for each client i. Hence, for fi∈ Fi
+fi=mX
+j=1vjfi
+j.
+Since all the clients share the same neural network architecture, we define a global functional space Fas
+F=span{fi
+j|i∈[N], j∈[m]}.
+Therefore, vcorresponds to fisuch that
+fi=NX
+c=1mX
+j=1vi
+jfc
+j,where vi
+j=vjifc=i
+0 ifc̸=i
+Hence,
+v⊤ψ=1
+NNX
+i=1mX
+j=1vjψni(fi
+j;θ)
+=1
+NNX
+i=11
+niniX
+k=1fi(Zi
+k)(Yi
+k−gi(Xi
+k;θ)).
+Similarly,
+v⊤C˜θv=mX
+p=1mX
+q=1vpvq[C˜θ]pq
+=mX
+p=1mX
+q=1vpvq1
+NNX
+i=11
+niniX
+k=1fi
+p(Zi
+k)fi
+q(Zi
+k)(Yi
+k−gi(Xi
+k;˜θ))
+=1
+NNX
+i=11
+niniX
+k=1mX
+p=1vpfi
+p(Zi
+k)mX
+q=1vqfi
+q(Zi
+k)(Yi
+k−gi(Xi
+k;˜θ))2
+=1
+NNX
+i=11
+niniX
+k=1(fi(Zi
+k))2(Yi
+k−gi(Xi
+k;˜θ))2
+=1
+NNX
+i=1C˜θ(fi, fi).
+18Federated IV Analysis via Federated GMM, Geetika et al.
+Thus, applying the Riesz Representation theorem using the representations v⊤ψ=1
+NPN
+i=1ψni(fi;θ)andv⊤C˜θv=
+1
+NPN
+i=1C˜θ(fi, fi), we can write the objective in functional form as
+∥ψ∥2= sup
+fi∈F
+∀i∈[N]1
+NNX
+i=1
+ψni(fi;θ)−1
+4C˜θ(fi, fi)
+.
+This gives us the desired result.
+C.2 Proof of Theorem 1
+Theorem 5 (Restatement of Theorem 1) .Under assumptions 1, 2, 3 and 4, a minimax solution (ˆθ,ˆτ)of feder-
+ated optimization problem (20) that satisfies the equilibrium condition as in definition 1: U˜θ(ˆθ, τ)≤U˜θ(ˆθ,ˆτ)≤
+max τ′:∥τ′−ˆτ∥≤h(δ)U˜θ(θ, τ′),is anE-approximate federated equilibrium solution as defined in 3, where the approx-
+imation error εifor each client i∈[N]lies in: max{ζi
+θ, ζi
+τ} ≤ εi≤min{α−ρi
+τ, β−Bi}forρi
+τ< α and
+Bi> β, such that α:=λmax
+∇2
+ττU˜θ(ˆθ,ˆτ),β:=λminh
+∇2
+θθU˜θ− ∇2
+θτU˜θ 
+∇2
+ττU˜θ−1∇2
+τθU˜θi
+(ˆθ,ˆτ)
+and
+Bi:=ρi
+θ+Lρi
+θτ1
+|λmax(∇2ττUi
+˜θ)|+Lρi
+τθ1
+|λmax(∇2ττUi
+˜θ)|+L2ρi
+τ1
+|λmax(∇2ττUi
+˜θ)·λmax(∇2ττU˜θ)|.
+Proof. The pure-strategy Stackelberg equilibrium for the federated objective is:
+U˜θ(ˆθ, τ)≤U˜θ(ˆθ,ˆτ)≤ max
+τ′:∥τ′−τ∗∥≤h(δ)U˜θ(θ, τ′), (30)
+We want to show that the ϵi- approximate equilibrium for each client’s objective Ui
+˜θalso hold individually.
+The first-order necessary condition for (30) to hold is ∇θU˜θ(ˆθ,ˆτ) = 0 and∇τU˜θ(ˆθ,ˆτ) = 0 . Thus,∇θU˜θ(ˆθ,ˆτ)2
+= 0.
+Consider
+∇θU˜θ(ˆθ,ˆτ)2
+=∇θU˜θ(ˆθ,ˆτ)− ∇ θUi
+˜θ(ˆθ,ˆτ) +∇θUi
+˜θ(ˆθ,ˆτ)2
+=∇θU˜θ(ˆθ,ˆτ)− ∇ θUi
+˜θ(ˆθ,ˆτ)2
++∇θUi
+˜θ(ˆθ,ˆτ)2
++ 2
+∇θU˜θ(ˆθ,ˆτ)− ∇ θUi
+˜θ(ˆθ,ˆτ)⊤
+∇θUi
+˜θ(ˆθ,ˆτ)
+Rearranging
+2
+∇θUi
+˜θ(ˆθ,ˆτ)− ∇ θU˜θ(ˆθ,ˆτ)⊤
+∇θUi
+˜θ(ˆθ,ˆτ)
+−∇θUi
+˜θ(ˆθ,ˆτ)2
+=∇θU˜θ(ˆθ,ˆτ)− ∇ θUi
+˜θ(ˆθ,ˆτ)2
+∇θUi
+˜θ(ˆθ,ˆτ)2
+−2
+∇θU˜θ(ˆθ,ˆτ)⊤
+∇θUi
+˜θ(ˆθ,ˆτ)
+=∇θU˜θ(ˆθ,ˆτ)− ∇ θUi
+˜θ(ˆθ,ˆτ)2
+Using gradient heterogeneity assumption (3) on R.H.S.
+∇θU˜θ(ˆθ,ˆτ)− ∇ θUi
+˜θ(ˆθ,ˆτ)2
+≤(ζi
+θ)2
+Thus, we obtain∇θUi
+˜θ(ˆθ,ˆτ)≤ζi
+θ.Similarly,∇τUi
+˜θ(ˆθ,ˆτ)≤ζi
+τ.
+In the special case, when ζi
+θ= 0andζi
+τ= 0, thus we will have∇θUi
+˜θ(ˆθ,ˆτ)2
+=∇τUi
+˜θ(ˆθ,ˆτ)2
+= 0for all i∈[N],
+which gives ∇θUi
+˜θ(ˆθ,ˆτ) =∇τUi
+˜θ(ˆθ,ˆτ) = 0 for all clients i.
+Next, we prove that each client satisfies the second-order necessary condition approximately. Since (ˆθ,ˆτ)satisfy the
+equilibrium condition (30), the second-order necessary condition holds for the global function U˜θ, i.e.∇2
+ττU˜θ(ˆθ,ˆτ)⪯0.
+We now prove that ∇2
+ττUi
+˜θ(ˆθ,ˆτ)⪯0.
+Using assumption 1, the hessian is symmetric. Thus, ∇2
+ττU˜θ(ˆθ,ˆτ)⪯0implies λmax(∇2
+ττU˜θ(ˆθ,ˆτ))≤0, where λmax
+is the largest eigenvalue of the hessian. Suppose, λmax(∇2
+ττU˜θ(ˆθ,ˆτ)) =−α, for some α≥0.
+19Federated IV Analysis via Federated GMM, Geetika et al.
+We can write ∇2
+ττUi
+˜θ(ˆθ,ˆτ) =∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ) +∇2
+ττU˜θ(ˆθ,ˆτ).
+Using a corollary of Weyl’s theorem (Horn and Johnson, 2012) for real symmetric matrices AandB,λmax(A+B)≤
+λmax(A) +λmax(B). Hence,
+λmax(∇2
+ττUi
+˜θ(ˆθ,ˆτ))≤λmax(∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ)) +λmax(∇2
+ττU˜θ(ˆθ,ˆτ)).
+Thus, λmax(∇2
+ττUi
+˜θ(ˆθ,ˆτ))≤λmax(∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ))−α.
+Since the spectral norm of a real symmetric matrix A is given as ∥A∥σ= max {|λmax(A)|,|λmin(A)|}.
+Under hessian heterogeneity assumption 4
+∥∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ)∥σ= maxλmax(∇2
+ττUi
+˜θ(θ, τ)− ∇2
+ττU˜θ(θ, τ)),
+λmin(∇2
+ττUi
+˜θ(θ, τ)− ∇2
+ττU˜θ(θ, τ))	
+≤ρi
+τ.
+By definition of the spectral norm ∥∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ)∥σ=λmax(∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ)),
+λmax(∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ))≤maxnλmax(∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ)),
+λmin(∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ))o
+≤ρi
+τ.
+Thus, λmax(∇2
+ττUi
+˜θ(ˆθ,ˆτ))≤λmax(∇2
+ττUi
+˜θ(ˆθ,ˆτ)− ∇2
+ττU˜θ(ˆθ,ˆτ))−α≤ρi
+τ−α, where ρi
+τ≥0. Hence,
+∇2
+ττUi
+˜θ(ˆθ,ˆτ)⪯(ρi
+τ−α)I.
+When ρi
+τ≤α, then∇2
+ττUi
+˜θ(ˆθ,ˆτ)⪯0.
+Now, since (ˆθ,ˆτ)satisfy the equilibrium condition (30), thus ∇2
+ττU˜θ(ˆθ,ˆτ)≺0and the Schur complement of
+∇2
+ττU˜θ(ˆθ,ˆτ)is positive semi-definite. Now when ρi
+τ< α , it follows from above that ∇2
+ττUi
+˜θ(ˆθ,ˆτ)≺0, hence
+∇2
+ττUi
+˜θ(ˆθ,ˆτ)−1
+exists. Now, we need to show that Schur complement of ∇2
+ττUi
+˜θ(ˆθ,ˆτ)is positive semi-definite.
+Since, S(ˆθ,ˆτ) :=h
+∇2
+θθU˜θ− ∇2
+θτU˜θ 
+∇2
+ττU˜θ−1∇2
+τθU˜θi
+(ˆθ,ˆτ)≻0.
+Define Si:=
+∇2
+θθUi
+˜θ− ∇2
+θτUi
+˜θ
+∇2
+ττUi
+˜θ−1
+∇2
+τθUi
+˜θ
+. We aim to prove λmin(Si)≥0to show Siis positive
+semidefinite (PSD).
+Analogous to the above part, using corollary to Weyl’s theorem, we have
+λmin(Si−S) +λmin(S)≤λmin(Si).
+Letλmin(S) =β, where β≥0. Moreover, ∥Si−S∥σ= maxλmax(Si−S),λmin(Si−S)	
+, thus λmin(Si−
+S)≥ −∥ Si−S∥σ.
+Thus, we have
+−∥(Si−S)∥σ+β≤λmin(Si).
+We can write Si−Sas
+Si−S= (∇2
+θθUi
+˜θ− ∇2
+θθU˜θ)−h
+(∇2
+θτUi
+˜θ− ∇2
+θτU˜θ)(∇2
+ττUi
+˜θ)−1∇2
+τθUi
+˜θ
++∇2
+θτU˜θ(∇2
+ττUi
+˜θ)−1(∇2
+τθUi
+˜θ− ∇2
+τθU˜θ) +∇2
+θτU˜θ
+(∇2
+ττUi
+˜θ)−1−(∇2
+ττU˜θ)−1
+∇2
+τθU˜θi
+.
+20Federated IV Analysis via Federated GMM, Geetika et al.
+Hence,
+∥Si−S∥σ≤ ∥∇2
+θθUi
+˜θ− ∇2
+θθU˜θ∥σ+∥(∇2
+θτUi
+˜θ− ∇2
+θτU˜θ)(∇2
+ττUi
+˜θ)−1∇2
+τθUi
+˜θ∥σ| {z }
+T1
++∥∇2
+θτU˜θ(∇2
+ττUi
+˜θ)−1(∇2
+τθUi
+˜θ− ∇2
+τθU˜θ)∥σ| {z }
+T2
++∥∇2
+θτU˜θ
+(∇2
+ττUi
+˜θ)−1−(∇2
+ττU˜θ)−1
+∇2
+τθU˜θ∥σ
+| {z }
+T3.
+Note that the eigenvalue of (∇2
+ττUi
+˜θ)−1isλ
+(∇2
+ττUi
+˜θ)−1
+=1
+λ(∇2ττUi
+˜θ), hence ∥(∇2
+ττUi
+˜θ)−1∥σ=1
+|λmax(∇2ττUi
+˜θ)|as
+∇2
+ττUi
+˜θis negative definite. By Assumption 2, each client’s function UiisL-Lipschitz thus ∥∇2Ui
+˜θ∥σ≤L. Since the
+Hessian ∇2Ui
+˜θis a block matrix of the form:
+∇2Ui
+˜θ=∇2
+θθUi
+˜θ∇2
+θτUi
+˜θ
+∇2
+τθUi
+˜θ∇2
+ττUi
+˜θ
+,
+The norm of Hessian is at least the norm of one of its components
+∥∇2
+θθUi
+˜θ∥σ≤L,∥∇2
+θτUi
+˜θ∥σ≤L,∥∇2
+τθUi
+˜θ∥σ≤L,∥∇2
+ττUi
+˜θ∥σ≤L.
+Thus, each Hessian block is individually bounded by L. Additionally, UisL-Lipschitz too. Using Assumption 4,
+bounding T1
+T1=∥(∇2
+θτUi
+˜θ− ∇2
+θτU˜θ)(∇2
+ττUi
+˜θ)−1∇2
+τθUi
+˜θ∥σ
+≤ ∥(∇2
+θτUi
+˜θ− ∇2
+θτU˜θ)∥σ· ∥(∇2
+ττUi
+˜θ)−1∥σ· ∥∇2
+τθUi
+˜θ∥σ
+≤Lρi
+θτ1
+|λmax(∇2ττUi
+˜θ)|
+Similarly, bounding T2
+T2=∥∇2
+θτU˜θ(∇2
+ττUi
+˜θ)−1(∇2
+τθUi
+˜θ− ∇2
+τθU˜θ)∥σ
+≤ ∥∇2
+θτU˜θ∥σ· ∥(∇2
+ττUi
+˜θ)−1∥σ· ∥(∇2
+τθUi
+˜θ− ∇2
+τθU˜θ)∥σ
+≤Lρi
+τθ1
+|λmax(∇2ττUi
+˜θ)|
+Lastly we bound T3, it is easy to verify that A−1−B−1=A−1(B−A)B−1
+T3=∥∇2
+θτU˜θ
+(∇2
+ττUi
+˜θ)−1−(∇2
+ττU˜θ)−1
+∇2
+τθU˜θ∥σ
+≤ ∥∇2
+θτU˜θ∥σ· ∥(∇2
+ττUi
+˜θ)−1−(∇2
+ττU˜θ)−1∥σ· ∥∇2
+τθU˜θ∥σ
+=∥∇2
+θτU˜θ∥σ· ∥(∇2
+ττUi
+˜θ)−1(∇2
+ττU˜θ− ∇2
+ττUi
+˜θ)(∇2
+ττU˜θ)−1∥σ· ∥∇2
+τθU˜θ∥σ
+≤ ∥∇2
+θτU˜θ∥σ· ∥(∇2
+ττUi
+˜θ)−1∥σ· ∥∇2
+ττU˜θ− ∇2
+ττUi
+˜θ∥σ· ∥(∇2
+ττU˜θ)−1∥σ· ∥∇2
+τθU˜θ∥σ
+≤L2ρi
+τ1
+|λmax(∇2ττUi
+˜θ)·λmax(∇2ττU˜θ)|
+Using bounds for T1, T2andT3, we can obtain a bound on ∥Si−S∥σ≤Bi, where Bi=ρi
+θ+Lρi
+θτ1
+|λmax(∇2ττUi
+˜θ)|+
+Lρi
+τθ1
+|λmax(∇2ττUi
+˜θ)|+L2ρi
+τ1
+|λmax(∇2ττUi
+˜θ)·λmax(∇2ττU˜θ)|. Consider ρi= max {ρi
+θ, ρi
+τθ, ρi
+θτ, ρi
+τ}. Hence, Bi≤
+ρi
+1 +L
+λmax(∇2ττUi
+˜θ)
+2 +1
+λmax(∇2ττU˜θ
+. Hence, we obtain
+λmin(Si)≥ −Bi+β,
+where λmax(S) = βsuch that β≥0. Hence, we obtain
+∇2
+θθUi
+˜θ− ∇2
+θτUi
+˜θ
+∇2
+ττUi
+˜θ−1
+∇2
+τθUi
+˜θ
+(ˆθ,ˆτ)⪰
+(β−Bi)I. When β≥Bi, then Siis positive semi-definite. When Bi= 0 , hence
+21Federated IV Analysis via Federated GMM, Geetika et al.
+
+∇2
+θθUi
+˜θ− ∇2
+θτUi
+˜θ
+∇2
+ττUi
+˜θ−1
+∇2
+τθUi
+˜θ
+(ˆθ,ˆτ)⪰βI, thus it will be positive semidefinite. When ρi
+τ< α andβ > Bi,
+then the suuficient condition for εi-approximate equilibrium is satisfied. And we obtain the result.
+Thus, for each client i, any approximation error εithat satisfies:
+max{ζi
+θ, ζi
+τ} ≤εi≤min{α−ρi
+τ, β−Bi}.
+forρi
+τ< α andBi> β, then (ˆθ,ˆτ)is anεi-approximate local equilibrium point for client i.
+C.3 Consistency
+C.3.1 Assumptions
+We first state the assumptions that are necessary to establish the consistency of the estimated parameter.
+Assumption 6 (Identification) .θ0is the unique θ∈Θsuch that ψ(fi;θ) = 0 for all fi∈ F, where i∈[n].
+Assumption 7 (Absolutely Star Shaped) .For every fi∈ Fiand|c| ≤1, we have cfi∈ Fi.
+Assumption 8 (Continuity) .For any x,gi(x;θ), fi(x;τ)are continuous in θandτ, respectively for all i∈[N].
+Assumption 9 (Boundedness) .Yi,supθ∈Θ|gi(X;θ)|,supτ∈T|fi(Z;τ)|are bounded random variables for all
+i∈[N].
+Assumption 10 (Bounded Complexity) .FiandGihave bounded Rademacher complexities:
+1
+2niX
+ξi∈{−1,+1}niEsup
+τ∈T1
+niniX
+k=1ξifi(Zk;τ)→0,1
+2niX
+ξi∈{−1,+1}niEsup
+θ∈Θ1
+niniX
+k=1ξigi(Xk;θ)→0.
+C.3.2 Proof of Theorem 2
+Theorem 6 (Restatement of of Theorem 2) .Let˜θnbe a data-dependent choice for the federated objective that has a limit
+in probability. For each client i∈[N], define mi(θ, τ,˜θ) :=fi(Zi;τ)(Yi−g(Xi;θ))−1
+4fi(Zi;τ)2(Yi−g(Xi;˜θ))2,
+Mi(θ) = supτ∈TE[mi(θ, τ,˜θ)]andηi(ϵ) :=infd(θ,θ0)≥ϵMi(θ)−Mi(θ0)for every ϵ >0. Let(ˆθn,ˆτn)be a solution
+that satisfies the approximate equilibrium for each of the client i∈[N]as
+sup
+τ∈TUi
+˜θ(ˆθn, τ)−εi−op(1)≤Ui
+˜θ(ˆθn,ˆτn)≤inf
+θ∈Θmax
+τ′:∥τ′−ˆτn∥≤h(δ)Ui
+˜θ(θ, τ′) +εi+op(1),
+for some δ0, such that for any δ∈(0, δ0],and any θ, τsuch that ∥θ−ˆθ∥ ≤δand∥τ−ˆτ∥ ≤δand a function
+h(δ)→0asδ→0. Then, under similar assumptions as in Assumptions 1 to 5 of (Bennett, Kallus, and Schnabel,
+2019), the global solution ˆθnis a consistent estimator to the true parameter θ0, i.e. ˆθnp− →θ0when the approximate
+error εi<ηi(ϵ)
+2for every ϵ >0for each client i∈[N].
+Proof. The proof follows from the result of Bennett, Kallus, and Schnabel (2019) that established the consistency of
+the D EEPGMM estimator.
+First, we define the following terms for the ease of analysis:
+mi(θ, τ,˜θ) =fi(Zi;τ)(Yi−g(Xi;θ))−1
+4fi(Zi;τ)2(Yi−g(Xi;˜θ))2
+Mi(θ) = sup
+τ∈TE[mi(θ, τ,˜θ)]
+Mni(θ) = sup
+τ∈TEni[mi(θ, τ,˜θn)]
+Note that ˜θnis a data-dependent sequence for the global model. Practically, the previous global iterate is used as ˜θ.
+Thus, we can define for the federated setting ˜θn=1
+NPN
+i=1˜θni. Let’s assume ˜θnp− →˜θ.
+22Federated IV Analysis via Federated GMM, Geetika et al.
+Claim 1: supθ|Mni(θ)−Mi(θ)|p− →0.
+sup
+θ|Mni(θ)−Mi(θ)|= sup
+θsup
+τ∈TEni[mi(θ, τ,˜θn)]−sup
+τ∈TE[mi(θ, τ,˜θ)]
+≤sup
+θ,τEni[mi(θ, τ,˜θn)]−E[mi(θ, τ,˜θ)]
+≤sup
+θ,τEni[mi(θ, τ,˜θn)]−E[mi(θ, τ,˜θn)]+ sup
+θ,τE[mi(θ, τ,˜θn)]−E[mi(θ, τ,˜θ)]
+≤sup
+θ1,θ2,τEni[mi(θ1, τ, θ 2)]−E[mi(θ1, τ, θ 2)]+ sup
+θ,τE[mi(θ, τ,˜θn)]−E[mi(θ, τ,˜θ)]
+We will now handle the two terms in the above equation separately.
+We will take the first term and call it B1. For mi(θ, τ,˜θn), we constitute its empirical counterpart mi
+k(θ, τ,˜θn) =
+fi(Zi
+k;τ)(Yi
+k−gi(Xi
+k;θ))−1
+4fi(Zi
+k;τ)2(Yi
+k−gi(Xi
+k;˜θ))2and using mi
+k′(θ, τ,˜θ′
+n)with ghost variables ˜θ′
+nfor
+symmetrization and ϵkaski.i.d. Rademacher random variables , we obtain
+E[B1] =E"
+sup
+θ1,θ2,τ1
+niniX
+k=1mi
+k(θ1, τ, θ 2)−Eh
+mi
+k′(θ1, τ, θ′
+2)i#
+≤E"
+sup
+θ1,θ2,τ1
+niniX
+k=1
+mi
+k(θ1, τ, θ 2)−mi
+k′(θ1, τ, θ′
+2)#
+≤E"
+sup
+θ1,θ2,τ1
+niniX
+k=1ϵk
+mi
+k(θ1, τ, θ 2)−mi
+k′(θ1, τ, θ′
+2)#
+≤2E"
+sup
+θ1,θ2,τ1
+niniX
+k=1ϵkmi
+k(θ1, τ, θ 2)#
+≤2E"
+sup
+θ,τ1
+niniX
+k=1ϵkfi(Zi
+k;τ)(Yi
+k−gi(Xi
+k;θ))#
++1
+2E"
+sup
+θ,τ1
+niniX
+k=1ϵkfi(Zi
+k;τ)2(Yi
+k−gi(Xi
+k;˜θ))2#
+≤2E"
+sup
+θ,τ1
+niniX
+k=1ϵk1
+2fi(Zi
+k;τ)2+1
+2(Yi
+k−gi(Xi
+k;θ))2#
++1
+2E"
+sup
+θ,τ1
+niniX
+k=1ϵk1
+2fi(Zi
+k;τ)4+1
+2(Yi
+k−gi(Xi
+k;˜θ))4#
+≤E"
+sup
+θ,τ1
+niniX
+k=1ϵkfi(Zi
+k;τ)2#
++E"
+sup
+θ,τ1
+niniX
+k=1ϵk(Yi
+k−gi(Xi
+k;θ))2#
++1
+4E"
+sup
+θ,τ1
+niniX
+k=1ϵkfi(Zi
+k;τ)4#
++1
+4E"
+sup
+θ,τ1
+niniX
+k=1ϵk(Yi
+k−gi(Xi
+k;˜θ))4#
+Using boundedness assumption 9, we consider the mapping from fi(Zi
+k;τ)andgi(Xi
+k;˜θ)to the summation terms in
+the last inequality as Lipschitz functions, hence for any functional class FiandL- Lipschitz function ϕ,Rni(ϕ◦fi)≤
+LRni(Fi),where Rni(Fi)is the Rademacher complexity of class Fi. Hence, E[B1]≤L(Rni(Gi) +Rni(Fi)).
+Using assumption 10, E[B1]→0.LetB′
+1be a modified value of B, after changing the j-th value of Xi, ZiandYi
+values, using assumption 9 on boundedness, we obtain the bounded difference inequality:
+sup
+X1:ni,Z1:ni,Y1:ni,X′
+j,Z′
+j,Y′
+j|B1−B′
+1| ≤ sup
+θ1,θ2,τ,X 1:ni,Z1:ni,Y1:ni,X′
+j,Z′
+j,Y′
+j|1
+ni 
+mi
+j(θ1, τ, θ 2)−mi′
+j(θ1, τ, θ 2)
+|
+≤b
+ni,
+23Federated IV Analysis via Federated GMM, Geetika et al.
+where bis some constant. Using McDiarmid’s Inequality, we have P(|B1−E[B1]| ≥ϵ0)≤2 exp
+−2niϵ2
+0
+c2
+. And
+E[B1]→0, we have B1p− →0.
+Now, we will handle B2. For that
+B2= sup
+θ,τEh
+mi(θ, τ,˜θn)i
+−Eh
+mi(θ, τ,˜θ)i
+= sup
+θ,τE
+fi(Zi;τ)(Yi−g(Xi;θ))−1
+4fi(Zi;τ)2(Yi−g(Xi;˜θn))2
+−E
+fi(Zi;τ)(Yi−g(Xi;θ))−1
+4fi(Zi;τ)2(Yi−g(Xi;˜θ))2
+= sup
+θ,τ1
+4Eh
+fi(Zi;τ)2(Yi−g(Xi;˜θn))2i
+−Eh
+fi(Zi;τ)2(Yi−g(Xi;˜θ))2i
+= sup
+θ,τ1
+4Eh
+fi(Zi;τ)2(Yi−g(Xi;˜θn))2i
++Eh
+fi(Zi;τ)2(Yi−g(Xi;˜θ))2i
+−Eh
+fi(Zi;τ)2(Yi−g(Xi;˜θ))2i
+−Eh
+fi(Zi;τ)2(Yi−g(Xi;˜θ))2i
+≤1
+4sup
+τE
+fi(Zi;τ)2ωn
+Here, ωn=(Yi−g(Xi;˜θn))2−(Yi−g(Xi;˜θ))2. Due to our assumption, ˜θnp− →˜θ, thus ωnp− →0due to Slutsky’s
+and continuous mapping theorem. Since, fi(Z;τ)is uniformly bounded, thus for some constant b′>0, we have
+B2≤b′
+4sup
+τ1
+NNX
+i=1|E[ωn]|
+≤b′
+4sup
+τ1
+NNX
+i=1E[|ωn|]
+Based on the boundedness assumption, we can verify that ωnis bounded, hence using Lebesgue Dominated Convergence
+Theorem, we can conclude that E[|ωn|]→0.
+Thus, using the convergence of B1andB2, we have supθ|Mni(θ)−Mi(θ)|p− →0for each i∈[N].
+Claim 2: for every ϵ >0, we have infd(θ,θ0)≥ϵMi(θ)> Mi(θ0).
+Mi(θ0)is the unique minimizer of Mi(θ). By assumption (6) and (7), θ0is the unique minimizer of
+supτE[fi(Zi;τ)(Yi−gi(X;θ))]such that supτE[fi(Zi;τ)(Yi−gi(X;θ))] = 0 . Thus, any other value of θwill
+have at least one τsuch that this expectation is strictly positive. M(θ0) = 0 andM(θ0) = supτ−1
+4fi(Zi;τ)2(Yi−
+gi(X;θ))2, the function whose supremum is being evaluated is non-positive but can be set to zero by assump-
+tion (7) by taking the zero function of fi. Let for any other θ′̸=θ0, letfi′be a function in Fisuch that
+E[fi(Z)(Yi−gi(X;θ′))]>0. If we have E[fi′(Z)2(Yi−gi(X;˜θ))2] = 0 , then Mi(θ′)>0. Else, consider
+cfi′for any c∈(0,1). Using assumption (7), cfi′∈ Fi, thus
+Mi(θ′) = supfi∈FiEh
+fi(Zi)(Yi−g(Xi;θ′))−1
+4fi(Zi)2(Yi−g(Xi;˜θ))2i
+≤cEh
+fi′(Zi)(Yi−g(Xi;θ′))i
+−c2
+4Eh
+fi′(Zi)2(Yi−g(Xi;˜θ))2i
+This is quadratic in cand is positive when cis sufficiently small, thus Mi(θ′)>0.
+We now prove claim 2 using contradiction. Let us assume claim 2 is false, i.e. for some ϵ > 0, we have
+infθ∈B(θ0,ϵ)Mi(θ) =Mi(θ0),where B(θ0, ϵ)c={θ|d(θ, θ0)≥ϵ}., since θ0is the unique minimizer of Mi(θ)
+by assumption (6). Thus, there must exist some sequence (θ1, θ2, . . .)inB(θ0, ϵ)csuch that Mi(θn)→Mi(θ0). By
+construction, B(θ0, ϵ)cis closed and the corresponding limit parameters θ∗= lim n→∞θn∈B(θ0, ϵ)cmust satisfy
+24Federated IV Analysis via Federated GMM, Geetika et al.
+Mi(θ∗) =Mi(θ0)using assumption (8). But d(θ∗, θ0)≥ϵ >0,thusθ∗̸=θ0. This contradicts that θ0is the unique
+minimizer of Mi(θ); hence, claim 2 is true.
+Claim 3: For the third part, we know that ˆθnsatisfies the εi- approximate equilibrium condition, given as:
+Eni[mi(ˆθn, τ,˜θn)]−εi≤Eni[mi(ˆθn,ˆτn,˜θn)]≤ max
+τ′:∥τ′−ˆτn∥≤h(δ)Eni[mi(θ, τ′,˜θn)] +εi,
+for a function h(δ)→0asδ→0and some δ0, such that for any δ∈(0, δ0],and any θ, τsuch that ∥θ−ˆθ∥ ≤δand
+∥τ−ˆτ∥ ≤δ. Assume that this is true with op(1), hence
+sup
+τEni[mi(ˆθn, τ,˜θn)]−εi−op(1)≤Eni[mi(ˆθn,ˆτn,˜θn)]≤inf
+θmax
+τ′:∥τ′−ˆτn∥≤h(δ)Eni[mi(θ, τ′,˜θn)] +εi+op(1),
+.
+Now, since Mni(ˆθn) =supτEni[mi(ˆθn, τ,˜θn)]. Hence,
+infθ max
+τ′:∥τ′−ˆτn∥≤h(δ)Eni[mi(θ, τ′,˜θn)≤infθsupτEni[mi(θ, τ′,˜θn)] =infθMni(θ)≤Mni(θ0)
+Thus, we have
+Mni(ˆθn)−εi−op(1)≤Eni[mi(ˆθn,ˆτn,˜θn)]≤Mni(θ0) +εi+op(1).
+We have proven all three conditions until now. From the first and second condition, since |Mni(θ0)−Mi(θ0)|p− →0,
+hence Mni(ˆθn)≤Mi(θ0) + 2εi+op(1). Hence, we obtain
+Mi(ˆθn)−Mi(θ0)≤Mi(ˆθn)−Mni(ˆθn) + 2εi+op(1)
+≤sup
+θ|Mi(ˆθ)−Mni(ˆθ)|+ 2εi+op(1)
+≤2εi+op(1)
+Hence, we obtain
+Mi(ˆθn)−Mi(θ0)−2εi≤Mi(ˆθn)−Mni(ˆθn) +op(1)
+≤sup
+θ|Mi(ˆθ)−Mni(ˆθ)|+op(1)
+≤op(1)
+Since, let ηi(ϵ) :=infd(θ,θ0)≥ϵMi(θ)−Mi(θ0). Hence, whenever d(ˆθn, θ0)≥ϵ, we have Mi(ˆθn)−Mi(θ0)≥ηi(ϵ).
+Thus, P[d(ˆθn, θ0)≥ϵ]≤P[Mi(ˆθn)−Mi(θ0)≥ηi(ϵ)] =P[Mi(ˆθn)−Mi(θ0)−2εi≥ηi(ϵ)−2εi]. For every
+ϵ >0, we have ηi(ϵ)>0from claim 2, and Mi(ˆθn)−Mi(θ0)−2εi=op(1). Thus, ηi(ϵ)−2εi>0when εi<ηi(ϵ)
+2.
+We have that for every ϵ >0andεi<ηi(ϵ)
+2, the RHS probability converges to 0, thus d(ˆθn, θ0) =op(1), hence ˆθn
+converges in probability to θ0for each client i∈[N].
+D Limit Points of F EDGDA
+We first discuss the γ- FEDGDA flow.
+D.1 F EDGDA Flow
+The F EDGDA updates can be written as
+θt+1=θt−η1
+γ1
+NX
+i∈[N]RX
+r=1 
+∇θU˜θ(θt, τt) + (∇θUi
+˜θ(θi
+t,r, τi
+t,r)− ∇ θUi
+˜θ(θt, τt))
++(∇θUi
+˜θ(θt, τt)− ∇ θU˜θ(θt, τt))
+τt+1=τt+η1
+NX
+i∈[N]RX
+r=1 
+∇τU˜θ(θt, τt) + (∇τUi
+˜θ(θi
+t,r, τi
+t,r)− ∇ τUi
+˜θ(θt, τt))
++(∇τUi
+˜θ(θt, τt)− ∇ τU˜θ(θt, τt))
+25Federated IV Analysis via Federated GMM, Geetika et al.
+Rearranging the terms and taking the continuous-time limit as η→0
+lim
+η→0θt+1−θt
+η= lim
+η→0−1
+γ1
+NX
+i∈[N]RX
+r=1 
+∇θU˜θ(θt, τt) + (∇θUi
+˜θ(θi
+t,r, τi
+t,r)− ∇ θUi
+˜θ(θt, τt))
++(∇θUi
+˜θ(θt, τt)− ∇ θU˜θ(θt, τt))
+lim
+η→0τt+1−τt
+η= lim
+η→01
+NX
+i∈[N]RX
+r=1 
+∇τU˜θ(θt, τt) + (∇τUi
+˜θ(θi
+t,r, τi
+t,r)− ∇ τUi
+˜θ(θt, τt))
++(∇τUi
+˜θ(θt, τt)− ∇ τU˜θ(θt, τt))
+We obtain the gradient flow equations as
+dθ
+dt=−R
+γ1
+NX
+i∈[N] 
+∇θU˜θ(θ(t), τ(t))
+−R
+γ1
+NX
+i∈[N] 
+∇θUi
+˜θ(θi(t), τi(t))− ∇ θUi
+˜θ(θ(t), τ(t))
+−R
+γ1
+NX
+i∈[N] 
+∇θUi
+˜θ(θ(t), τ(t))− ∇ θU˜θ(θ(t), τ(t)))
+, (31)
+dτ
+dt=R1
+NX
+i∈[N] 
+∇τU˜θ(θ(t), τ(t))
++R1
+NX
+i∈[N] 
+∇τUi
+˜θ(θi(t), τi(t))− ∇ τUi
+˜θ(θ(t), τ(t))
++R1
+NX
+i∈[N] 
+∇τUi
+˜θ(θ(t), τ(t))− ∇ τU˜θ(θ(t), τ(t))
+. (32)
+Using Assumption 3R
+γ1
+NX
+i∈[N](∇θUi
+˜θ(θ(t), τ(t))− ∇ θU˜θ(θ(t), τ(t)))≤R
+γζθ
+R1
+NX
+i∈[N](∇τUi
+˜θ(θ(t), τ(t))− ∇ τU˜θ(θ(t), τ(t)))≤Rζτ
+Thus,
+R
+γ1
+NX
+i∈[N](∇θUi
+˜θ(θ(t), τ(t))− ∇ θU˜θ(θ(t), τ(t))) =OR
+γζθ
+R1
+NX
+i∈[N](∇τUi
+˜θ(θ(t), τ(t))− ∇ τU˜θ(θ(t), τ(t))) =O(Rζτ)
+Since Ui
+˜θis Lipschitz smooth by assumption 2, we have
+R
+γ1
+NX
+i∈[N](∇θUi
+˜θ(θi(t), τi(t))− ∇ θUi
+˜θ(θ(t), τ(t)))≤LR
+γ1
+NX
+i∈[N]∥(θi(t), τi(t))−(θ(t), τ(t)∥,
+R1
+NX
+i∈[N](∇τUi
+˜θ(θi(t), τi(t))− ∇ τUi
+˜θ(θ(t), τ(t)))≤LR1
+NX
+i∈[N]∥(θi(t), τi(t))−(θ(t), τ(t))∥.
+Substituting these bounds into Equations (31) and (32), we obtain
+R
+γ1
+NX
+i∈[N](∇θUi
+˜θ(θi(t), τi(t))− ∇ θUi
+˜θ(θ, τ)) =O
+LR
+γ1
+NX
+i∈[N]∥(θi(t), τi(t))−(θ(t), τ(t)∥
+,
+R1
+NX
+i∈[N](∇τUi
+˜θ(θi(t), τi(t))− ∇ τUi
+˜θ(θ, τ)) =O
+LR1
+NX
+i∈[N]∥(θi(t), τi(t))−(θ(t), τ(t))∥
+.
+26Federated IV Analysis via Federated GMM, Geetika et al.
+Since the local update follows
+θi(t) =θ(t)−η
+γRX
+j=1∇θUi
+˜θ(θi
+j(t), τi
+j(t)),
+τi(t) =τ(t) +ηRX
+j=1∇τUi
+˜θ(θi
+j(t), τi
+j(t)),
+Using bounded gradient assumption, i.e. ∥∇θUi
+˜θ(θ, τ))∥2≤Gθand∥∇τUi
+˜θ(θ, τ))∥2≤Gτfor all i, asη→0andR
+is fixed and finite, the deviation ∥(θi(t), τi(t))−(θ(t), τ(t))∥vanish, leading to
+dθ
+dt=−1
+γR∇θU˜θ(θ(t), τ(t)) +OR
+γζθ
+,
+dτ
+dt=R∇τU˜θ(θ(t), τ(t)) +O(Rζτ).
+D.2 Proof of Theorem 3
+Proof. LetA=∇2
+θθU˜θ(θ, τ),B=∇2
+ττU˜θ(θ, τ)andC=∇2
+θτU˜θ(θ, τ).Consider ϵ=1
+γ, thus for sufficiently small ϵ
+(hence a large γ), the Jacobian Jof F EDGDA for a point (θ, τ)is given as:
+Jϵ=R−ϵA−ϵC
+C⊤B
+.
+Using Lemma 6, Jϵhasd1+d2complex eigenvalues {Λj}d1+d2
+j=1 such that
+|Λj+ϵµj|=o(ϵ) 1 ≤j≤d1
+|Λj+d1−νj|=o(1), 1≤j≤d2,(33)
+where {µj}d1
+j=1and{νj}d2
+j=1are the eigenvalues of matrices R(A−CB−1C⊤)andRBrespectively.
+We now prove the theorem statement:
+LocMinimax ⊂ ∞ − FGDA ⊂ ∞ − FGDA ⊂ L ocMinimax ∪
+{(θ, τ)|(θ, τ)is stationary and ∇2
+ττU˜θ(θ, τ)is degenerate }.
+By definition of lim sup andlim inf , we know that ∞ − FGDA ⊂∞ − FGDA .
+Now we show LocMinimax ⊂ ∞ − FGDA . Consider a strict local minimax point (θ, τ), then by sufficient condition
+it follows that:
+B≺0,and A−CB−1C⊤≻0.
+Thus, RB≺0,andR(A−CB−1C⊤)≻0, where Ris always positive. Hence, {νj}d1
+j=1<0and{µj}d2
+j=1<0.
+Using equations 33, for some small ϵ0< ϵ,Re(Λ j)<0for all j.Thus, (θ, τ)is a strict linearly stable point of
+1
+ϵ-FEDGDA.
+Now, we show ∞ − FGDA ⊂ L ocMinimax ∪ {(θ, τ)|(θ, τ)is stationary and ∇2
+ττU˜θ(θ, τ)is degenerate }.Consider
+(θ, τ)a strict linearly stable point of1
+ϵ-FEDGDA , such that for some small ϵ,Re(Λ j)<0for all j.By equation 33,
+assuming B−1exists
+RB≺0,and R(A−CB−1C⊤)⪰0.
+Since, Ris positive, thus B≺0,andA−CB−1C⊤⪰0.Let’s assume A−CB−1C⊤has0as an eigenvalue.
+Thus, there exists a unit eigenvector wsuch that A−CB−1C⊤w= 0. Then,
+Jϵ·(w,−B−1C⊤w)⊤=R−ϵA−ϵC
+C⊤B
+·w
+−B−1C⊤w
+=0.
+Thus,Jϵhas0as its eigenvalue, which is a contradiction because for strict linearly stable point Re(Λ j)<0for all j.
+Thus,A−CB−1C⊤≻0. Hence, (θ, τ)is a strict local minimax point.
+27Federated IV Analysis via Federated GMM, Geetika et al.
+LetG:Rd×Rk→Rbe the function defined as: G(θ, τ) = det( ∇2
+ττU˜θ(θ, τ)).Let’s assume that ∇2
+ττU˜θ(θ, τ)is
+smooth, thus the determinant function is a polynomial in the entries of the Hessian, which implies that Gis a smooth
+function. Since ∇2
+ττU˜θ(θ, τ) = 0 implies at least one eigenvalue of ∇2
+ττU˜θ(θ, τ)is zero, thus det(∇2
+ττU˜θ(θ, τ)) = 0 .
+We aim to show that the set
+A={(θ, τ)|(θ, τ)is stationary and det(∇2
+ττU˜θ(θ, τ)) = 0}
+has measure zero in Rd×Rk.
+A point q∈Rd×Rkis aregular value ofGif for every (θ, τ)∈G−1(q), the differential dG(θ, τ)is surjective.
+Otherwise, qis acritical value .
+The differential of Gis given by: ∇G(θ, τ) = Tr 
+Adj(∇2
+ττU˜θ)· ∇(∇2
+ττU˜θ)
+.Ifdet(∇2
+ττU˜θ(θ, τ)) = 0 , then the
+Hessian ∇2
+ττU˜θis singular. This causes its adjugate matrix to lose rank, leading to a degeneracy in ∇G(θ, τ), making
+dG(θ, τ)not surjective .
+Thus, every (θ, τ)satisfying G(θ, τ) = 0 is a critical point of G, meaning that 0is acritical value ofG.
+By Sard’s theorem, the set of critical values of a smooth function has measure zero in the codomain. Since Gis
+smooth, the set of critical values of GinRhas measure zero. In particular, since 0is a critical value of G, the set:
+G−1(0) ={(θ, τ)|det(∇2
+ττU˜θ(θ, τ)) = 0}has measure zero in Rd+k.
+Since the set of degenerate ∇2
+ττU˜θ(θ, τ)is precisely G−1(0), we conclude that Lebesgue measure (A) = 0 .Thus, the
+set of stationary points where the Hessian ∇2
+ττU˜θ(θ, τ)is singular has measure zero in Rd×Rk.
+Lemma 5. (Zedek, 1965) Given a polynomial pn(z) :=Pn
+k=0akzk,where an̸= 0, an integer m≥nand a number
+ϵ >0, there exists a number δ >0such that whenever the m+ 1complex numbers bk,0≤k≤m, satisfy the
+inequalities
+|bk−ak|< δ for0≤k≤n, and|bk|< δ forn+ 1≤k≤m,
+then the roots βk,1≤k≤m, of the polynomial qm(z) :=Pm
+k=0bkzkcan be labeled in such a way as to satisfy, with
+respect to the zeros αk,1≤k≤n, ofpn(z), the inequalities
+|βk−αk|< ϵ for1≤k≤n, and|βk|>1/ϵ forn+ 1≤k≤m.
+Lemma 6. For any symmetric matrix A∈Rd1×d1,B∈Rd2×d2, any rectangular matrix C∈Rd1×d2and a scalar
+R, assume that Bis non-degenerate. Then, matrix
+R−ϵA−ϵC
+C⊤B
+hasd1+d2complex eigenvalues {Λj}d1+d2
+j=1 with following form for sufficiently small ϵ:
+|Λj+ϵµj|=o(ϵ) 1 ≤j≤d1
+|Λj+d1−νj|=o(1), 1≤j≤d2,
+where {1
+Rµj}d1
+j=1and{1
+Rνj}d2
+j=1are the eigenvalues of matrices A−CB−1C⊤andBrespectively.
+The proof follows from Lemma 5 by a similar argument as in (Jin, Netrapalli, and Jordan, 2020) with {µj}d1
+j=1and
+{νj}d2
+j=1as the eigenvalues of matrices R(A−CB−1C⊤)andRB, respectively, and is thus omitted.
+28

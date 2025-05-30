@@ -1,0 +1,1596 @@
+arXiv:2505.20697v1  [cs.LG]  27 May 2025Generating Hypotheses of Dynamic Causal Graphs in Neuroscience:
+Leveraging Generative Factor Models of Observed Time Series
+Zachary C. Brown1David Carlson1
+Abstract
+The field of hypothesis generation promises to re-
+duce costs in neuroscience by narrowing the range
+of interventional studies needed to study various
+phenomena. Existing machine learning methods
+can generate scientific hypotheses from complex
+datasets, but many approaches assume causal rela-
+tionships are static over time, limiting their appli-
+cability to systems with dynamic, state-dependent
+behavior, such as the brain. While some tech-
+niques attempt dynamic causal discovery through
+factor models, they often restrict relationships to
+linear patterns or impose other simplifying as-
+sumptions. We propose a novel method that mod-
+els dynamic graphs as a conditionally weighted
+superposition of static graphs, where each static
+graph can capture nonlinear relationships. This
+approach enables the detection of complex, time-
+varying interactions between variables beyond lin-
+ear limitations. Our method improves f1-scores
+of predicted dynamic causal patterns by roughly
+22-28% on average over baselines in some of our
+experiments, with some improvements reaching
+well over 60%. A case study on real brain data
+demonstrates our method’s ability to uncover re-
+lationships linked to specific behavioral states,
+offering valuable insights into neural dynamics.
+1. Introduction
+Causal discovery methods applied to brain dynamics hold
+great promise for designing targeted interventions in var-
+ious neurological diseases. A typical approach is to gen-
+erate hypotheses about causal relationships between brain
+regions by using Granger causality on time series recorded
+from each region (Seth, 2007), which can be extended to
+many brain regions to capture more complete network rela-
+1Department of Electrical and Computer Engineering, Duke
+University, Durham, NC 15213, USA. Correspondence to:
+Zachary C. Brown <zac.brown@duke.edu >, David Carlson
+<david.carlson@duke.edu >.
+Copyright 2025 by the author(s).tionships. Granger causality describes whether the history
+of one variable can help predict future information about
+another variable (L ¨owe et al., 2022; Assaad et al., 2022).
+Granger causal models are more statistical in nature than
+causal (Pearl, 2009); however, we seek to generate hypothe-
+sesabout causal relationships to then inform causal infer-
+ence/assays, hence the use of Granger causal models.
+Current machine learning (ML) methods do not capture the
+brain’s full complexity, which has well-documented nonlin-
+ear interactions and dynamic causal graphs that vary by state
+and task. Existing discovery methods tend to assume that
+either a)(potentially dynamic) linear models are sufficient
+for modeling causal behavior (Huang et al., 2019; Gallagher
+et al., 2021) or that b)causal graphs between variables are
+static and not state-dependent (Zhang et al., 2017b; Sadeghi
+et al., 2024). These limitations reflect a gap in existing
+ML methodology, with implications outside neuroscience
+for any field seeking to automate hypothesis generation for
+potentially nonlinear, state-dependent dynamical systems.
+Thus, we focus on generating hypotheses about mechanisms
+governing nonlinear and state-dependent (or “dynamic”)
+behavior in time series systems (hereafter referred to as
+“temporal systems” or simply “systems” to conserve space).
+While understandable concerns may be raised about the
+detectability of such mechanisms in even simple systems
+(see our discussion on identifiability in Appendix A.1), prior
+literature has demonstrated that using automated hypothe-
+ses generation for these mechanisms can still yield useful
+insights which aid scientific discovery (Mague et al., 2022).
+Indeed, we accurately estimate causal graphs in observed
+systems without making restrictive assumptions as to the
+state-dependence or linearity/nonlinearity of causal relation-
+ships. We do this by combining key concepts from both
+factor-based and nonlinear models of causal time series.
+In summary, we seek to reduce the space of hypotheses that
+must be tested before a causal relationship is successfully
+identified. As such, we present 1) a novel approach to hy-
+pothesis generation for dynamic causal graphs using a deep
+generative factor model, 2) methods for including auxiliary
+variables - such as behavior - as supervised labels to improve
+hypotheses and utility, 3) neuroscience-inspired relational
+discovery challenges and datasets for improving ML meth-
+1Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+ods, and 4) empirical results comparing leading methods on
+under-explored hypothesis generation paradigms. We only
+assume our data consists of regularly sampled time series
+of scalar-valued nodes (see Section 3.1). These time series
+may be noisy, and we make no assumptions regarding the
+underlying generative processes. In Section 3.5, we assume
+the availability of “global state” labels for each time step
+that relate to the dominant generative process.
+2. Related Work
+Causal discovery may be considered to be a sub-field of
+hypothesis generation, and is the sub-field most closely
+related to our aim of forming hypotheses about causal re-
+lationships. Specifically, our proposed method should be
+viewed as a preparatory analysis technique preceding more
+complex methods such as Dynamic Causal Models (DCMs)
+(Friston et al., 2003). This is because we assume we have
+no access to any interventional inputs required to construct
+a DCM model (Stephan et al., 2010). In such a setting, it is
+recommended that Granger causal models (such as ours) be
+used to inform DCM models (Friston et al., 2013).
+There are numerous causal discovery methods which avoid
+Granger causality (Runge, 2020; Gerhardus & Runge, 2020;
+Zou & Feng, 2009; Yu et al., 2019). These methods do
+not assume causality from temporal correlation, and thus
+are better positioned to handle causal relations such as con-
+temporaneous effects (Runge, 2020) and latent confounders
+(Gerhardus & Runge, 2020). However, these methods tend
+to rely on assumptions that rule out hypotheses we would
+like to explore in neuroscience; for example, many methods
+assume causal graphs are acyclical (Runge, 2020; Gerhardus
+& Runge, 2020; Zou & Feng, 2009; Yu et al., 2019), which
+recurrent, multi-time scale systems like the brain may fun-
+damentally violate - e.g. through cross-frequency coupling
+(Dzirasa et al., 2010; Allen et al., 2011). Thus, our approach
+differs from these methods and we instead report empiri-
+cal comparisons between our method and Regime-PCMCI
+(Saggioro et al., 2020) in Section 4.2.
+Vector Autoregressive Models (V ARs) are often used to
+estimate Granger causality, but are limited to linear relation-
+ships (Shojaie & Fox, 2022). Recent research has used arti-
+ficial neural networks (ANNs) to perform nonlinear causal
+discovery in temporal systems (Tank et al., 2021), including
+tasks from finding predictive graphical models (L ¨owe et al.,
+2022) to estimating a subject’s emotional state via recorded
+electroencephalogram (EEG) signals (Song et al., 2018).
+These frameworks tend to focus on estimating static causal
+graphs (Tank et al., 2021; Song et al., 2018; Bussmann et al.,
+2021; Pamfil et al., 2020; D’Acunto et al., 2022) and we
+use them as baselines in this paper. Our contributions are
+orthogonal to this line of work, as we focus on capturing
+dynamics of graphs over different points in time rather thanestimating a static graph. In fact, our factor-based approach
+can use these structures as individual graphs whose strength
+modulates over time to make a composite graph.
+There is also prior work on identifying dynamic graphs over
+time. For example, Fujiwara et al. (2023) developed an
+approach to estimate how the strength of causal relation-
+ships change over time, but did not capture dynamic graph
+structures. Other approaches - based on factor models or
+matrix factorizations - capture dynamic graph structures,
+but are restricted to discovering linear relationships between
+variables (Fox et al., 2011; Mague et al., 2022; Gallagher
+et al., 2021; Calhoun et al., 2014). Similarly, the very recent
+DyCAST method is tested solely on synthetic data with lin-
+ear relationships (Cheng et al., 2025). Building on this work,
+we use factor model approaches on top of ANN base units to
+capture time-evolving graphs with nonlinear relationships.
+This allows us to more realistically capture key properties of
+many real-world temporal systems, including brain models.
+Additionally, our framework allows for the inclusion of aux-
+iliary labels, similar to what has been done previously with
+systems limited to linear relationships (Talbot et al., 2023).
+Additionally, we note there is work using dynamic nonlinear
+models through time, such as State-Dependent Causal Infer-
+ence (SDCI) (Rodas et al., 2021), Switching Neural Network
+Trackers (SNNTs) (Ghimire, 2018), and Constraint-based
+causal Discovery from Nonstationary/heterogeneous Data
+(CD-NOD) (Zhang et al., 2017a). However, SDCI mod-
+els connections between embedded latent variables (which
+embedding process would hamper our ability to identify
+variables with a single physical signal/brain region) and
+assigns a state label to each latent variable in the system,
+a granularity which we cannot attain with labels from be-
+havioral assays in neuroscience. Meanwhile, SNNTs are
+probabilistic in nature instead of being designed for causal
+discovery and use discrete states instead of the superposition
+of factors in the datasets used in our Section 4.3 experiments
+and the design of our proposed method. In contrast, the de-
+velopment of CD-NOD was largely motivated by the task
+of performing causal discovery on neurological (esp. fMRI)
+data, and it thus shares similarities with our work in much
+of the problem setup and certain assumptions. Still, there
+are enough differences between our approach and CD-NOD
+- such as our focus on autoregressive systems and uncon-
+strained directionality of underlying causal relationships -
+that our direct comparisons with Regime-PCMCI (Saggioro
+et al., 2020) can be considered sufficient for our purposes.
+Finally, prior work explored using low-dimensional latent
+spaces to model dynamics in neural activity (Linderman
+et al., 2017; Keshtkaran et al., 2022). In contrast, we largely
+ignore our models’ latent features beyond applying con-
+straints because our focus is on identifying candidates for
+causal relationships in recorded data.
+2Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+3. Methods
+3.1. Problem Statement
+Suppose we must hypothesize a causal model for a dataset
+DofN∈Nmulti-dimensional (i.e. ‘multi-channel’) time
+series recordings xn. LetD= (X) = ( xn)N
+n=1denote
+the complete dataset of recordings. Each recording xn∈
+Xcontains the observed history of ncsystem variables at
+regular intervals with T∈Ntemporal measurements. Let
+τin∈N≤Tbe the maximal number of time steps over which
+we estimate causal relationships. For simplicity, assume
+observations are of scalar features such that xn,t:t+τin∈
+Rnc×τin∀t≤Tandn≤N.
+We assume our data is a noisy realization from a time-
+dependent system Φ(t). We must learn a model that a)
+reasonably approximates Φat any point in time and b)esti-
+mates causal influences between system variables in Φ. We
+approximate Φby learning a factor model fϕover the set of
+observed variables, where the expression of each factor is
+dynamic over time. Indeed, in Sections 4.1, 4.2, and 4.3 we
+implement Φas a factor model itself (see Section 3.2 for
+formalization). The functions comprising each factor can
+take on many forms including hypothesis generation func-
+tions. Additionally, the linear combinations in factor models
+enable us to track statistics such as presence of a factor over
+time or in relationship to auxiliary variables (e.g. behavior),
+making these models useful for scientific research.
+3.2. General Notation
+Table 1 presents important symbols in this work. In particu-
+lar, we use ⊙†to express ‘broadcast multiplication’ between
+vectors and 3-axis tensors, in which we take the Hadamard
+product (Kolda & Bader, 2009) between vector elements
+and corresponding matrix-shaped tensor slices before sum-
+ming over all product results; see Appendix A.3 for details.
+Using this notation, our experiments treat Φas
+Φ(t) =G(t)⊙†F(t) =K∗X
+k=1G(t)kFk(t)
+where K∗is the number of true factors Fk∈ F acting on all
+system variables Vat each time step t- i.e.Fk:RV→RV
+- according to the system state G(t)∈RK∗.
+Our model consists of functions fϕkfor each factor, each
+mapping a record of past variable states to present vari-
+able states. By predicting present variable states from time-
+lagged states of (other) variables, each fϕklearns Granger
+causal relationships between variables (Seth, 2007).
+We now discuss how estimates of these relationships can be
+formally represented during evaluation. We turn to graph
+theory to express each factor’s estimate of the strength of
+Granger causal relationships as a series of adjacency matri-Table 1. Common symbols in this paper.
+SYMBOL DESCRIPTION
+‘ˆ’ P REDICTION ,FORECAST ,AND /OR ESTIMATE
+‘⊙†’ ‘ BROADCAST MULTIPLICATION ’ (S ECTION 3.2)
+‘∗’ ( EMPHASIZES )SCALAR -VECTOR MULTIPLYING
+‘(...)’ A VERAGE OF VALUE OF (...)
+‘MSE’ T HE MEAN -SQUARED ERROR PENALTY
+‘COSSIM’ T HE COSINE SIMILARITY MEASURE
+ces mapping past variable (i.e. ‘node’) states/values to the
+present. The flexibility of graphs lets us also consider an
+abstract adjacency matrix summarizing the effect of Φ(t)on
+variables in the true system. Formally, we summarize our
+models’ estimated Granger causal relationships in a series of
+adjacency matrices ˆA∈Rnc×nc×τinwhere each ai,j,t∈ˆA
+is the estimated weight of the Granger causal relationship
+where the state of node νj∈ V from ttime steps in the
+past ‘causally’ effects current node νi∈ V. To make quan-
+titative comparisons, we standardized the representation(s)
+of baselines’ and our models’ estimated causal graph(s) by
+summing over time-lagged features (see Appendix B.2);
+hence, we define the lag-summed view of ˆAas
+˜A=X
+tˆA[:,:,t]. (1)
+Importantly, ˆAand˜Aare summary statistics computed
+separately from the forecasting operation, and do not imply
+any linearization assumption in the forecasts themselves.
+3.3. Base (Single-Factor) Model
+Consider the case where our factor model is a single factor
+function fϕ1. We can use any algorithm for fϕ1so long as
+it learns relevant Granger causal information by forecasting
+time series. In this paper we implement fϕ1as a cMLP
+(Tank et al., 2021) due to its versatile design. Formally, the
+forward computation is given as
+fϕ1(xn,t:t+τin) =ˆxn,t+(τin+1). (2)
+Regarding the loss function of this single-factor model, we
+assume no direct knowledge of the target system’s underly-
+ing causal graph since we are performing hypothesis genera-
+tion. Instead, we estimate causal connections in an unsuper-
+vised fashion. Hence, our objective function is essentially
+a sum over regularization terms guiding the model towards
+solutions with desirable qualities, including sparsity.
+Formally, suppose we are given a recorded signal xn∈
+X, the model’s corresponding forecast ˆxn∈ˆX, and an
+estimated adjacency matrix ˆA∈ϕformed via a subset
+of the model’s parameters ϕ. Our implementation of fϕ
+3Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+learns ˆAin the first layer of weights, which together take
+on the shape (nc×nc×τin)and can be interpreted as a
+series of time-lagged adjacency matrices (Tank et al., 2021);
+details in Appendix B.1. Hence, we include a lag-dependent
+L1-norm sparsity penalty on the time-lagged slices of ˆA
+(favoring the discovery of temporally-local interactions in
+cases of cyclical or chained causal relationships in the factor)
+along with a MSE loss over forecasts in our base objective
+Lβ(ϕ,D) =ητinX
+t=1log(t+ 1)||ˆA:,:,t||1+ωMSE( X,ˆX)
+(3)
+where η, ω∈Rare chosen hyperparameters. Again, the L1
+regularization term here serves two purposes for the factor’s
+causal model: 1) to encourage sparsity/parsimony and 2)
+to emphasize reliance on more recent time lags via the log
+term. We use the Adam optimization algorithm to train
+our model to minimize the above loss function. We also
+include weight decay (i.e. L2-norm regularization) on all
+parameters as done in prior work (Tank et al., 2021).
+3.4.RElational Discovery via ConditionaLly Interacting
+Forecasting Factors (REDCLIFF)
+Now consider general cases where our model has nk≥1
+factors. We seek to learn a Granger causal model fϕsatisfy-
+ingfϕ(xn,t:t+τin) =Pnk
+k=1αn,k,t +(τin+1)fϕk(xn,t:t+τin)
+where nk∈Nis the total number of model factors, fϕk
+is the k-th factor generator, and αn,k,t +(τin+1)∈Ris the
+coefficient for fϕkat time t+ (τin+ 1) .
+To learn factor coefficients for each factor, we introduce
+a ‘state model’ gθwhich is a parameterized function that
+generates factor weights (or ‘scores’) conditioned on the
+history of the system. Note gθcan be seen as trying to
+classify each factor as either likely or unlikely to be needed
+in each time series forecast. Thus gθis fundamentally dif-
+ferent from the generative factors of fϕ(which perform
+regression on the time series itself); indeed, we found that
+gθtypically required more historical information than the
+generative factors to sufficiently learn its task (see Section
+3.6 and Appendix A.2). Thus, we provide additional his-
+torical information of length τcl∈N≤Ttogθsogθsees a
+combined context window of τin+τcltime steps.
+We define the forward computation of gθaccording to
+gθ(xn,t−τcl:t+τin) =αn,:,t+(τin+1)whereαn,:,t+(τin+1)∈
+Rnkare conditional factor scores. Thus, our model forecasts
+Φ’s evolution as:
+ˆxn,t+τin+1=gθ(xn,t−τcl:t+τin)⊙†fϕ(xn,t:t+τin)(4)
+=nkX
+k=1αn,k,t +(τin+1)fϕk(xn,t:t+τin)
+where we have the nkfactor scores αn,k,t +(τin+1)∈R∀k
+being broadcast-multiplied against the nkfactor outputsfϕk(xn,t:t+τin)∈Rnc×1. We refer to the resulting model
+as a RElational Discovery via ConditionaLly Interacting
+Forecasting Factors (REDCLIFF) model (see Figure 1).
+The objective function for training REDCLIFF models has
+two major components. Modifying Equation 3, the first
+component Lfpertains to the generative factors fϕkand
+retains the MSE forecasting penalty, but now includes all
+nk≥1factors in the L1-norm penalty. We also include a
+cosine similarity penalty to induce our prior that each factor
+should serve different purposes by encouraging factors to
+dissociate (details in Appendices B.3 and C.6). Specifically,
+Lf(ϕ,D) =ηnkX
+k=1τinX
+t=1log(t+ 1)||kˆA:,:,t||1 (5)
++ωMSE( X,ˆX)
++ρnkX
+p=1nkX
+q=(p+1)CosSim(p˜A−I,q˜A−I)
+where I∈Rnc×ncis the identity matrix andp˜Aandq˜Aare
+the lag-summed views of the adjacency matrices derived
+from factors pandq(Eq. 1).1We set η,ω, and ρas real-
+valued hyperparameters. The second loss component Lg
+enforces sparsity (offset by 1) in the factor scores of gθ,
+Lg(θ,D) =γ
+−1 +NX
+n=1||αn,:||1
+, (6)
+where γ∈Ris another constant hyperparameter. Putting it
+together gives the full objective function:
+L(ϕ, θ,D) =Lf(ϕ,X,ˆX) +Lg(θ,D). (7)
+In review, the state model gθis how a REDCLIFF model
+adjusts weights of relationships between variables. By em-
+phasizing factors with different relationships, gθcan model
+changes in the causal direction of relationships, making it
+the main function for estimating dynamic causal behavior.
+3.5. REDCLIFF-Supervised (REDCLIFF-S)
+Now suppose Dincludes a set Yof “global state” (i.e.
+“behavioral state” in our motivating neurobehavioral cases)
+labels for the span of each recording in X; that is, D=
+(X,Y). We assume the set Ytakes the form Y= (yn∈
+RB×T)N
+n=1where B∈Nis the number of global state
+variables and both NandTare as before.
+We seek to estimate causal patterns linked to specific behav-
+iors in signals. Thus, we follow prior literature and assign
+1Subtracting the identity induces an implicit assumption that
+each variable is involved in each factor (via self-connection); this is
+reasonable for recurrent systems like the brain and in our Synthetic
+Systems experiments. Future work should explore alternatives.
+4Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 1. Illustration of the REDCLIFF(-S) algorithm. A) The two
+primary subtasks performed by a REDCLIFF(-S) model. B) An
+illustration of a nk= 3factor REDCLIFF-S model’s forward pass.
+behaviors to the first Belements of α(Mague et al., 2022).
+Because the desired factor scores in α:Bmay not always cor-
+relate with the behaviors they are associated with, we define
+invertible functions gαandgysuch that ˆy=gy(g−1
+α(α:B)).
+These invertible functions provide more flexibility than di-
+rectly copying elements of αwhile still preserving the rel-
+ative information contained therein, and may be used to
+limit the effect gradients from the forecasting loss have on
+gθ. When the behavioral label ynis a known quantitative
+variable, we can generate ˆynvia supervised regression. Al-
+ternatively, if ynis categorical, we can predict a behavior
+as ‘present’ in the signal when the value of one of these
+behavioral elements crosses a threshold cb∈R.We put this all together by re-defining gθsuch that
+gθ(x) =gα(g′
+h(x))
+gy(g′
+h(x):B)
+=gα(α′)
+gy(α′
+:B)
+=α
+ˆy
+(8)
+where gα:Rnk→Rnkandgy:RB→RBare invertible
+and now g′
+hrepresents the original function gθprior to our
+inclusion of gαandgy. The predicted behavioral label
+ˆyb∈ˆyindicates the presence of behavior yn,bifˆyn,b> cb
+where cbis some threshold. We make no change to the
+REDCLIFF forward computation (Equation 4) other than to
+note the output of gθnow includes ˆy, which must be ignored
+in the broadcast multiplication step so just αis used.
+To complete the definition of a REDCLIFF-S model, we
+add a supervised component to Lin Eq. 7 to obtain
+L(ϕ, θ,D) =Lf(ϕ,D) +Lg(θ,D) +λMSE( Y,ˆY)(9)
+where λis a real-valued hyperparameter. We hypothesize
+this new MSE term constrains the Granger causal graph(s)
+of the relevant factor(s) to correspond to ˆY(as would any
+other supervised loss term).
+3.6. Training Strategies and Details
+We train REDCLIFF(-S) using the Adam optimizer with
+weight decay. To effectively learn each model, we first
+pretrain the state model gθusing the LgandλMSE( Y,ˆY)
+terms from Equation 9 (setting λ= 0in the unsupervised
+case). Then, we freeze the state model and train the genera-
+tive factors in fϕusing Equation 5 (we call this “acclima-
+tion”). Following these steps, we employ the full training
+objective (Equation 7 or 9) to jointly update all parameters.
+One challenge for hypothesis generation is that you cannot
+perform model selection explicitly on holdout graph discov-
+ery performance on real data as the true graph is unknown.
+Instead, we stop training once the number of maximal itera-
+tions is reached or when the following criterion is minimized
+on the validation set Dv= (Xv,Yv):
+Ls(ϕ, θ,Dv) =ωMSE( Xv,ˆXv) +λMSE( Yv,ˆYv)(10)
++ρnkX
+p=1nkX
+q=(p+1)CosSim p˜A
+max(p˜A),q˜A
+max(q˜A)
+.
+For more details on Ls, see Appendix B.3.
+In terms of computational complexity, the REDCLIFF(-S)
+implementations we tested in this work scale (in training
+and testing) as the product of the number of factors nkand
+the number of forward passes nsimmade by each factor2
+2We experimented with having nsim∈N≥1forward passes
+before updating REDCLIFF-S parameters in some grid searches.
+In practice, nsim= 1performed best, but we include the general
+form in our complexity analyses for rigor.
+5Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+plus the computational complexity of the state model. More
+formally, let Cϕ∗represent the maximal (temporal or spacial,
+depending on context) complexity of any factor in ϕand
+Cθbe the complexity of the state model; then the temporal
+complexity of our implementation is O(nk·nsim·Cϕ∗+Cθ)
+and the spacial complexity is the same. Learning can also
+be parallelized over factors for scalable implementations.
+Additional theoretical analyses in Appendix A.2 support our
+findings that gθrequired more context than each fϕk.
+4. Experiments on Simulated Datasets
+We now report empirical comparisons of REDCLIFF-S
+against other methods3, with additional results given in
+Appendix C. All algorithms were trained on a local cluster
+featuring a variety of GPU devices, including A6000 GPUs.
+We focus much of our analysis on f1-score performance,
+partly because our neuroscientific application implicitly as-
+sumes all parts of the brain are causally related to some
+degree and the difficulty is determining which connections
+are the most relevant at key moments; the f1-score’s empha-
+sis on the presence (positive label) of relationships is thus
+well suited to our setting. As is common practice, we report
+‘optimal’ f1-scores in which we compute each evaluated
+algorithm’s f1-score using a classification threshold (i.e. the
+value at which logits are labeled negative or positive) which
+yields the highest possible f1-score for that algorithm on the
+task. We do use the “Adjustment Identification Distance” (or
+AID) family of causal distance metrics (Henckel et al.) in
+our comparisons against several supervised baselines (Table
+2 and Appendix C.3), since all algorithms in this comparison
+had access to ‘global state’ information that relates to causal
+edge relevancy, possibly making it harder for the f1-score
+to differentiate algorithms. We also report some ROC-AUC
+scores, such as in Table 2 and the Appendices.
+4.1. Synthetic Data Generation and Analyses
+We rely on synthetic data to test REDCLIFF-S’ ability to es-
+timate known causal relationships. To create these datasets,
+we defined each artificial temporal system as a set of Vector
+Auto-Regressive (V AR) models (Zivot & Wang, 2006), one
+for each factor. Our implementation allows for inter-variable
+edge activations between time-lags to be either linear or
+nonlinear; in this work, we included nonlinear activations
+between different time-lags. Specifically, we used the ReLU
+(i.e. positive indicator 1(x)[max( x,0)]) and negative ReLU
+(i.e. negative indicator 1(x)[min( x,0)]) nonlinear activations.
+For each experiment we selected hyperparameters such as
+the number of V AR models used, how many time series
+were present, and how many lags were in each V AR (see
+3Code has been made available at github.com/carlson-
+lab/redcliff-s-hypothesizing-dynamic-causal-graphs
+Figure 2. Synthetic Systems results from select systems. A) Av-
+erage optimal f1-score and standard error of the mean (SEM)
+between true and estimated inter-variable causal relationships. B)
+Average pair-wise improvement and SEM between optimal f1-
+scores obtained by REDCLIFF-S and baselines.
+Appendix D). Here we set the number of lags for each V AR
+toτ= 2time steps for visualization purposes, but any inte-
+ger greater than 0 would suffice. Defining these systems also
+meant selecting square adjacency matrices mapping values
+from past to present system states for each V AR model in
+the system. We included self-connections in each adjacency
+matrix to better visualize their generated time series. The
+number of inter-variable connections between time series
+was varied across systems, with connections chosen ran-
+domly. The sizes of our Synthetic Systems were primarily
+designed to approximate the conditions of the TST dataset
+(Carlson et al., 2023) with increasing fidelity/complexity
+(the largest Synthetic Systems had 12 nodes, which corre-
+sponded to 12 channels in our pre-processed TST dataset).
+Once we defined a system, we sampled recordings and their
+6Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+labels for the dataset. First, a random state vector was drawn
+from a uniform distribution for each V AR model in the sys-
+tem. This vector was recurrently fed through its correspond-
+ing V AR model for a number of ‘burn-in’ steps, after which
+we recorded the resulting multivariate time series for Ttime
+steps; innovations were simulated throughout by multiply-
+ing draws from uniform and Gaussian distributions. Record-
+ings obtained from each V AR model were then weighted
+over time by linearly interpolated weights (randomly se-
+lected between 0 and 1). These weighted recordings were
+added together along with a level of Gaussian noise. We
+augmented labels by marking with a one-hot vector which
+factor weight was largest at each time step, meaning that all
+of our Synthetic Systems experiments contain label noise .
+We stratified results by marking systems as low (L), moder-
+ate (M), or high (H) complexity C, according to
+C(nc,ne) =r−1
+graph=ne
+(nc2−nc)−1
+(11)
+where rgraph is the ratio of true inter-variable interactions
+in each system state to the number of possible inter-variable
+interactions. In essence, Cis inversely related to the sparsity
+of relationships in the graph. We provide additional details
+regarding this complexity score in Appendix C and D.
+4.2. Hypothesis Generation for Synthetic Systems
+Figure 2 gives results from one high complexity system (6-
+2-2) and three moderate system configurations for which we
+generated five random repeats (i.e. unique systems) to train
+each algorithm (more results in Appendix C). Each repeat
+was designed to have 1040 training samples and 240 valida-
+tion samples for each factor/system state in the system, with
+each sample recording 100 sequential time steps. We used
+the cMLP and cLSTM (Tank et al., 2021); DGCNN (Song
+et al., 2018); and dCSFA-NMF (Talbot et al., 2023; Mague
+et al., 2022) methods as baselines. Hyperparameters for each
+algorithm were chosen via grid search on a single repeat in
+our (low-complexity) nc= 12 -node, ne= 33 -edge (inter-
+variable), nk= 3-factor Synthetic System dataset. Our grid
+search selected parameters which minimized stopping cri-
+teria (for DYNOTEARS and REDCLIFF-S) or objective
+functions (for all other baselines), with ties won by the most
+‘parsimonious’ parameters (see Appendices D and E). The
+same hyperparameters were used across all the experiments
+reported in this section, with limited adjustments - e.g. to
+the number of REDCLIFF-S factors or the value of loss co-
+efficients - made to account for certain characteristics in the
+target system (see Appendix E). Each algorithm was trained
+on a given system repeat dataset, after which we computed
+the average optimal f1-score (and corresponding standard er-
+ror of the mean, or SEM) of each algorithm’s inter-variable
+causal predictions against the true causal graphs across fac-
+tors and repeats for each synthetic system.
+Figure 3. Visualizing true and REDCLIFF-S Top-10 estimated
+inter-variable causal relationships of a factor from Synthetic Sys-
+tem “12-11-5”. REDCLIFF-S captures 7 of 11 true relationships,
+while incorrect/missed pathways share functional similarities; the
+fact that REDCLIFF-S extracted these relationships with four other
+system states/factors adding noise in the dataset marks a sea change
+in modeling capability over baselines. While we could have high-
+lighted examples with higher optimal f1-scores, we highlight this
+one due to its comparable complexity to our TST case study.
+As another test, we re-trained REDCLIFF-S models along
+with Regime-PCMCI (Saggioro et al., 2020) and supervised
+versions of ‘SLARAC’, ‘QRBS’, and ‘LASAR’ from the
+tidybench repository (Weichwald et al., 2020)4on our ‘12-
+11-2’ Synthetic Systems (Fig. 2A) using 10 different ran-
+dom seeds and compared their ability to detect unweighted
+causal edges. In Table 2, we report the average median per-
+formance of each method on several metrics, with additional
+details and results given in Appendix C.3.
+4.3. D4IC Multi-State Extension of DREAM4
+We also validated REDCLIFF-S on an adaptation of the pub-
+lic DREAM4 dataset (Marbach et al., 2009). We chose to
+adapt the DREAM4 dataset due to 1) it’s use as a benchmark
+dataset in prior hypothesis generation and causal discovery
+research (Pamfil et al., 2020) and 2) its relatively small size
+since some baseline implementations required that data not
+be batched - namely, the DYNOTEARS algorithm (Pamfil
+et al., 2020) and the NA V AR algorithm (Bussmann et al.,
+2021) with recursive cLSTM-based (NA V AR-R) and cMLP-
+based (NA V AR-P) implementations. We measured the aver-
+age optimal f1-score of each algorithm’s causal estimates
+between variables, with causal relationships defined by fac-
+tors taken from different folds of the DREAM4 dataset and
+presented to the algorithms in a single training session as
+4We also tried training ‘SELV AR’ from tidybench, but could
+not compile it locally.
+7Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 2. Comparing unweighted inter-variable edge detection by supervised discovery methods on the 12-11-2 Synthetic Systems (Fig. 2)
+- note REDLCIFF-S’ f1-scores differ from Fig. 2 which included edge weighting. Edge predictions were determined by optimal f1-score
+thresholds. Values report the mean (over repeats) of the median (over 10 random seeds and system factors) statistic ±SEM. ‘Upper’ and
+‘Lower’ refer to upper- and lower-triangular portions of adjacency matrices, which we split to avoid cycles (see Sec. 4.1 & Appendix B.2).
+We also report the mean comparative placement (from 1 to 5) of each method’s mean performance (details in Appendix C.3).
+(F1 T HRESH .) P ARENT AIDERROR STRUCTURAL HAMMING DIST. MEAN
+ALGORITHM OPTIMAL F1 ROC-AUC U PPER LOWER UPPER LOWER PLACE .
+LASAR (S UP.) 0.344 ±0.034 0.579 ±0.018 7.0 ±1.995 4.3 ±0.460 21.2 ±5.410 20.9 ±5.905 3.5
+QRBS (S UP.) 0.203 ±0.016 0.536 ±0.008 4.5 ±1.631 3.0 ±0.949 35.9 ±5.049 38.8 ±4.258 3.5
+SLARAC (S UP.) 0.169 ±0.016 0.512 ±0.010 2.7 ±1.973 0.7 ±0.179 54.5 ±5.194 56.3 ±4.447 3.7
+REGIME -PCMCI 0.407 ±0.027 0.673 ±0.026 6.1 ±1.212 4.8 ±0.782 9.1 ±0.219 9.4 ±1.033 2.3
+REDCLIFF-S 0.383±0.038 0.705 ±0.022 3.9 ±0.607 3.1 ±0.727 10.9 ±1.513 11.8 ±1.753 2.0
+Figure 4. Average optimal f1-score between true and estimated
+inter-variable causal relationships across the D4IC HSNR dataset.
+a single dynamic-causal system. Non-stochastic noise was
+simulated by adding down-weighted recordings from all but
+one DREAM4 folds to a recording from the dominant fold at
+three different signal-to-noise ratios: low (LSNR), moderate
+(MSNR), and high (HSNR). We refer to the resulting dataset
+as the “DREAM4 Insilico-Combined” (D4IC) dataset.
+Hyperparameters for each algorithm were tuned to a single
+repeat of the D4IC MSNR dataset prior to training on all
+D4IC noise levels and repeats. Model selection proceeded
+as in Section 4.2, though we increased the weight on the
+cosine similarity penalty in selecting our final REDCLIFF-S
+model which balanced the scale of variation of the cosine
+similarity penalty with that of the other penalties (details in
+Appendix B.3). We include two cMLP baseline models (v1
+and v2) with slightly different hyperparameters. Results are
+visualized in Figure 4, in which we see the REDCLIFF-S
+model improves over alternative approaches on this dataset.4.4. Discussion
+The main strength of REDCLIFF-S is that its hypotheses
+can be easily tested. Equations 4 and 8 are designed for
+this in several ways. As discussed, factor scores αn,k,t can
+be given explicit behavioral designations. Factor scores
+can also be constrained (via Sigmoid or similar activation
+functions) to be non-negative, and thereby be viewed as
+how (physically) present the corresponding factors are in
+predicted signals.5Thirdly, trained factors fϕkrely on fixed
+graphs explicitly showing relationships between variables.
+Finally, the sum over factors allows us to inspect individual
+contributions of each factor. Overall, REDCLIFF-S shows
+performance improvements across many scenarios.
+First, Figure 2 and Table 2 together give the core results
+on our Synthetic Systems Dataset experiments. Figure 2A
+presents average optimal f1-scores (across all samples and
+repeats) of REDCLIFF-S and applicable baselines. Surpris-
+ingly, the single-factor baselines attain fairly competitive
+f1-scores in some cases, seemingly learning an ‘average
+factor graph’ that may not be particularly accurate for any
+single factor but which performs well ‘on average’. Even
+so, in Figure 2B we see the average pair-wise improvement
+of REDCLIFF-S’ predictions is at least a standard error of
+the mean above zero for all baselines on all four systems,
+suggesting REDCLIFF-S yields improvements with statisti-
+cal significance. These findings are further supported by the
+results shown in Table 2. Despite the fact that REDCLIFF-S
+was the only algorithm trained to predict global state in-
+formation (all other baselines in Table 2 had direct access
+to the state label), REDCLIFF-S is uniquely able to attain
+competitive performance across all metrics used. This can
+be seen in that when we rank the algorithms based on their
+mean performance for each metric, REDCLIFF-S’ ranking
+(or ‘comparative placement’, to avoid confusion with ‘ma-
+trix rank’) tends to be lower than the other methods’. Taken
+together, our findings in Section 4.2 suggest REDCLIFF-S
+5Our early experiments included these constraints, but we omit
+them here due to different models being selected for by our criteria.
+8Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 3. Summarizing effects of REDCLIFF-S ablations on mean
+optimal f1-score across various datasets (Appendix C.6).
+ABLATION
+DATASET ρ= 0 nk= 1 α= 1 λ= 0
+SYN.SYS. 6-2-2 ↓ ↓ ↓ ↓
+SYN.SYS. 6-4-2 ↑ ↓ ↓ ↓
+SYN.SYS. 12-11-2 ↓ ↓ ↓ ↓
+SYN.SYS. 12-11-5 ↑ ↓ ↓ ↓
+D4IC HSNR ↓ ↓ ↓ ↓
+generates hypotheses about the presence of dynamic causal
+relationships that prove accurate at state-of-the-art rates, and
+this pattern holds true for systems with differing numbers
+of variables, inter-variable relationships, and factors.
+Results from our D4IC HSNR experiments are shown in
+Figure 4, where we see the REDCLIFF-S (cMLP) model at-
+tains the highest average optimal f1-score with a statistically
+significant margin. While the improvements over competing
+methods are somewhat modest in this case, a brief investiga-
+tion into the factor networks of D4IC HSNR suggests that
+four of the five factors in each repeat would have been rated
+as ‘low complexity’ according to Equation 11; importantly,
+REDCLIFF-S tends to make the least improvement over
+baselines in the ‘low complexity’ regime (see Appendix
+C.3). In all, our D4IC experimental results generally sup-
+port those from Section 4.2, verifying that REDCLIFF-S is
+effective at hypothesizing dynamic causal relationships.
+We also ran ablation tests to study the effect of REDCLIFF-
+S model parameters on performance, which we discuss in
+detail in Appendix C.6 and summarize in Table 3.
+See further discussion in Appendix B.4.
+5. Experiments on Real-World Datasets
+We tested REDCLIFF-S on real-world data using the pub-
+licly available Tail Suspension Test (TST) dataset (Carlson
+et al., 2023) - which we discuss here - and the Social Pref-
+erence (SP) dataset described in Mague et al. (2022) (see
+Appendix C.5). Where possible, we combined multiple
+recordings within a single brain region into an averaged
+LFP for that region. The number of factors and other hyper-
+parameters were chosen based on grid searches minimizing
+the stopping criteria for training. Appendix D covers TST
+preprocessing in detail and Appendix C.4 elaborates on TST
+model selection and additional results.
+In Figure 5 we show the difference between mean normal-
+ized causal estimates for the REDCLIFF-S factors assigned
+to the Open Field (OF) and Home Cage (HC) behavioral
+paradigms in this case study. In it, we see the OF-factor is
+more heavily reliant than the HC-factor on information from
+Figure 5. Difference in REDCLIFF-S’ mean, normalized inter-
+variable causal estimates in the Open Field vs Home Cage
+paradigms of our TST Case Study.
+the Nucleus Accumbens Core (Acb Core) to predict behav-
+ior in the Prelimbic and Infralimbic cortices, and from the
+Anterior-Left Lateral Habenula (‘alLH HAB’) and Medial
+Dorsal Hippocampal (mDHip) channels to predict activity
+in several regions including the Thalmus (Md Thal). In-
+terestingly, our model’s hypothesis that the Anterior-Left
+Lateral Habenula (‘alLH HAB’) is important for predicting
+LFP activity across several brain regions in the more stress-
+ful OF paradigm appears to be validated by recent research
+implicating the Lateral Habenula in stress responses of mice
+(Tan et al., 2024). Prior research also identified a brain-wide
+‘anxiety network’ involving the Nucleus Accumbens Shell
+and the Prelimbic and Infralimbic cortices (Talbot et al.,
+2023), which our REDCLIFF-S model appears to express in
+part as pathways from the Nucleus Accumbens Core to the
+Prefrontal Cortex and from there to the Infralimbic Cortex
+and then to the Nucleus Accumbens Shell.
+6. Conclusion
+We present the novel REDCLIFF-S hypothesis generation
+algorithm for temporal systems featuring dynamic causal
+interactions. By learning to combine nonlinear factors using
+weights conditioned on signal history, REDCLIFF-S attains
+state-of-the-art performance in estimating multiple causal
+graphs simultaneously in various settings, and in a way
+conducive to follow-up scientific inquiry. Experiments on
+real data suggest REDCLIFF-S can provide scientific value
+to computational neuroscience and other fields.
+9Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Acknowledgements
+We would like to thank our colleagues at the Collective for
+Psychiatric Neuro-Engineering (CPNE) for supporting this
+work. In particular, conversations with Noah Lanier, Aaron
+Fleming, Kathryn Walder, and Hannah Soliman proved es-
+pecially helpful in clarifying and communicating our ideas.
+Conversations with Natalie Brown were also useful for clar-
+ifying key ideas. We would also like to thank the reviewers
+for providing their insight and helpful feedback.
+This material is based upon work supported by the National
+Science Foundation Graduate Research Fellowship under
+Grant No. DGE 2139754.
+Impact Statement
+This paper presents work whose goal is to advance the field
+of Machine Learning. There are many potential societal
+consequences of our work, none which we feel must be
+specifically highlighted here.
+References
+Allen, E. A., Liu, J., Kiehl, K. A., Gelernter, J., Pearl-
+son, G. D., Perrone-Bizzozero, N. I., and Calhoun, V . D.
+Components of cross-frequency modulation in health and
+disease. Frontiers in systems neuroscience , 5:59, 2011.
+Assaad, C. K., Devijver, E., and Gaussier, E. Survey and
+evaluation of causal discovery methods for time series.
+Journal of Artificial Intelligence Research , 73:767–819,
+2022.
+Bussmann, B., Nys, J., and Latr ´e, S. Neural additive vector
+autoregression models for causal discovery in time series.
+InDiscovery Science: 24th International Conference,
+DS 2021, Halifax, NS, Canada, October 11–13, 2021,
+Proceedings 24 , pp. 446–460. Springer, 2021.
+Calhoun, V . D., Miller, R., Pearlson, G., and Adalı, T. The
+chronnectome: time-varying connectivity networks as
+the next frontier in fmri data discovery. Neuron , 84(2):
+262–274, 2014.
+Carlson, D., Kumar, S., and Dzirasa, K. Multi-region local
+field potential recordings during a tail-suspension test.
+Duke Research Data Repository , 2023.
+Cheng, Y ., Lyu, B., Xing, W., and Zhu, Z. Dycast: learning
+dynamic causal structure from time series. 2025.
+D’Acunto, G., Di Lorenzo, P., and Barbarossa, S.
+Multiscale causal structure learning. arXiv preprint
+arXiv:2207.07908 , 2022.
+Dzirasa, K., Coque, L., Sidor, M. M., Kumar, S., Dancy,
+E. A., Takahashi, J. S., McClung, C. A., and Nicolelis,M. A. Lithium ameliorates nucleus accumbens phase-
+signaling dysfunction in a genetic mouse model of mania.
+Journal of Neuroscience , 30(48):16314–16323, 2010.
+Fox, E., Sudderth, E. B., Jordan, M. I., and Willsky, A. S.
+Bayesian nonparametric inference of switching dynamic
+linear models. IEEE Transactions on signal processing ,
+59(4):1569–1585, 2011.
+Friston, K., Moran, R., and Seth, A. K. Analysing connectiv-
+ity with granger causality and dynamic causal modelling.
+Current opinion in neurobiology , 23(2):175, 2013.
+Friston, K. J., Harrison, L., and Penny, W. Dynamic causal
+modelling. Neuroimage , 19(4):1273–1302, 2003.
+Fujiwara, D., Koyama, K., Kiritoshi, K., Okawachi, T.,
+Izumitani, T., and Shimizu, S. Causal discovery for non-
+stationary non-linear time series data using just-in-time
+modeling. In Conference on Causal Learning and Rea-
+soning , pp. 880–894. PMLR, 2023.
+Gallagher, N., Dzirasa, K., and Carlson, D. Directed spec-
+trum measures improve latent network models of neural
+populations. Advances in neural information processing
+systems , 34:7421–7435, 2021.
+Gerhardus, A. and Runge, J. High-recall causal discovery
+for autocorrelated time series with latent confounders.
+Advances in Neural Information Processing Systems , 33:
+12615–12625, 2020.
+Ghimire, M. Switching neural network systems for non-
+linear tracking. Master’s thesis, Wright State University,
+2018.
+Henckel, L., W ¨urtzen, T., and Weichwald, S. Adjustment
+identification distance: A gadjid for causal structure learn-
+ing. In The 40th Conference on Uncertainty in Artificial
+Intelligence .
+Huang, B., Zhang, K., Gong, M., and Glymour, C. Causal
+discovery and forecasting in nonstationary environments
+with state-space models. In Chaudhuri, K. and Salakhutdi-
+nov, R. (eds.), Proceedings of the 36th International Con-
+ference on Machine Learning , volume 97 of Proceedings
+of Machine Learning Research , pp. 2901–2910. PMLR,
+09–15 Jun 2019. URL https://proceedings.
+mlr.press/v97/huang19g.html .
+Keshtkaran, M. R., Sedler, A. R., Chowdhury, R. H., Tandon,
+R., Basrai, D., Nguyen, S. L., Sohn, H., Jazayeri, M.,
+Miller, L. E., and Pandarinath, C. A large-scale neural
+network training framework for generalized estimation
+of single-trial population dynamics. Nature Methods , 19
+(12):1572–1577, 2022.
+10Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Kolda, T. G. and Bader, B. W. Tensor decompositions and
+applications. SIAM review , 51(3):455–500, 2009.
+Koutra, D. Exploring and making sense of large graphs.
+Computer Science Department, Carnegie Mellon Univer-
+sity, 2015.
+Kugiumtzis, D. State space reconstruction parameters in
+the analysis of chaotic time series—the role of the time
+window length. Physica D: Nonlinear Phenomena , 95
+(1):13–28, 1996.
+Linderman, S., Johnson, M., Miller, A., Adams, R., Blei, D.,
+and Paninski, L. Bayesian learning and inference in re-
+current switching linear dynamical systems. In Artificial
+intelligence and statistics , pp. 914–922. PMLR, 2017.
+L¨owe, S., Madras, D., Zemel, R., and Welling, M. Amor-
+tized causal discovery: Learning to infer causal graphs
+from time-series data. In Conference on Causal Learning
+and Reasoning , pp. 509–525. PMLR, 2022.
+Maclaren, O. J. and Nicholson, R. What can be estimated?
+identifiability, estimability, causal inference and ill-posed
+inverse problems. arXiv preprint arXiv:1904.02826 ,
+2019.
+Mague, S. D., Talbot, A., Blount, C., Walder-Christensen,
+K. K., Duffney, L. J., Adamson, E., Bey, A. L., Ndubuizu,
+N., Thomas, G. E., Hughes, D. N., et al. Brain-wide
+electrical dynamics encode individual appetitive social
+behavior. Neuron , 110(10):1728–1741, 2022.
+Marbach, D., Schaffter, T., Mattiussi, C., and Floreano, D.
+Generating realistic in silico gene networks for perfor-
+mance assessment of reverse engineering methods. Jour-
+nal of computational biology , 16(2):229–239, 2009.
+Pamfil, R., Sriwattanaworachai, N., Desai, S., Pilgerstor-
+fer, P., Georgatzis, K., Beaumont, P., and Aragam, B.
+Dynotears: Structure learning from time-series data. In
+International Conference on Artificial Intelligence and
+Statistics , pp. 1595–1605. PMLR, 2020.
+Pearl, J. Causality . Cambridge university press, 2009.
+Rodas, C. B., Tu, R., and Kjellstrom, H. Causal discovery
+from conditionally stationary time-series. arXiv preprint
+arXiv:2110.06257 , 2021.
+Runge, J. Discovering contemporaneous and lagged causal
+relations in autocorrelated nonlinear time series datasets.
+InConference on Uncertainty in Artificial Intelligence ,
+pp. 1388–1397. Pmlr, 2020.
+Sadeghi, A., Gopal, A., and Fesanghary, M. Causal discov-
+ery in financial markets: A framework for nonstationary
+time-series data, 2024.Saggioro, E., de Wiljes, J., Kretschmer, M., and Runge,
+J. Reconstructing regime-dependent causal relationships
+from observational time series. Chaos: An Interdisci-
+plinary Journal of Nonlinear Science , 30(11), 2020.
+Seth, A. Granger causality. Scholarpedia , 2(7):1667, 2007.
+Shojaie, A. and Fox, E. B. Granger causality: A review
+and recent advances. Annual Review of Statistics and Its
+Application , 9(1):289–319, 2022.
+Song, T., Zheng, W., Song, P., and Cui, Z. Eeg emotion
+recognition using dynamical graph convolutional neural
+networks. IEEE Transactions on Affective Computing , 11
+(3):532–541, 2018.
+Stephan, K. E., Penny, W. D., Moran, R. J., den Ouden,
+H. E., Daunizeau, J., and Friston, K. J. Ten simple rules
+for dynamic causal modeling. Neuroimage , 49(4):3101–
+3102, 2010.
+Talbot, A., Dunson, D., Dzirasa, K., and Carlson, D.
+Estimating a brain network predictive of stress and
+genotype with supervised autoencoders. Journal of
+the Royal Statistical Society Series C: Applied Statis-
+tics, 72(4):912–936, 05 2023. ISSN 0035-9254. doi:
+10.1093/jrsssc/qlad035. URL https://doi.org/
+10.1093/jrsssc/qlad035 .
+Tan, W., Ikoma, Y ., Takahashi, Y ., Konno, A., Hirai, H.,
+Hirase, H., and Matsui, K. Anxiety control by astrocytes
+in the lateral habenula. Neuroscience Research , 2024.
+Tank, A., Covert, I., Foti, N., Shojaie, A., and Fox, E. B.
+Neural granger causality. IEEE Transactions on Pattern
+Analysis and Machine Intelligence , 44(8):4267–4279,
+2021.
+Weichwald, S., Jakobsen, M. E., Mogensen, P. B., Pe-
+tersen, L., Thams, N., and Varando, G. Causal structure
+learning from time series: Large regression coefficients
+may predict causal links better in practice than small p-
+values. volume 123 of Proceedings of the NeurIPS 2019
+Competition and Demonstration Track, Proceedings of
+Machine Learning Research , pp. 27–36. PMLR, 2020.
+URLhttp://proceedings.mlr.press/v123/
+weichwald20a.html .
+Yu, Y ., Chen, J., Gao, T., and Yu, M. Dag-gnn: Dag structure
+learning with graph neural networks. In International
+conference on machine learning , pp. 7154–7163. PMLR,
+2019.
+Zhang, K., Huang, B., Zhang, J., Glymour, C., and
+Sch¨olkopf, B. Causal discovery from nonstation-
+ary/heterogeneous data: Skeleton estimation and orienta-
+tion determination. In IJCAI: Proceedings of the Confer-
+ence, volume 2017, pp. 1347, 2017a.
+11Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Zhang, K., Huang, B., Zhang, J., Glymour, C., and
+Sch¨olkopf, B. Causal discovery from nonstation-
+ary/heterogeneous data: Skeleton estimation and orienta-
+tion determination. In IJCAI: Proceedings of the Confer-
+ence, volume 2017, pp. 1347. NIH Public Access, 2017b.
+Zivot, E. and Wang, J. Vector autoregressive models for
+multivariate time series. Modeling financial time series
+with S-PLUS® , pp. 385–429, 2006.
+Zou, C. and Feng, J. Granger causality vs. dynamic bayesian
+network inference: a comparative study. BMC bioinfor-
+matics , 10:1–17, 2009.
+12Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+A. Supporting Theory and Proofs
+A.1. Identifiability Analysis of Systems Featuring Nonlinear, Dynamic Causal Graphs
+In this section we provide theoretical arguments as to why the systems at the center of our work - dynamical systems
+featuring nonlinear, dynamic causal graphs - are generally not identifiable. At the same time, we point out that prior
+work has demonstrated that utilizing causal discovery methods can still benefit scientific research in real-world settings
+where nonlinear, dynamic causal graphs are the norm rather than the exception (Mague et al., 2022). Throughout our
+discussion, we follow the common definition of identifiability, in which if the likelihood of two models is the same, then
+their parameterizations must also be the same (Maclaren & Nicholson, 2019).
+There are three cases related to causal identifiability in our setting: the case where auxiliary variables are not available (the
+unsupervised case), that where some - but not all - auxiliary variables are available (the partially-supervised case), and the
+case where an auxiliary variable can be assigned to every system state (the fully supervised case). For the unsupervised
+and partially-supervised cases, the lack of identifiability is readily apparent in that we can swap various factors and factor
+weights tied to unsupervised states within our REDCLIFF(-S) architecture and arrive at functionally identical models.
+The fully supervised case is also not identifiable, as we illustrate via counter-example. Consider the system with nk= 2
+states ( 0and1),nc= 2node ( AandB) where both nodes are self-connected. Assume all innovations in AandBfollow
+a symmetric, random distribution (such as the uniform or normal distributions) in both states 0and1at every time step.
+Finally, assume the only difference between states 0and1is that in state 0we have that Adrives B(i.e.A→B) via
+the ReLU (i.e. positive indicator 1(x)[max( x,0)]) function at lag t= 2, whereas in state 1we have A→Bis the negative
+ReLU (i.e. negative indicator 1(x)[min( x,0)]) function at lag t= 2. In this setting the functional form of the A→Bedge
+cannot be uniquely identified for either state 0or1- even with an infinite number of samples. Specifically, for state 0the
+negative indicator 1(x)[min( x,0)]at lag t= 2will be just as correlated with the observed data as the true positive indicator
+1(x)[max( x,0)]at lag t= 2for the A→Bedge. Similarly, in state 1the positive indicator 1(x)[max( x,0)]at lag t= 2will be
+just as correlated with observations as the true negative indicator 1(x)[min( x,0)]at lag t= 2for the A→Bedge.
+In summary, we have demonstrated that systems featuring nonlinear, dynamic causal graphs are not identifiable unless
+one makes sweeping assumptions which preclude even fairly simple systems (such as our 2-node system with ReLU-like
+nonlinearities) from being considered. Despite this, prior work has shown that causal discovery methods still benefit
+scientific research in real-world settings where nonlinear, dynamic causal graphs are common (Mague et al., 2022).
+A.2. Noisy Classification vs Generative Task Information Requirements
+We now provide a theoretical argument as to why it may be necessary to provide additional system history to (and even
+drastically limit the modeling capabilities of) the REDCLIFF(-S) state model. Our argument centers around the implications
+of the τinandτclparameters (Eq. 4), and is thus related to long-standing prior work investigating the effects of similar
+parameters on state-space models of dynamical systems (Kugiumtzis, 1996). Here, we argue that the task of predicting
+the state of a signal requires more historical time steps than is required to generate the same time series in the presence of
+nontrivial noise, at least for some dynamical systems. We now present a summary of our theoretical argument, followed by
+a proof sketch, and finally by a discussion of the theoretical implications.
+A.2.1. M OTIVATING EXAMPLE (LEMMA 1 PRELIMINARIES )
+As a motivating example, we explore a system for which a classifier needs more historical information as opposed to a
+generative model. In our example, there are at least two system states governed by different causal relationships operating
+on similar time scales, for which a classifier cannot both a)distinguish between these two states and b)be unbiased.
+LetΦbe a system consisting of D∈Ninteracting variables according to N∈Nstates, in which the dynamics of Φare
+governed by M∈Ndistinct causal graphs between variables. Define τas the maximal number of historical time steps
+required to generate the behavior of Φacross all states6. Assume ∃two states of Φ(call them states iandjwhere i̸=j) for
+which the generative functions can be expressed as fi(xt) =Aixt−τandfj(xt) =Ajxt−τwhere both Ai∈RD×Dand
+Aj∈RD×Dare invertible with Ai̸=Aj.
+Finally, let Xi∈RD×Tbe a recorded signal of T∈Nobservations made while Φwas in state i≤N. We say that Xi
+6Effectively, τis the number of time steps required to reduce Φto a Markov Chain.
+13Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+exhibits nontrivial noise if ∃another recording Xj∈RD×Tsuch that 0< j≤Nwithj̸=ifor which the initial conditions
+are independently, identically distributed with those of Xi, that is: Xi:,0i.i.d.∼Xj:,0.7
+A.2.2. L EMMA 1: S TATEMENT AND PROOF SKETCH
+Lemma 1 To learn an accurate, unbiased state model gθmapping recorded signals with nontrivial noise to states of Φ(i.e.
+gθ:RD×T→N≤N), it must be that T > τ .
+Proof Sketch Lemma 1 follows from Bayes’ Theorem, which we use to show that two windows of length τsampled from a
+distribution featuring nontrivial noise can’t be readily distinguished by an unbiased model gθ.
+Suppose the recording x∈RD×TwithT < τ is randomly sampled from Φaccording to a uniform distribution over all N
+states. By way of contradiction, assume we have an unbiased classifier (i.e. the REDCLIFF-S state model gθ) for which
+p(fi|X)̸=p(fj|X).
+Notice that since both AiandAjare invertible, we have both that
+X:,T−τ=f−1
+i(X:,T) =A−1
+iX:,T∼p(X|fi)
+as well as that
+X:,T−τ=f−1
+j(X:,T) =A−1
+jX:,T∼p(X|fj).
+Hence, we have
+=⇒p(X|fi) =p(X|fj). (12)
+Applying Bayes’ Theorem, we have that
+=⇒p(fi,X)p(X)
+p(fi)=p(X|fi) =p(X|fj) =p(fj,X)p(X)
+p(fj)=⇒p(fi,X)
+p(fi)=p(fj,X)
+p(fj)(13)
+Now recall that Xwas randomly sampled according to a uniform distribution over states. Therefore, p(fi,X) =p(fj,X),
+which yields
+=⇒1
+p(fi)=1
+p(fj)=⇒p(fi) =p(fj) (14)
+However, we can also apply Bayes’ Theorem to the output of our classifier p(fi|X)̸=p(fj|X). Doing this yields
+p(fi,X)p(fi)
+p(X)=p(fi|X)̸=p(fj|X) =p(fj,X)p(fj)
+p(X)(15)
+As before, we use the fact that p(fi,X) =p(fj,X)to obtain
+=⇒p(fi,X)p(fi)̸=p(fj,X)p(fj) =⇒p(fi)̸=p(fj) (16)
+But the finding that p(fi)̸=p(fj)contradicts our assumption that our classifier was unbiased, for which p(fi) =p(fj).
+⇒⇐
+A.2.3. D ISCUSSION
+Lemma 1 has important implications for training REDCLIFF-based models. Effectively, once the state model gθin a
+REDCLIFF model has enough capacity to accurately distinguish between states, Lemma 1 indicates that gθmay also
+have access (by necessity) to at least as much information as that required to forecast the evolution of Φ(assuming
+the proper noise profile) in one or more system states , at least for restricted (yet simple and arguably common) classes of
+temporal systems. These findings indicate that it may be necessary at times to restrict the modeling capabilities of gθto
+ensure proper delineation of tasks within a REDCLIFF-S model.
+7This is relevant to hypothesis generation, where we often start by assuming signals are generated from similarly distributed initial
+conditions, and we attempt to identify where this assumption fails.
+14Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+A.3. ‘Broadcast Multiplication’: Formal Definition
+Here we formally define broadcast multiplication - the linear operation used to combine outputs of our generative factors.
+Definition : Let N-dimensional vectors v,v′∈RNbe given along with 3-axis tensors Z,Z′∈RN×P×Qwhere both
+P, Q∈N. Then ‘broadcast multiplication’, denoted by ⊙†, is an operation such that
+v⊙†Z=NX
+n=1vn·Zn,:,: (17)
+B. Methodological Details
+B.1. Factor-level Implementation - A Brief Review of cMLPs (Tank et al., 2021)
+As mentioned in the main paper, we implement each factor of the REDCLIFF-S models in this work as a “component-wise
+Multi-Layer Perceptron” or “cMLP” (Tank et al., 2021); here we briefly summarize the cMLP architecture and refer the
+reader to the original paper for more details. Essentially, the cMLP architecture is a 1-D convolutional neural network
+that treats the first layer of weights as an information filter mapping prior variable values of a dynamic system to the next
+predicted value of a single variable. Since the architecture allows for a set of historical system observations to be input, the
+first layer of a cMLP comes to represent a set of estimated, time-lagged Granger causal connections. One can view the
+magnitude of each weight in the first layer of parameters as the strength of a Granger causal connection from one of the
+input variables to the predicted variable. By instantiating a different cMLP for each variable in a dynamical system, one can
+learn a sequence of time-lagged, full adjacency matrices mapping prior variable values to future variable values. We found
+this architecture to be flexible for our purposes, and it proved at least as effective in predictive tasks as other architectures
+we tested in preliminary experiments (namely the cLSTM (Tank et al., 2021) and DGCNN (Song et al., 2018) architectures).
+B.2. Standardizing Causal Graph Estimates
+To facilitate fair comparison between both baseline and our REDCLIFF-based algorithms, we needed to standardize the
+form in which each algorithm’s estimated Granger causal graphs were presented. This was non-trivial, since some of the
+algorithms incorporated a lag-dimension into their causal graph estimates (esp. those based on the cMLP architecture from
+Tank et al. (2021)), while others (esp. DYNOTEARS from Pamfil et al. (2020)) treated each feature measured from a
+channel - be it a historical scalar value or a power-spectral feature - as an individual node in the estimated graph, while yet
+others (esp. dCSFA-NMF in Gallagher et al. (2021) and REDCLIFF-based models) learned multiple causal graph factors.
+The standard we chose to adopt was that each estimated (and true) Granger causal graph would need to be presented as a
+simple adjacency matrix; i.e. if there were ncvariables in the recorded system, then the true/estimated graph(s) from each
+system/model were compressed to lie within Rnc×nc. In practice, this meant that graphs involving lags and/or node features
+had their representations compressed by summing over the lag and/or feature values corresponding to each node.
+If an algorithm was only capable of estimating a single graph for a system governed by nk>1graphs, the estimated graph
+was copied nktimes and compared to each of the mtrue causal graphs, with results averaged across each comparison.
+B.3. REDCLIFF-S Stopping Criteria and Model Selection
+Here we describe how we arrived at the stopping criteria for REDCLIFF-S model training and how it was used in model
+selection. Our stopping criteria (Equation 10) has three main components: a forecasting term, a state classification term, and
+an estimated Granger causal graph similarity term. Intuitively, the two MSE terms (forecasting and state classification) are
+in the stopping criteria to ensure our performance on the two main subtasks of our REDCLIFF-S models (predicting factor
+effect and relevance; see Figure 1A) is being optimized.
+The third cosine similarity-based (estimated Granger causal graph similarity) term is included for several reasons. For one
+thing, the very premise of REDCLIFF-S is that the target system being modeled has different causal relationships over time;
+hence, our stopping criteria implicitly assumes that component factors ought to be different by minimizing this estimated
+Granger causal graph similarity term. A potentially useful side-effect of minimizing similarity between factors is that it
+reduces the size and complexity of our REDCLIFF-S model.
+In addition to these intuitive motivations for minimizing cosine similarity between factors, we also found this cosine
+15Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+similarity-based term was correlated with the value of various graph similarity metrics comparing factor estimates to
+their ground truth representations over the course of training (for example, see Supplemental Table 4). Other interesting
+phenomena include our finding that troughs in our mean cosine similarity curve coincided with peaks in the DeltaCon0
+similarity (a measure of functional similarity between two graphs (Koutra, 2015)) between estimated and true causal graphs
+as well as the onset of instabilities in the ROC-AUC curves comparing estimates to ground truth. These observations (along
+with similar ones from many other experiments) demonstrate why this penalty for the sum of cosine similarity between
+factor estimates served as a reasonable proxy to determine when to stop training.
+Table 4. Comparing correlation between stopping criteria elements and the ROC-AUC between final REDCLIFF-S factor predictions of
+causal relationships and the true factor graphs in our Synthetic Systems grid search over REDCLIFF-S model parameters. Values rounded
+to three significant figures, with the strongest negative correlation bolded.
+LOSS/PENALTY TERMS INCLUDED INCRITERIA
+FORECASTING STATE PREDICTION GRAPH SIMILARITY PEARSON ’SR V ALUE
+✓ - - -0.368
+- ✓ - 0.529
+- - ✓ -0.332
+✓ ✓ - -0.176
+✓ - ✓ -0.654
+- ✓ ✓ -0.201
+✓ ✓ ✓ -0.674
+One open question is how to balance the significant differences in variation between the forecasting and state prediction
+penalties on one hand and the significantly less-variable cosine similarity term on the other. In selecting the final model for
+our D4IC experiment, we found that weighting the cosine similarity penalty by 60ρ(instead of just ρ) in our selection criteria
+balanced the three variation scales to all lie within roughly the same order of magnitude. More sophisticated balancing
+schemes would likely improve results.
+B.4. Discussion: Limitations and Future Work
+Most limitations of REDCLIFF-S arise as trade-offs for scientific utility. For example, the set of REDCLIFF-S factors
+has many hyperparameters which can be costly to tune; this cost restricted us to tuning on a single repeat of our 12-node,
+33-edge, 3-factor system in Section 4.2, and may have limited REDCLIFF-S’ measured performance.
+We also wish to draw attention to a general lack of methods for measuring functional similarity in nonlinear graphs.
+As discussed in relation to Equation 5, we found it helpful to approximate the DeltaCon0 metric (which measures
+functional/compositional similarity between lagged linear graphs) (Koutra, 2015) using a cosine similarity penalty; however,
+to the best of our knowledge, the nonlinear version of DeltaCon0 has not been developed. This poses a major obstacle to
+evaluating the performance of models on our Synthetic Systems task, and is a research question we hope our work motivates.
+B.5. Comparing State Prediction Error with 1-Factor Models
+To test the ability of the REDCLIFF-S algorithm to dynamically adjust factor weightings at each time step in preliminary
+experiments, we compared the mean-squared error of each state label prediction ˆymade by REDCLIFF-S models against a
+‘Na¨ıve 1-Factor Model’ state prediction. For this, we adopted the convention that a state label prediction made by a 1-Factor
+model (such as the cMLP and cLSTM models by (Tank et al., 2021) or the DGCNN method by (Song et al., 2018)) would
+be equivalent to predicting that all system factors (represented by the model’s single factor) would always be present; hence,
+ˆy=1for any input xin. The difference in MSE between these na ¨ıve predictions and the true label ywas taken with the
+MSE obtained by the REDCLIFF-S models’ predictions across many samples and then averaged.
+C. Additional Experimental Results
+C.1. Pair-wise Optimal F1-Score Improvement of REDCLIFF-S on Synthetic Systems’ 6-2-2 Data
+As we alluded to in the abstract of the main paper, REDCLIFF-S “improves f1-scores of predicted dynamic causal patterns
+by roughly 22-28% on average over baselines in some of our experiments, with some improvements reaching well over
+16Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 6. Pair-wise optimal f1-Score Improvement of REDCLIFF-S on the Synthetic Systems 6-2-2 experiment.
+60%”; Figure 6 plots these levels of improvement explicitly.
+C.2. Additional D4IC Results
+We report the main results of our D4IC Low Signal-to-Noise Ratio (LSNR) experiments in Figure 7 and those of our D4IC
+Moderate Signal-to-Noise Ratio (MSNR) experiments in Figure 8.
+Figure 7. Optimal f1-score on D4IC-LSNR experiments.
+ Figure 8. Optimal f1-score on D4IC-MSNR experiments.
+We also report ROC-AUC statistics corresponding to D4IC-trained REDCLIFF-S, cMLP-v2, and dCSFA-NMF models in
+Table 5.
+C.3. Additional Synthetic Systems Results
+We now report additional results from our Synthetic Systems experiments for transparency.
+17Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 5. Average inter-variable ROC-AUC score ±SEM on the D4IC LSNR, MSNR, and HSNR data sets. Averages are taken across
+factors and repeats. Note that predictions included edge weighting, but we converted true-edge weights into binary ‘present’/‘not-present’
+values during evaluation to facilitate ROC-AUC calculations.
+D4IC N OISE LEVEL
+ALGORITHM LSNR MSNR HSNR
+CMLP- V2 0.550 ±0.016 0.594 ±0.017 0.567 ±0.015
+DCSFA-NMF - 0.567 ±0.013 0.554 ±0.013
+REDCLIFF-S ( CMLP) 0.632 ±0.014 0.635 ±0.016 0.629 ±0.018
+Figure 9. Summary plot of pair-wise optimal f1-score improvement of REDCLIFF-S across Synthetic Systems experiments.
+In Table 6 we report ROC-AUC scores corresponding to the models and optimal f1-score statistics in Figure 2 of the main
+manuscript.
+We give additional results related to Table 2 in Supplemental Table 7. Note that between the two tables, the top performing
+baselines - usually Regime-PCMCI (Saggioro et al., 2020) and SLARAC (Weichwald et al., 2020) - appear to ‘trade-off’
+between performance on metrics such as optimal f1-score and structural hamming distance (SHD) versus performance on
+the AID metrics. In contrast, REDCLIFF-S does not exhibit this trade-off, regularly attaining competitive performance
+(statistically similar to the best or second-best performances) across all metrics.
+With regards to optimal f1-score performance, we provide a summary plot of these results in Supplemental Figure 9 and a
+visualization comparing true to estimated factors in Supplemental Figure 10. Optimal f1-score and ROC-AUC score results
+are grouped by systems rated with similar complexity scores. Scores of C≤7.0received a ‘Low’ categorization; results
+on systems with this rating can be found in Supplementary Figures 11 through 16. Scores which satisfied 7.0<C≤13.0
+were categorized as ‘Moderate’ complexity; results on systems with this rating can be found in Supplementary Figures 17
+through 22. Scores were categorized as ‘High’ complexity if they satisfied C>13.0; results on systems with this rating can
+be found in Supplementary Figures 23 through 24.
+18Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 6. Average inter-variable ROC-AUC score ±SEM on the Synthetic System 6-2-2, 6-4-2, 12-11-2, and 12-11-5 data sets. Averages
+are taken across factors and repeats. Note that predictions included edge weighting, but we converted true-edge weights into binary
+‘present’/‘not-present’ values during evaluation to facilitate ROC-AUC calculations.
+SYNTHETIC SYSTEM
+ALGORITHM 6-2-2 6-4-2 12-11-2 12-11-5
+CMLP 0.544 ±0.035 0.591 ±0.021 0.572 ±0.020 0.562 ±0.015
+CLSTM 0.612 ±0.050 0.534 ±0.040 0.532 ±0.024 0.552 ±0.020
+DGCNN 0.556 ±0.072 0.566 ±0.036 0.562 ±0.030 0.536 ±0.015
+DCSFA-NMF - - - 0.557 ±0.012
+REDCLIFF-S ( CMLP) 0.797 ±0.036 0.682 ±0.037 0.756 ±0.019 0.743 ±0.019
+Table 7. Supplemental results to Table 2. Note that the final column now gives the average placement across metrics from both tables
+combined. Again, note that performance is averaged across 10 random seeds, leading to slight differences with REDCLIFF-S performance
+given in Table 6.
+(NOTHRESHOLD ) A NCESTOR AIDERROR OSETAIDERROR OVERALL
+ALGORITHM ROC-AUC U PPER LOWER UPPER LOWER AVG. PLACE .
+LASAR (S UP.) 0.457 ±0.043 4.9 ±1.466 2.9 ±0.434 4.7 ±1.331 2.9 ±0.434 3.8
+QRBS (S UP.) 0.424 ±0.029 2.1 ±0.385 1.9 ±0.537 2.5 ±0.548 1.9 ±0.537 3.0
+SLARAC (S UP.) 0.347 ±0.023 0.8 ±0.716 0.4 ±0.219 0.7 ±0.626 0.4 ±0.219 2.8
+REGIME -PCMCI 0.775 ±0.018 3.8 ±0.540 3.6 ±0.518 4.1 ±0.477 3.8 ±0.502 3.1
+REDCLIFF-S 0.782±0.021 2.2 ±0.335 2.1 ±0.434 2.7 ±0.390 2.3 ±0.522 2.3
+C.4. Additional Region-Averaged TST 100 Hz Results
+We provide a visualization of our approach to model selection (specifically with regard to determining the number of
+REDCLIFF-S factors) in Supplemental Figure 25. Plots of the supervised adjacency matrices learned by our REDCLIFF-S
+models trained on the Region-Averaged TST 100 Hz dataset can be found in Supplemental Figures 26 through 28. We
+provide additional plots of the differences between the average Open Field (OF) and Tail Suspended (TS) supervised factors
+in Supplemental Figure 29 and between the average TS and Home Cage (HC) supervised factors in Supplemental Figure 30.
+C.5. Region-Averaged Social Preference 100 Hz Results
+In addition to the TST dataset, we also applied our REDCLIFF-S method to analyze the Social Preference (SP) dataset
+described in Mague et al. (2022). It should be noted that our analysis here is preliminary, and was not as thorough as our
+analysis of the TST data due to time constraints. Supplemental Figure 31 provides a visualization of how we selected the
+number of factors for the REDCLIFF-S models trained on different folds of the SP data; note that the selection criteria does
+not decrease monotonically as the number of factors increases (as it did on the TST data), suggesting that a more detailed
+search of REDCLIFF-S’ hyperparameter settings may yield more accurate results. Plots of the supervised adjacency matrices
+learned by our REDCLIFF-S models trained on the Region-Averaged SP 100 Hz dataset can be found in Supplemental
+Figures 32 and 33.
+We provide an additional plot of the mean normalized difference between Social Preference (SP) and Object Preference
+(OP) supervised factors in Supplemental Figure 34. While several of the connections that REDCLIFF-S found do appear to
+have been published previously (compare with Figure 4A in Mague et al. (2022)), we highlight the fact that the network
+identified by REDCLIFF-S seems to break from previously published results by including the Hippocampus in multiple
+network edges. Interestingly, Mague et al. (2022) report that elevated power in certain frequency bands recorded from the
+Hippocampus was implicated in social behavior, but they did not seem to detect any coherence between activity in the
+Hippocampus versus other regions. Given that our REDCLIFF-S method is designed to estimate both linear and nonlinear
+granger causal relationships whereas the dCSFA-based technique employed by Mague et al. (2022) focuses exclusively on
+linear causal relationships, these findings may suggest that the Hippocampus shares nonlinear causal relationships with
+other brain regions during social activity. More follow up work would need to be done to confirm this hypothesis, but we are
+excited to see that REDCLIFF-S does appear to be identifying plausible, novel hypotheses.
+19Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 8. Mean optimal f1-score ±SEM obtained by REDCLIFF-S ablations across various datasets (summarized in Table 3 of the main
+paper). Values should be compared against those depicted in Figures 2A and 4 of the main paper.
+ABLATION
+DATASET ρ= 0(EQ. 5, 10) nk= 1(≡EQ. 2) α= 1(EQ. 4) λ= 0(EQ. 9)
+SYNTHETIC SYSTEM 6-2-2 0.463 ±0.057 0.279 ±0.044 0.291 ±0.045 0.279 ±0.044
+SYNTHETIC SYSTEM 6-4-2 0.517 ±0.054 0.335 ±0.031 0.407 ±0.037 0.335 ±0.031
+SYNTHETIC SYSTEM 12-11-2 0.296 ±0.037 0.188 ±0.033 0.208 ±0.018 0.188 ±0.033
+SYNTHETIC SYSTEM 12-11-5 0.362 ±0.031 0.156 ±0.014 0.197 ±0.018 0.156 ±0.015
+D4IC HSNR 0.370 ±0.014 0.304 ±0.002 0.336 ±0.009 0.342 ±0.010
+C.6. Ablation Analyses
+In Table 8 we provide the details of our ablation experiments summarized in Table 3 of the main paper. With the exception
+of our ρ= 0ablation experiments, we see that ablation scores are worse - in many cases by a large margin - than those of
+the full REDCLIFF-S model, suggesting that these hyperparameters play an important role in REDCLIFF-S’ performance.
+Theρ= 0ablation experiments tell a more nuanced story, with performance degrading marginally for three of the five
+systems tested and actually increasing when ρwas ablated for two of the systems. These observations are somewhat
+unsurprising for a few reasons. Firstly, we reiterate that we only tuned the hyperparameters - including ρ- on a single
+synthetic system configuration due to time constraints, so it is unsurprising that at least one of our parameter settings
+is sub-optimal in certain cases. Secondly, we note that there appears to be a pattern in Table 8 where the systems with
+sparser edges and fewer factors (esp. the 6-2-2 and 12-11-2 Synthetic Systems) tend to perform worse after setting ρ= 0,
+whereas those with more edges and factors (esp. the 6-4-2 and 12-11-5 Synthetic Systems) see improvements when ρ= 0.
+This makes intuitive sense, since state graphs in systems with more edges and factors are simply more likely to share
+similar causal relationships than those with sparser connections and fewer states. Finally, the CosSim loss term which
+ρmodulates was introduced into REDCLIFF’s training process after we observed that doing so correlated loosely with
+improved ROC-AUC performance at test time in preliminary experiments (see Appendix B.3); since the ROC-AUC and
+F1 metrics are fundamentally different, the correlated relationship between minimized CosSim and ROC-AUC may not
+always indicate improved F1 performance. In summary, it would seem that ρis more sensitive than other hyperparameters to
+properties of the system being modeled and should thus be carefully tuned to suit the particular target system (and possibly
+dropped entirely for sufficiently dense or expressive systems).
+20Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 10. Visualizing true (left column) and REDCLIFF-S Top-10 estimated (right column) inter-variable causal relationships of two
+factors (‘A’ - also depicted in main paper Figure 3 - and ‘B’) from Synthetic System “12-11-5”. The color map shows (normalized) weight
+of inter-variable causal relationships.
+21Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 11. Average optimal f1-scores ±SEM from our Low-
+complexity Synthetic Systems experiments.
+Figure 12. Average improvement in optimal f1-scores ±SEM
+by the REDCLIFF-S algorithm over baselines from our Low-
+complexity Synthetic Systems experiments.
+Figure 13. Average optimal f1-scores ±SEM from our Low-
+complexity Synthetic Systems experiments.
+Figure 14. Average improvement in optimal f1-scores ±SEM
+by the REDCLIFF-S algorithm over baselines from our Low-
+complexity Synthetic Systems experiments.
+22Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 15. Average optimal f1-scores ±SEM from our Low-
+complexity Synthetic Systems experiments.
+Figure 16. Average improvement in optimal f1-scores ±SEM
+by the REDCLIFF-S algorithm over baselines from our Low-
+complexity Synthetic Systems experiments.
+Figure 17. Average optimal f1-scores ±SEM from our Moderate-
+complexity Synthetic Systems experiments.
+Figure 18. Average improvement in optimal f1-scores ±SEM by
+the REDCLIFF-S algorithm over baselines from our Moderate-
+complexity Synthetic Systems experiments.
+23Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 19. Average optimal f1-scores ±SEM from our Moderate-
+complexity Synthetic Systems experiments.
+Figure 20. Average improvement in optimal f1-scores ±SEM by
+the REDCLIFF-S algorithm over baselines from our Moderate-
+complexity Synthetic Systems experiments.
+Figure 21. Average optimal f1-scores ±SEM from our Moderate-
+complexity Synthetic Systems experiments.
+Figure 22. Average improvement in optimal f1-scores ±SEM by
+the REDCLIFF-S algorithm over baselines from our Moderate-
+complexity Synthetic Systems experiments.
+24Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 23. Average optimal f1-scores ±SEM from our High-
+complexity Synthetic Systems experiments.
+Figure 24. Average improvement in optimal f1-scores ±SEM
+by the REDCLIFF-S algorithm over baselines from our High-
+complexity Synthetic Systems experiments.
+Figure 25. Visualizing model selection in the Region-Averaged
+TST 100 Hz case study.
+Figure 26. Average estimated strength of causal relationships be-
+tween channels recorded in the Home Cage state from the Region-
+Averaged TST 100 Hz experiment.
+25Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 27. Average estimated strength of causal relationships be-
+tween channels recorded in the Open Field state from the Region-
+Averaged TST 100 Hz experiment.
+Figure 28. Average estimated strength of causal relationships be-
+tween channels recorded in the Tail Suspended state from the
+Region-Averaged TST 100 Hz experiment.
+Figure 29. Difference between Open Field vs Tail Suspended aver-
+age estimated strength of causal relationships between channels
+from the Region-Averaged TST 100 Hz experiment.
+Figure 30. Difference between Tail Suspended vs Home Cage av-
+erage estimated strength of causal relationships between channels
+from the Region-Averaged TST 100 Hz experiment.
+26Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 31. Visualizing model selection in the Region-Averaged SP 100 Hz case study.
+Figure 32. Average estimated strength of causal relationships be-
+tween channels recorded in the Social Preference state from the
+Region-Averaged SP 100 Hz experiment.
+Figure 33. Average estimated strength of causal relationships be-
+tween channels recorded in the Object Preference state from the
+Region-Averaged SP 100 Hz experiment.
+27Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Figure 34. Difference in average estimated strength of causal relationships between channels predicted in the Social Preference vs Object
+Preference behavioral paradigms of the Region-Averaged SP 100 Hz experiment.
+28Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+D. Datasets Used: Additional Details
+In this section we report various hyperparameters used in curating/preparing the datasets used in our experiments. Sup-
+plemental Table 9 presents hyperparameters for the D4IC dataset (see Section 4.3). Supplemental Table 10 presents
+hyperparameters for the Synthetic Systems Dataset (see Section 4.2). Supplemental Table 11 presents hyperparameters for
+the Region-Averaged TST 100 Hz dataset (see Section 5). We briefly discuss the Region-Averaged SP 100 Hz dataset in
+Appendix D.2.
+Note that some elements in these hyperparameter tables appear as functions/equations rather than numerical values or lists of
+numbers. Due to the vast number of models we had to train for our quantitative results, portions of our code were designed
+to compute various hyperparameters rather than have them hard-coded and/or passed in as arguments. We release this
+code in the project repository for the main paper; again, the repository can be accessed at github.com/carlson-lab/redcliff-s-
+hypothesizing-dynamic-causal-graphs.
+Table 9. D4IC Dataset (Section 4.3) - hyperparameters across experiments.
+PARAMETER NAME VALUE
+NETWORK SIZE 10
+NUMBER OF FACTORS PERSYSTEM 5
+NUMBER OF CROSS VALIDATION FOLDS 5
+DOMINANT COEFFICIENT 10
+POSSIBLE BACKGROUND COEFF .S ∈[0.0, 0.1, 1.0]
+Table 10. Synthetic Systems Dataset (Sections 4.1-4.2) - hyperparameters across experiments. Of particular note, repeat number 3
+(indexed from 0) of the nc= 12 -node, ne= 33 -edge (inter-variable), nk= 3-factor synthetic system dataset was used for grid-searching
+hyperparameters across our Synthetic Systems experiments. Generally speaking, we find that the greater the number of edges per node in
+the system, the more ‘complex’ the Granger causal estimation task.
+PARAMETER NAME VALUE
+NUMBER OF REPEATS PER SYSTEM 5
+NUMBER OF FACTORS /VAR- MODELS (nk=B) nk∈ {1,2,3,4,5,6,7,8,9,10}
+DIMENSIONALITY (nc) nc∈ {3,6,12}
+LAGGED DEPENDENCIES (τ) 2
+NUMBER OF TIMESTEPS IN RECORDINGS 100
+TRAINING SAMPLES PER CLASS LABEL (TSCL) 1040
+VALIDATION SAMPLES PER CLASS LABEL (VSCL) 240
+NUMBER OF SAMPLES IN TRAINING SET =TSCL ∗(B+ 1)
+NUMBER OF SAMPLES IN VALIDATION SET =VSCL ∗(B+ 1)
+INNOVATIONS AMP COEFFS =NP.ONES ((nc, 1))
+INNOVATIONS VAR =NP.ZEROS ((nc, 1))
+INNOVATIONS MU =NP.ZEROS ((nc, 1))
+BASE FREQUENCIES =np.pi∗np.array([i ∗707 + i%2for i in range(n c)]
+).reshape(n c,1)/120000
+D.1. Preprocessing the TST 100 Hz Datasets
+As mentioned in the main paper, we applied some preprocessing steps to the publicly available TST dataset (Carlson et al.,
+2023) in order to prepare it for our experiments. Specifically, we first sorted the publicly available local field potential
+(LFP) recordings and associated behavioral label files according to the identifier of the mouse being observed; this was
+done in order to ensure all mice were equally represented in each data repeat and so that different mice could be designated
+as ‘hold-out’ subjects for each repeat. We then iterated through each subject mouse’s files and performed the following
+operations on each recording:
+• Removed LFP recordings from any channel/brain-region that was not present across all recordings of all mice;
+•Marked any time point for which the LFP value was more than 15 median absolute deviations above the median value
+of the (filtered - see below) recorded signal as outliers (i.e. ‘nan’ values);
+29Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 11. Region-Averaged TST 100 Hz Dataset (Section 4.4) - hyperparameters across experiments.
+PARAMETER NAME VALUE
+NUM PROCESSED SAMPLES 10000
+SAMPLE TEMP WINDOW SIZE 1500
+SAMPLE FREQ 1000
+POST PROCESSING SAMPLE FREQ 100
+CUTOFF 35
+MAD THRESHOLD 15
+Q 2
+ORDER 3
+FILTER TYPE LOWPASS
+HOME CAGE STOP = 300* SAMPLE FREQ
+DOWNSAMPLING STEP SIZE =SAMPLE FREQ //POST PROCESSING SAMPLE FREQ
+•Filtered the resulting (outlier-marked) LFPs - where we zero-ed out all outliers - with a low-pass Butterworth filter
+followed by IIR notch filter;
+•Filtered LFP channel recordings were then stacked into an nc×Trecrecording where ncwas the number of selected
+LFP channels and Trecwas the full length of the recording.
+Once a recording file had been run through the above steps, we drew samples evenly across the portions of the recording
+representing the a)Home Cage (HC), b)Open Field (OP), and c)Tail Suspended (TS) behavioral paradigms. Each sample
+was drawn such that it was guaranteed to not have any marked-outlier time points. Once a sample had been drawn, a one-hot
+vector label corresponding to the behavioral paradigm was attached to it and the sampled signal was down-sampled to
+reduce computational overhead in later experiments.
+D.2. Preprocessing the SP 100 Hz Datasets
+We used the same parameters to preprocess the Social Preference (SP) dataset (Mague et al., 2022) as were used to prepare
+the Region-Averaged TST 100 Hz dataset. The only fundamental differences between the preprocessed TST data and the
+Region-Averaged SP 100 Hz dataset were 1) the labels in the datasets (three behavioral labels for TST and two for SP) and
+2) the dimensionality of the time series being analyzed.
+E. Model Hyperparameters Used in Experiments: Additional Details
+In this section we report hyperparameters used to configure and train the models used in our experiments. Hyperparam-
+eters for the cLSTM models which appear in this paper (see Sections 4.2 and 4.3) are given in Supplemental Table 12.
+Hyperparameters for the cMLP models which appear in this paper (see Sections 4.2 and 4.3) are given in Supplemental
+Table 13. Hyperparameters for the DGCNN models which appear in this paper (see Sections 4.2 and 4.3) are given in
+Supplemental Table 14. Hyperparameters for the DYNOTEARS models which appear in this paper (see Section 4.3) are
+given in Supplemental Table 15. Hyperparameters for the NA V AR-R (cLSTM) models which appear in this paper (see
+Section 4.3) are given in Supplemental Table 16. Hyperparameters for the NA V AR-P (cMLP) models which appear in this
+paper (see Section 4.3) are given in Supplemental Table 17. Hyperparameters for the dCSFA models which appear in this
+paper (see Sections 4.2 and 4.3) are given in Supplemental Table 18. Hyperparameters for the REDCLIFF-S (cMLP) models
+which appear in this paper (see Sections 4.2, 4.3, and 5) are given in Supplemental Table 19 and 20.
+E.1. Identifying Datasets Used to Tune Parameters
+Along with the hyperparameters for each model, we report the dataset(s) used to derive those parameters. Models represented
+by columns with “Synth. Systems” in the column name used hyperparameters selected by grid search(es) on Repeat 3 of the
+dataset for a (nonlinear, noisy) system with nc= 12 ,ne= 33 , and nk= 3; code for generating this dataset is included
+in the project repository for the main paper. Models represented by columns with “D4IC” in the column name had their
+hyperparameters selected by grid search(es) performed on Repeat 0 of the Moderate SNR D4IC dataset (see Table 9), with
+the cMLP v1 model being less optimal than cMLP v2 according to the original selection criteria.
+30Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 12. cLSTM - hyperparameters across experiments.
+PARAMETER NAME SYNTH . SYSTEMS D4IC
+BATCH SIZE 128 128
+MAX ITER 300 1000
+NUM SIMS 1 1
+CONTEXT 2 2
+MAX INPUT LENGTH 4 4
+FORECAST COEFF . 1.0 1.0
+ADJ. L1 R EGULARIZATION COEFF . 1.0 10.0
+GEN HIDDEN 25 25
+GEN LR 0.0001 0.0005
+GEN EPS 0.0001 0.0001
+GEN WEIGHT DECAY 0.0001 0.0001
+EMBED HIDDEN SIZES 10 10
+Table 13. cMLP - hyperparameters across experiments.
+PARAMETER NAME SYNTH . SYSTEMS D4IC ( V1) D4IC ( V2)
+BATCH SIZE 128 128 128
+MAX ITER 300 1000 1000
+GEN LAG AND INPUT LEN 2 2 2
+FORECAST COEFF . 1.0 1.0 1.0
+ADJ. L1 R EGULARIZATION COEFF . 1.0 1.0 1.0
+GEN HIDDEN 25 50 50
+GEN LR 0.0001 0.0005 0.001
+GEN EPS 0.0001 0.0001 0.0001
+GEN WEIGHT DECAY 0.0001 0.0001 0.0001
+EMBED HIDDEN SIZES 10 60 10
+E.2. Hyperparameters Represented by Functions
+We noticed in preliminary experiments that some hyperparameters were highly sensitive to certain aspects of the dynamical
+systems being modeled; furthermore, we noticed these sensitivities could be described by fairly simple functions of system
+aspects. Rather than set a fixed value for these model hyperparameters, we tuned ‘meta-hyperparameters’ (e.g. coefficients)
+of the functions for these sensitive hyperparameters to a particular dataset, and then re-computed the output of their functions
+each time the ‘tuned’ model was transferred to a new target dynamical system. We report the tuned functional form (with
+tuned meta-hyperparameters) in place of any fixed value for this type of sensitive hyperparameter.
+31Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 14. DGCNN - hyperparameters across experiments.
+PARAMETER NAME SYNTH . SYSTEMS D4IC
+BATCH SIZE 128 128
+MAX ITER 300 1000
+NUM CHANNELS 10 10
+GEN EPS 0.0001 0.0001
+GEN WEIGHT DECAY 0.0001 0.0001
+NUM FEATURES PER NODE 2 2
+NUM CLASSES =SAME AS DATASET 5
+NUM GRAPH CONV LAYERS 3 1
+NUM HIDDEN NODES 250 100
+GEN LR 0.0001 0.0001
+Table 15. DYNOTEARS - hyperparameters across experiments.
+PARAMETER NAME D4IC
+MAX ITER 100
+LAMBDA W 0.9
+LAMBDA A 0.1
+HTOL 0.00000001
+WTHRESHOLD 0.0
+TABU EDGES NONE
+TABU PARENT NODES NONE
+TABU CHILD NODES NONE
+LAG SIZE 1
+Table 16. NA V AR-R (cLSTM) - hyperparameters across experiments.
+PARAMETER NAME D4IC
+BATCH SIZE 128
+EPOCHS 1000
+NUM NODES 10
+MAXLAGS 2
+NUM HIDDEN 256
+HIDDEN LAYERS 1
+LEARNING RATE 0.0001
+WEIGHT DECAY 0
+LAMBDA 1 0.0
+Table 17. NA V AR-P (cMLP) - hyperparameters across experiments.
+PARAMETER NAME D4IC
+BATCH SIZE 128
+EPOCHS 1000
+NUM NODES 10
+MAXLAGS 20
+NUM HIDDEN 256
+HIDDEN LAYERS 2
+LEARNING RATE 0.0001
+WEIGHT DECAY 0
+LAMBDA 1 0.0
+32Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 18. dCSFA - hyperparameters across experiments.
+PARAMETER NAME SYNTH . SYSTEMS D4IC
+BATCH SIZE 128 128
+NEPOCHS 250 1000
+NPRE EPOCHS 50 50
+NMF MAX ITER 10 20
+NUM HIGH LEVEL NODE FEATURES 13 5
+NUM NODE FEATURES 50 20
+NCOMPONENTS =SAME AS DATASET 5
+NSUP NETWORKS =NCOMPONENTS 5
+RECON WEIGHT 2.0 1.0
+SUP WEIGHT 1.0 2.0
+SUP RECON WEIGHT 1.0 1.0
+SUP SMOOTHNESS WEIGHT 1.0 2.0
+H 256 256
+MOMENTUM 0.9 0.5
+LR 0.0005 0.001
+FS 100 100
+MIN FREQ 0.0 0.0
+MAX FREQ 50.0 50.0
+DIRECTED SPECTRUM TRUE TRUE
+DETREND CONSTANT CONSTANT
+WINDOW HANN HANN
+NPERSEG =NUM NODE FEATURES =NUM NODE FEATURES
+NOVERLAP =NUM NODE FEATURES //2 = NUM NODE FEATURES //2
+NFFT NONE NONE
+Table 19. REDCLIFF-S - hyperparameters across experiments on synthetic data. Note that for the Synthetic Systems datasets we set nc
+equal to the dimensionality of the system, while for the D4IC datasets we had nc= 10 .
+PARAMETER NAME SYNTH . SYSTEMS D4IC
+BATCH SIZE 128 128
+MAX ITER 300 1000
+nk =SAME AS DATASET 5
+B =nk 5
+τin(EQ. 2) 4 4
+ω(EQ. 5) 10.0 10.0
+ρ(EQ. 5) =1.0Pnk−1
+i=1i0.1 =1.0Pnk−1
+i=1i
+η(EQ. 5) =0.1
+nk√
+nc2−10.00201 ≈0.1
+nk√
+nc2−1
+γ(EQ. 6) 0.001 0.001
+λ(EQ. 9) 100.0 100.0
+GEN HIDDEN [25] [100]
+GEN LR 0.0005 0.0005
+GEN EPS 0.0001 0.0001
+GEN WEIGHT DECAY 0.0001 0.0001
+NUM PRETRAIN EPOCHS 100 50
+NUM ACCLIMATION EPOCHS 100 15
+FACTOR SCORE EMBEDDER TYPE DGCNN DGCNN
+EMBED NUM HIDDEN NODES 100 30
+EMBED NUM GRAPH CONV LAYERS 3 2
+EMBED LR 0.0005 0.0002
+EMBED EPS 0.0001 0.0001
+EMBED WEIGHT DECAY 0.0001 0.0001
+EMBED LAG (τin+τclass) 16 20
+33Generating Hypotheses of Dynamic Causal Graphs in Neuroscience
+Table 20. REDCLIFF-S - hyperparameters across experiments on real-world data. Note that for the Region-Averaged TST 100 Hz dataset
+we had nc= 12 while for the Regaion Averaged SP dataset we had nc= 9.
+PARAMETER NAME REG. AVG. TST 100 H Z REG. AVG. SP 100 H Z
+BATCH SIZE 128 128
+MAX ITER 300 300
+nk 9 [2, 4, 6, 9, 18, 36]
+B 3 2
+τin(EQ. 2) 4 4
+ω(EQ. 5) 10.0 10.0
+ρ(EQ. 5) =1.0Pnk−1
+i=1i≈0.0278 =1.0Pnk−1
+i=1i
+η(EQ. 5) =0.1
+nk√
+nc2−1≈0.000929 =0.1
+nk√
+nc2−1
+γ(EQ. 6) 0.001 0.001
+λ(EQ. 9) 100.0 100.0
+GEN HIDDEN [25] [25]
+GEN LR 0.0005 0.0005
+GEN EPS 0.0001 0.0001
+GEN WEIGHT DECAY 0.0001 0.0001
+NUM PRETRAIN EPOCHS 100 100
+NUM ACCLIMATION EPOCHS 100 100
+FACTOR SCORE EMBEDDER TYPE DGCNN DGCNN
+EMBED NUM HIDDEN NODES 100 100
+EMBED NUM GRAPH CONV LAYERS 3 3
+EMBED LR 0.0005 0.0005
+EMBED EPS 0.0001 0.0001
+EMBED WEIGHT DECAY 0.0001 0.0001
+EMBED LAG (τin+τclass) 16 16
+34

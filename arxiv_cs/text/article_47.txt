@@ -1,0 +1,1302 @@
+arXiv:2505.21265v1  [cs.CL]  27 May 2025Multilingual Pretraining for Pixel Language Models
+Ilker Kesen†Jonas F. Lotz†,‡Ingo Ziegler†Phillip Rust†Desmond Elliott†
+†Department of Computer Science, University of Copenhagen
+‡ROCKWOOL Foundation Research Unit
+ilke@di.ku.dk
+Abstract
+Pixel language models operate directly on im-
+ages of rendered text, eliminating the need
+for a fixed vocabulary. While these models
+have demonstrated strong capabilities for down-
+stream cross-lingual transfer, multilingual pre-
+training remains underexplored. We introduce
+PIXEL -M4, a model pretrained on four visu-
+ally and linguistically diverse languages: En-
+glish, Hindi, Ukrainian, and Simplified Chi-
+nese. Multilingual evaluations on semantic
+and syntactic tasks show that PIXEL -M4out-
+performs an English-only counterpart on non-
+Latin scripts. Word-level probing analyses
+confirm that PIXEL -M4captures rich linguis-
+tic features, even in languages not seen during
+pretraining. Furthermore, an analysis of its
+hidden representations shows that multilingual
+pretraining yields a semantic embedding space
+closely aligned across the languages used for
+pretraining. This work demonstrates that multi-
+lingual pretraining substantially enhances the
+capability of pixel language models to effec-
+tively support a diverse set of languages.
+1 Introduction
+Visually-rendered text has emerged as an alterna-
+tive to sub-word tokenization for language mod-
+els (Salesky et al., 2021; Rust et al., 2023). In
+comparison to sub-word tokenization, processing
+visually-rendered text enables models to transfer to
+unseen languages without needing to initialize new
+embeddings (Dobler and de Melo, 2023), or rely-
+ing on back-off mechanisms based on bytes (Xue
+et al., 2022) or characters (Clark et al., 2022). Pre-
+vious work on pixel-based language models has
+predominantly focused on monolingual pretrain-
+ing on English data (Rust et al., 2023; Lotz et al.,
+2023), with related efforts extending to multilin-
+gual pretraining for machine translation (Salesky
+et al., 2023). Given evidence that pixel-based mod-
+els facilitate positive transfer through visual simi-
+larity (Lotz et al., 2025; Muñoz-Ortiz et al., 2025),
+Arab.Brah. CJK  Cyrl.LatinOther01020304050607080PerformanceText
+Classification
+Arab.Brah. CJK  Cyrl.LatinOtherDependency
+Parsing
+Brah. CJK  LatinNER
+PIXEL-BIGRAMS PIXEL-M4Figure 1: Average performance across tasks compar-
+ing PIXEL -M4and PIXEL -BIGRAMS grouped by scripts:
+Arabic, Brahmic, Chinese-Japanese-Korean, Cyrillic,
+Latin, and others. Both models share the same architec-
+ture and hyperparameters, but PIXEL -M4is pretrained
+in four visually and linguistically diverse languages: En-
+glish, Hindi, Ukrainian and Simplified Chinese. PIXEL -
+M4performs better in almost all non-Latin script lan-
+guages without sacrificing Latin-script performance.
+we investigate multilingual pretraining for general-
+purpose representation learning specifically by se-
+lecting only one language per script. This approach
+is particularly valuable for low-resource languages
+that can benefit from transfer via visually similar,
+high-resource languages.
+We present PIXEL -M4: a multilingual version of
+PIXEL (Rust et al., 2023). PIXEL -M4is pretrained
+on four equally-sized amounts of visually diverse
+scripts sourced from mC4 (Xue et al., 2021): En-
+glish (Latin script), Hindi (Devanagari script), Sim-
+plified Chinese (Han script), and Ukrainian (Cyril-
+lic script). These scripts were chosen to represent
+abugida, alphabetic, logographic/logosyllabic writ-
+ing systems, covering billions of speakers. Fur-
+thermore, not only do these scripts represent visual
+diversity, they also represent grammatical diversity,
+1covering Balto-Slavic, Indo-Iranian, Germanic, and
+Sino-Tibetan languages.
+In downstream task experiments, we investi-
+gate the ability of PIXEL -M4to transfer to new
+languages in three conditions (i) same-script; (ii)
+related-script; and (iii) unrelated scripts to better
+understand what is gained by multilingual pretrain-
+ing.1The same-script experiments focus on Simpli-
+fied Chinese (Han), Hindi (Devanagari), and vari-
+ous Latin and Cyrillic script languages. The related-
+script experiments include Japanese and Brahmic
+script languages; while the unrelated-script experi-
+ments focus on Armenian, Greek, Korean and lan-
+guages using the abjad writing system (e.g. Ara-
+bic and Hebrew). Compared to its monolingually-
+pretrained equivalent, PIXEL -BIGRAMS (Lotz et al.,
+2023), we find consistent improvements in perfor-
+mance for almost all non-Latin script languages on
+text classification, dependency parsing and named
+entity recognition.
+We conduct word-level probing experiments
+using LINSPECTOR (¸ Sahin et al., 2020) to com-
+pare differences in linguistic understanding across
+15 languages from multilingual versus monolin-
+gual pretraining. We find that PIXEL -M4captures
+linguistic features more effectively than PIXEL -
+BIGRAMS , both for seen scripts (e.g., Russian
+and Macedonian) and unseen scripts (Arabic, Ar-
+menian, Greek). Additionally, an exploration of
+PIXEL -M4’s embedding space reveals that earlier
+layers primarily encode visual information, while
+deeper layers shift toward semantic understand-
+ing, corroborating earlier observations by Tatariya
+et al. (2024). Through cross-lingual retrieval ex-
+periments, we find that PIXEL -M4has learned a
+semantic representation space that is shared across
+the pretraining languages.
+In short, the main contributions of this paper are:
+•We present the first multilingually-pretrained
+general-purpose pixel language model,2
+trained over four visually and linguistically
+diverse languages.
+•Experiments on syntactic and semantic tasks
+show consistent improvements for non-Latin
+script languages compared to previous PIXEL
+language models.
+1The downstream task languages also cut across different
+language families, e.g. Indo-European, Sino-Tibetan, and
+Turkic. However, we focus on script transfer, given the visual
+nature of the data processed by PIXEL -M4.
+2Code and models:
+ ilkerkesen/pixel-m4• Word-level probing analyses show that multi-
+lingual pretraining produces representations
+that capture more linguistic features across
+languages, such as case marking, part-of-
+speech tags, and verb tense.
+•Sentence-level analyses of the learned hid-
+den representations reveal that PIXEL -M4has
+learned a representation space highly aligned
+between a subset of its pretraining languages.
+2 PIXEL -M4
+In this section, we describe our methodology in
+detail, including the selection of pretraining lan-
+guages, the pretraining data creation procedure
+(§2.1), the model architecture and the pretraining
+procedure (§2.2).
+2.1 Pretraining Data
+Following our motivation to explore multilingual
+pretraining through a diverse selection of scripts
+rather than a large range of languages, PIXEL -M4
+is pretrained on text written in Latin (English),
+Cyrillic (Ukrainian), Simplified Chinese charac-
+ters (Chinese), and Devanagari (Hindi). For each
+script, a corresponding subset of the mC4 (Xue
+et al., 2021) corpus is rendered into images, fol-
+lowing the strategy of rendering two characters per
+image patch from Lotz et al. (2023). With a se-
+quence length of 529 image patches and a batch
+size of 256, the model observes approximately 135
+billion image patches over 1 million pretraining
+steps – this is the same total amount of data as the
+original PIXEL and PIXEL -BIGRAMS models. How-
+ever, PIXEL -M4is trained on an order-or-magnitude
+more unique samples than PIXEL -BIGRAMS . This
+difference is due to the fact that PIXEL -BIGRAMS
+was trained by iterating 10 times over the English-
+only Wikipedia + BookCorpus datasets (Zhu et al.,
+2015), whereas PIXEL -M4processes each sample
+in our subset of mC4 only once across the four
+pretraining languages.
+2.2 Pretraining Procedure
+Both PIXEL -M4and PIXEL -BIGRAMS follow the
+PIXEL pretraining recipe from Rust et al. (2023),
+including hyperparameter values. Based on the
+Masked Autoencoding Vision Transformer (He
+et al., 2022), the models render each input sequence
+to a 529-patch image using the PangoCairo render-
+ing library,3where each image patch is 16×16pix-
+3https://docs.gtk.org/PangoCairo
+2els. We use the Google Noto Sans fonts collection
+to ensure that the majority of Unicode codepoints
+can be accurately rendered.4PIXEL -M4is trained
+by mixing the four languages within each batch;
+however, each individual sample consists of only
+one language. The image patches are first embed-
+ded through a linear projection, 25% of them are
+masked (in spans of up to 6 consecutive patches),
+and only the unmasked patches plus a CLStoken
+are passed to the encoder. After the encoder, a
+lightweight decoder reconstructs the pixel values
+of only the masked patches. For downstream tasks
+we remove the decoder and instead attach a task-
+specific head, and disable patch masking in inputs.
+3 Experimental Setup
+This section contains the details of our experi-
+ments:5§3.1 contains information regarding tasks
+and benchmarks and §3.2 describes the baselines.
+3.1 Tasks & Benchmarks
+Text Classification. We first test the models on
+the sentence-level semantic task of topic classifica-
+tion using the SIB-200 benchmark (Adelani et al.,
+2024). Each example in SIB-200 is semantically
+aligned across languages. This aspect of SIB-200
+allows us to make a controlled comparison across
+different languages and scripts. Our first set of
+evaluations cover the four pretraining languages
+ofPIXEL -M4: Latin (English ENG), Han (Chinese
+ZHO), Cyrillic (Ukrainian UKR), and Devanagari
+(Hindi HIN). For the same-script transfer setting,
+we experiment with Latin script languages (Ger-
+man DEU, Finnish FIN, French FRA, Turkish TUR,
+Uzbek UZN) and Cyrillic script languages (Kyrgyz
+KIR, Russian RUS). For the related-script transfer
+setting, we perform experiments in Japanese ( JPN)
+and Brahmic script languages (Bengali BEN, Stan-
+dard Tibetan BOD, Tamil TAM, Telugu TEL). Lastly,
+we cover Armenian ( HYE), Greek ( ELL), Hebrew
+(HEB), Korean ( KOR) and Arabic script languages
+(Egyptian Arabic ARZ, Uyghur UIG, Urdu URD) to
+test transfer to unrelated novel scripts. We report
+macro-averaged F1 score as the metric.
+Dependency Parsing. We evaluate on the token-
+level syntactic parsing task of dependency pars-
+ing using the Universal Dependencies (UD) bench-
+mark (Nivre et al., 2020; Zeman et al., 2022). We
+also compare the models using the same three
+4https://fonts.google.com/noto
+5See Appendix for implementation details.transfer learning settings again: (i) same-script
+languages seen during pretraining: Latin (English
+ENG, Vietnamese VIE), Devanagari (Hindi HIN),
+Han (Chinese ZHO), and Cyrillic (Ukrainian UKR,
+Russian RUS, Bulgarian BUL); (ii) languages in
+scripts related to at least one pretraining script:
+Coptic ( COP), Japanese ( JPN) and Brahmic script
+languages (Tamil TAM, Telugu TEL); (iii) lan-
+guages in scripts unrelated to the pretraining scripts:
+Arabic abjad (Arabic ARA, Urdu URD) and Korean
+(KOR). We report Labeled Attachment Score (LAS)
+as the evaluation metric.
+Named Entity Recognition. Lastly, we per-
+form experiments on the token-level semantic
+task of Named Entity Recognition (NER) us-
+ing three benchmarks: the multilingual Universal
+NER (Mayhew et al., 2024, UNER) and Naama-
+padam (Mhaske et al., 2023) benchmarks, as well
+as the NER portion of the Korean Language Un-
+derstanding Evaluation (Park et al., 2021, KLUE).
+Once again, we cover same-script, related-script
+and unrelated-script transfer scenarios. Here, three
+of the four scripts seen during pretraining – Latin
+(English ENG, Serbian SRP), Han (Chinese ZHO),
+and Devanagari (Hindi HIN) – are additionally eval-
+uated on Korean KOR, as well as three Brahmic
+scripts (Bengali BEN, Tamil TAM, Telugu TEL). We
+report macro-averaged F1 scores.
+3.2 Baselines
+We mainly compare PIXEL -M4against the mono-
+lingual PIXEL -BIGRAMS model, which is trained
+exclusively on English text rendered at the bigram
+level. PIXEL -M4implements the identical architec-
+ture, text rendering strategy and pretraining proce-
+dure with the same set of hyperparameters, but
+PIXEL -M4is multilingually pretrained on equal
+amounts of English, Hindi, Ukrainian and Simpli-
+fied Chinese. This comparison allows us to observe
+the effects of multilingual pretraining for pixel lan-
+guage models in different transfer learning settings.
+We additionally compare PIXEL -M4against four
+monolingual BERT variants: The original English
+BERT (Devlin et al., 2019) primarily for the Latin
+languages, Chinese BERT (Devlin et al., 2019) for
+Han and Japanese scripts, a Hindi BERT (Samuel
+et al., 2023) for the Brahmic script languages, and
+a Ukrainian BERT (Samuel et al., 2023) for the
+Cyrillic languages. English BERT is also used as a
+fallback option to evaluate languages that do not
+belong to any of the pretraining scripts, such as
+3Arabic Brahmic Cyrillic
+ARZ UIG URD BOD BEN HIN TAM TEL KIR RUS UKR
+BERT -MONO 29.1 43.9 31.1 40.7 38.4 87.2 48.6 29.5 73.5 83.8 86.5
+PIXEL -BIGRAMS 38.3 48.6 36.5 36.9 31.7 32.6 39.7 39.9 47.1 37.7 44.4
+PIXEL -M4 37.5 53.7 41.6 46.3 46.2 78.6 64.5 46.6 62.9 74.7 80.5
+Latin CJK OthersAvg.
+DEU ENG FIN FRA TUR UZN ZHO JPN KOR ELL HEB HYE
+BERT -MONO 63.8 88.1 43.5 76.1 62.7 59.4 89.5 78.9 15.4 32.6 32.7 36.5 55.3
+PIXEL -BIGRAMS 63.8 84.3 59.7 73.2 60.7 56.7 48.5 41.0 37.8 34.3 26.7 37.3 46.0
+PIXEL -M4 67.3 83.9 60.6 70.7 59.9 56.2 75.5 65.0 64.7 36.9 31.3 44.8 58.7
+Table 1: Text classification results on a selected language subset of the SIB-200 benchmark using macro F1-score.
+BERT -MONO indicates that the monolingual BERT model varies by language (see §3.2 for details). Best performances
+are bolded. PIXEL -M4significantly outperforms its English-only-pretrained equivalent PIXEL -BIGRAMS in almost
+all non-Latin languages, and PIXEL -M4performs better than monolingual BERT models on novel writing systems.
+Arabic or Hangul. This allows us to test whether
+multilingually-pretrained pixel models can match
+or exceed the cross-lingual transfer capabilities
+of the tokenizer-based models, not only for Latin
+scripts but also for others.
+4 Results and Discussion
+We discuss the results of the downstream task ex-
+periments in this section.
+Text Classification. Table 1 presents the results
+on SIB-200 for text classification. PIXEL -M4
+outperforms PIXEL -BIGRAMS by large margins
+in its pretraining languages ( HIN: +46.0, UKR:
++36.1, ZHO: +27.0), which are unseen by PIXEL -
+BIGRAMS during the pretraining. We also observe
+substantial gains in Cyrillic languages ( KIR: +15.8,
+RUS: +37.0), showing that pretraining pixel mod-
+els on a particular script enhances transfer learning
+within the same-script languages. In English and
+other Latin languages, both models achieve similar
+performances. The significant performance gains
+in Japanese ( JPN: +24) and the Brahmic languages
+(BEN: +14.5, BOD: +9.4, TAM: +24.8, TEL: 6.7)
+showcase PIXEL -M4’s cross-lingual transfer learn-
+ing ability to novel scripts orthographically related
+to one pretraining script. Lastly, we compare both
+PIXEL -M4and PIXEL -BIGRAMS in languages with
+writing systems visually distant to the pretraining
+scripts. Once again, PIXEL -M4performs better
+than PIXEL -BIGRAMS in these languages, where
+we can observe improvements for Armenian ( HYE:
++7.5), Greek ( ELL: +4.3), Korean ( KOR: +26.9) andthe languages in right-to-left abjad writing systems
+(HEB: 4.6, UIG: +5.1, URD: +5.1). These results il-
+lustrate that multilingual pretraining with a diverse
+set of scripts accelerates cross-lingual generaliza-
+tion even for novel and distant writing systems.
+Overall, these results highlight that visually and
+linguistically diverse multilingual pretraining for
+pixel models leads to substantial gains in all types
+of transfer learning scenarios investigated in this
+work.
+Compared to the monolingual BERT variants,
+PIXEL -M4performs consistently better, especially
+in the transfer learning setting involving unseen
+scripts. Conversely, BERT -MONO models surpass
+PIXEL -M4in transfer learning within the same-
+script, yet BERT -MONO pretrained in English falls
+behind PIXEL -M4in German ( DEU: +3.5) and
+Finnish ( FIN: +17.1).
+Dependency Parsing. Table 2 presents the re-
+sults on the UDP benchmark. In the pretraining
+languages, PIXEL -M4significantly improves upon
+PIXEL (HIN: +3.0, UKR: +9.9, ZHO: +6.0) ex-
+cept in English ( ENG: -2.0), which both models
+have seen in their pretraining. PIXEL -M4outper-
+forms PIXEL on the languages written in Cyrillic
+(BUL: +2.5, RUS: +3.9), which demonstrates im-
+proved cross-lingual transfer learning within the
+same-script languages once again. For the unseen
+Brahmic languages, PIXEL -M4achieves a slight
+gain in Telugu ( TEL: +0.7) and a much larger per-
+formance boost in Tamil ( TAM: +10.7). For the
+orthographically distant Korean language, PIXEL -
+4Arabic Brahmic Cyrillic Latin CJK OtherAvg.
+ARA URD HIN TAM TEL BUL RUS UKR ENG VIE ZHO JPN KOR COP
+BERT -MONO 77.7 71.9 92.8 43.4 75.6 89.8 87.5 92.0 90.6 49.4 85.5 87.9 30.2 13.0 70.5
+PIXEL -BIGRAMS 77.7 75.3 88.6 49.8 79.0 86.3 79.1 74.4 89.6 49.4 73.9 90.8 78.1 81.4 76.7
+PIXEL -M4 74.2 75.9 91.6 60.5 79.7 88.8 83.0 84.3 87.6 49.4 79.9 91.2 82.3 81.6 79.3
+Table 2: Dependency parsing results for the selected set of languages in the UDP benchmark with LAS. BERT -MONO
+indicates that the monolingual BERT model varies by language. PIXEL -M4outperforms PIXEL -BIGRAMS in non-
+Latin script languages, and it again achieves a better performance than BERT -MONO on novel scripts.
+Latin Brahmic CJKAvg.
+ENG SRP HIN BEN TAM TEL KOR ZHO
+BERT -MONO 79.3 85.8 82.5 75.4 67.3 78.3 30.6 85.4 73.1
+PIXEL -BIGRAMS 63.4 81.6 79.0 78.0 67.9 79.6 80.4 61.4 73.9
+PIXEL -M4 67.3 82.1 80.9 78.5 68.0 79.6 81.6 74.9 75.9
+Table 3: NER results by macro-averaged F1-scores.
+BERT -MONO is the monolingual BERT model varies by
+language based on their scripts. Overall, PIXEL -M4
+performs better than PIXEL -BIGRAMS and BERT -MONO
+with an average score of 75.9.
+M4outperforms PIXEL -BIGRAMS (KOR: +4.2). For
+the Arabic-script languages, we observe mixed re-
+sults: In Arabic, the performance drops ( ARA: -
+3.5), while we observe a modest gain in Urdu
+(URD: +0.6). Altogether, multilingually-pretrained
+PIXEL -M4improves on PIXEL -BIGRAMS on the
+dependency parsing task for the unseen languages
+considering various cross-lingual transfer learning
+settings. Lastly, our findings on this task is similar
+to the SIB-200 findings for comparing PIXEL -M4
+against monolingual BERT models: (i) PIXEL -M4
+achieves a better overall performance than BERT -
+MONO in cross-lingual transfer involving writing
+systems unknown to both; (ii) BERT -MONO per-
+forms better than PIXEL -M4for the pretraining
+scripts and cross-lingual transfer within the same-
+script.
+Named Entity Recognition. Table 3 reports
+macro-averaged F1 for NER across eight lan-
+guages. As expected, multilingual pixel pretraining
+(PIXEL -M4) outperforms the English-only PIXEL -
+BIGRAMS model on every language, raising the
+average F1 from 73.9 to 75.9. The largest boost
+is seen in Chinese ( ZHO: +13.5), reflecting that
+exposure to Chinese during PIXEL -M4’s pretrain-
+ing. Other pretraining languages also benefit from
+multilingual pretraining ( ENG: +3.9, HIN: +1.9).
+Differently from the other tasks, both PIXEL -M4
+and PIXEL -BIGRAMS perform on par in the Brah-mic scripts ( HIN: +1.9, BEN: +0.5, TAM: +0.1, TEL:
+0.0): This might be due the larger training sets
+available in the Naamapadam benchmark. Later,
+in §5, we show that PIXEL -M4outperforms PIXEL -
+BIGRAMS with large margins in low-resource set-
+tings. Lastly, +1.2 gain in Korean suggests that
+PIXEL -M4can transfer visual substructure from
+unrelated scripts for better entity processing.
+The monolingual BERT models achieve a bet-
+ter performance than PIXEL -M4for the languages
+with writing systems known by both models, un-
+derscoring that world-knowledge and semantic co-
+occurrence patterns encoded into specific token
+entities remain crucial for this semantic task. This
+is especially the case for English, as both BERT
+and PIXEL -BIGRAMS are pretrained using exactly
+the same data. Nonetheless, our findings for the
+languages in unseen scripts is inline with previ-
+ous experiments where PIXEL -M4performs better
+than BERT -MONO : (BEN: +3.1, TAM: +0.7, TEL:
+1.6). These improvements highlight how pixel
+models can process languages in related scripts
+directly, avoiding the tokenization failure modes of
+subword-based models.
+5 Analysis
+We perform three different analyses to examine the
+outcomes of multilingual pretraining, where each
+subsection covers a different analysis.
+5.1 Data-Efficiency Analysis
+To investigate the capabilities of PIXEL -M4further,
+we perform a data-efficiency analysis on Naama-
+padam – the Indic languages benchmark. Using
+the original training splits, we create subsets of
+size 1024, 2048, 4096 and 8192 examples. We
+repeat this process 8 times using different random
+seeds, resulting 32 different subsets. Next, we train
+both PIXEL -BIGRAMS and PIXEL -M4on these sub-
+sets and compare them in terms of data-efficiency.
+51024 2048 4096 81923040506070F1
+Hindi
+PIXEL-BIGRAMS
+PIXEL-M4
+1024 2048 4096 8192
+Bengali
+1024 2048 4096 8192
+Tamil
+1024 2048 4096 8192
+Telugu
+# of examplesFigure 2: Data-efficient learning experiments on the Naamapadam NER benchmark showing the mean test F 1score
+as a function of training set size in log scale for four Brahmic languages. In each experiment, PIXEL -M4consistently
+outperforms PIXEL -BIGRAMS , with the largest relative gains under the smallest data regimes.
+Figure 2 illustrates this comparison, where each
+subplot represents the results for the specified lan-
+guage. For Hindi, Bengali and Tamil, PIXEL -M4
+performs significantly better than PIXEL in all set-
+tings. The results in Bengali and Tamil also high-
+light the cross-lingual transfer learning capacity of
+the PIXEL -M4in low-resource settings. As we de-
+crease the number of examples, we observe more
+substantial gains in all languages including Tel-
+ugu, where PIXEL -M4performs slightly better than
+PIXEL -BIGRAMS on the entire set of tasks. Over-
+all, multilingual pretraining of pixel language mod-
+els substantially enhances transfer learning in low-
+resource settings.
+5.2 Word-Level Probing
+We also performed a probing analysis similar to
+Tatariya et al. (2024). Here, we use LINSPECTOR
+(¸ Sahin et al., 2020), a multilingual word-level prob-
+ing benchmark, to investigate the transferability of
+multilingual representations encoded by PIXEL -M4.
+We investigate hidden representations encoded by
+both PIXEL -M4and PIXEL -BIGRAMS after each
+layer, and compare them against each other. We
+perform this analysis on four different tasks (Case
+Marking, POS, SameFeat, TagCount) using five dif-
+ferent languages (Arabic, Armenian, Greek, Rus-
+sian, Macedonian).6Case Marking requires as-
+sessing the grammatical case (e.g. nominative, ac-
+cusative) of a given input word. POS involves
+predicting the POS tag for the given word. The
+SameFeat task measures the ability to detect the
+mutual morphological feature of two given words
+in their surface forms. Lastly, TagCount requires
+correctly predicting the number of morphological
+tags for the given input word. SameFeat andTag-
+Count are more difficult than the other tasks, as
+both require predicting the entire set of morpholog-
+ical features for the given word(s).
+6See Appendix for a larger set of tasks and languages.We show the results of our probing analyses in
+Figure 3. In this grid of subplots, each row in-
+vestigates a different task, and each column inves-
+tigates a different language. In Macedonian and
+Russian, PIXEL -M4learns significantly better rep-
+resentations compared to PIXEL -BIGRAMS , which
+is expected because PIXEL -M4has seen a similar
+language in the same script during pretraining. The
+gap between two models in earlier layers (1-3) is
+smaller on SameFeat andTagCount , as they re-
+quire more complex linguistic assessment. This
+also applies for the other tested languages, and it
+is in line with the observations of Tatariya et al.
+(2024), where earlier layers focus more on visual
+rather than semantic processing. In Arabic, Arme-
+nian, and Greek, PIXEL -M4still performs slightly
+better than PIXEL -BIGRAMS on the majority of
+tasks, which showcases its improved visual pro-
+cessing and transfer learning to unseen languages.
+For these unseen languages, the performance of
+PIXEL -M4starts to plateau starting from the 7th or
+8th layer. Overall, these results demonstrate that
+the multilingual pretraining produces a better set of
+hidden representations throughout the entire model,
+even for the unseen scripts.
+5.3 Analyzing Hidden Representations
+Similar to Salesky et al. (2023), we visualize the
+hidden representations learned by both PIXEL and
+PIXEL -M4using t-SNE (Van der Maaten and Hin-
+ton, 2008). To perform this analysis, we use a sub-
+set of SIB-200 (Adelani et al., 2024) including the
+training splits of 26 languages. We perform t-SNE
+visualization throughout the model, starting from
+the convolved input representations (Layer 0) to the
+output of the last transformer layer (Layer 12). Fig-
+ure 4 shows t-SNE plots: rows correspond to mod-
+els, columns to layers, and ‘ ×’ marks the PIXEL -
+M4pretraining-language centroids. We observe the
+same phenomenon for the convolved features as
+660708090Case
+Arabic
+ Armenian
+ Greek
+ Macedonian
+ Russian
+60708090POS
+406080SameFeat
+1 2 3 4 5 6 7 8 9 10 11 126080TagCount
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+ 1 2 3 4 5 6 7 8 9 10 11 12
+ 1 2 3 4 5 6 7 8 9 10 11 12
+ 1 2 3 4 5 6 7 8 9 10 11 12
+LayerFigure 3: Word-level probing analysis on LINSPECTOR , where each row investigates a different task, and each
+column investigates a different language. In each subplot, y-axis represents the model accuracies and x-axis
+represents the corresponding layer number for the used hidden representations. Multilingually-pretrained PIXEL -M4
+has learned better linguistic representations even for the languages with orthographically distant writing systems.
+Figure 4: t-SNE visualization of the outputs for the specified layers. Each row contains visualizations for a particular
+model, and each column focuses on a particular layer. Each ‘ ×’ marker appear at the centroid of a different
+pretraining language seen by PIXEL -M4. Both models cluster languages based on their scripts, yet PIXEL -M4clusters
+some pretraining languages in the later layers.
+demonstrated in Salesky et al. (2023): Languages
+which use the same or a related writing script are
+grouped together. This can be observed for both
+models, where we can see large clusters for Arabic,
+Cyrillic and Latin, and Chinese-Japanese language
+clusters appear next to each other. As we move
+through in the model layers, we start to see some
+languages form their own separate clusters by mov-
+ing away from their script clusters (e.g. Layer 4 and
+8). More importantly, in the later layers of PIXEL -
+M4, we observe that the pretraining languages move
+away from the rest of the languages that share the
+same script, and they start to cluster together. Thisobservation demonstrates that PIXEL -M4shifts its
+focus from visual processing more to the seman-
+tics in the later layers. This raises the question of
+whether PIXEL -M4has learned a semantic represen-
+tation space shared between different pretraining
+languages.
+To determine whether PIXEL -M4has learned a
+representation space shared between different pre-
+training languages, we perform a cross-lingual re-
+trieval experiment on the multilingually aligned
+SIB-200 benchmark. To obtain sentence embed-
+dings, we apply L2 normalization to the mean
+pooled hidden representations after each layer. At
+70 1 2 3 4 5 6 7 8 9 10 11 12
+Layer0.00.10.20.30.40.50.60.70.8Recall@5
+ENG HIN
+ENG UKR
+ENG ZHO
+HIN UKR
+HIN ZHO
+UKR ZHO
+Figure 5: Cross-lingual similarity analysis on SIB-200
+using the mean pooled hidden representations of PIXEL -
+M4. The x-axis indicates the layer number; the y-axis re-
+ports the performance using recall@5. Each line focuses
+on a different language-pair combination. The dashed
+line shows the maximum recall@5 value obtained by
+PIXEL -BIGRAMS for these language pairs. This analysis
+reveals that PIXEL -M4has learned a mutual semantic
+representation for some pretraining language pairs.
+each layer, we treat each sentence embedding in
+one language as a query and compute its cosine
+similarity against every sentence embedding in the
+other language. We report recall@5, i.e., the per-
+centage of the examples where the true translation
+is ranked in the top 5. Since each sentence has ex-
+actly one correct translation, retrieval performance
+per example is binary, taking values of either 0 or
+1. Figure 5 shows the results for each language
+pair. We see that the semantic alignment between
+each language pair increases as we move through
+in the layers. Particularly, the semantic alignment
+between English and Ukrainian is very high, as
+they are also tightly clustered in the t-SNE feature
+space. We can also observe a high semantic align-
+ment between English and Hindi, yet the remaining
+pairs do not share a highly aligned semantic repre-
+sentation space.
+6 Related Work
+Salesky et al. (2021) proposed an encoder-decoder-
+based machine translation model that replaces the
+tokenizer in the encoder by processing source text
+as rendered images. Rust et al. (2023) proposed
+PIXEL , the first model that relies on purely process-
+ing visually rendered text. Later, Lotz et al. (2023)
+investigated different strategies for text rendering
+with the aim of removing redundant patches. Fei
+et al. (2024) experimented with replacing BERT ’s
+tokenizer with pixel-based processing. Gao et al.
+(2024) extended PIXEL with a mixed modality pre-training objective, which produced substantial im-
+provements. Tai et al. (2024) pretrained PIXAR ,
+which is the first autoregressive pixel language
+model that purely relies on processing rendered
+text. Gao et al. (2024); Chai et al. (2024) also pro-
+posed pixel language models with text generation
+abilities, yet they achieved this by still depending
+on subword tokenizers. Recently, Lotz et al. (2025)
+embedded pixel language models into the English-
+centric language models as a fallback mechanism
+to better adapt these models to novel languages
+and scripts. Most notably, Salesky et al. (2023) is
+closely related to our work as it employs a multilin-
+gual pretraining. However, their experiments focus
+on learning a shared encoder for machine trans-
+lation, while we pretrained a multilingual pixel
+language model for general-representation learning
+without relying on any tokenizer.
+7 Conclusion
+In this work, we explored multilingual pretraining
+for pixel language models. We pretrained PIXEL -
+M4, a multilingual pixel-based language model on
+four visually and linguistically diverse languages,
+namely English, Hindi, Ukrainian and Simplified
+Chinese. We performed downstream task exper-
+iments on three different tasks: sentence classi-
+fication, dependency parsing, and named entity
+recognition. In these experiments, we covered a
+diverse set of languages and scripts, where we eval-
+uated on 27 languages and 15 scripts. Our exper-
+iments revealed that PIXEL -M4achieves superior
+performance in low-resource settings compared to
+its monolingually-pretrained predecessor PIXEL -
+BIGRAMS , outperforming it in almost all non-Latin
+languages by a large margin. In order to better un-
+derstand the representations learned by PIXEL -M4,
+we conducted word-level and sentence-level anal-
+yses. Our word-level probing analysis illustrated
+that PIXEL -M4has learned better hidden represen-
+tations than PIXEL -BIGRAMS throughout the net-
+work for the unseen scripts, highlighting its cross-
+lingual transfer capabilities. Additionally, an analy-
+sis on the hidden layer representations revealed that
+PIXEL -M4has learned a semantic representation
+space shared by a subset of pretraining languages
+in the later layers. In future work, we aim to scale
+up multilingual pretraining for pixel models with
+larger model capacity and more languages included
+in pretraining.
+8Limitations
+PIXEL -M4inherits many of the limitations of its
+predecessors. First, rendering text using the bi-
+grams strategy leads to increased sequence lengths
+when a bigram does not fit into single patch. Like
+Rust et al. (2023) and Lotz et al. (2023), PIXEL -
+M4cannot generate text. The improvements over
+PIXEL -BIGRAMS are also limited for Latin-script
+languages and also for high-resource settings. Fi-
+nally, due to our limited compute budget, we pre-
+trained a single PIXEL -M4model on only four
+languages-each in a different script. Consequently,
+we have not explored larger or different combina-
+tions of languages and scripts, such as additional
+Latin-script languages (e.g. French, Estonian, Turk-
+ish) or right-to-left scripts (e.g. Hebrew, Arabic).
+We leave these comparisons to future work.
+Acknowledgements
+IK, IZ and DE were supported by the European
+Union’s Horizon 2020 research and innovation
+program under grant agreement No. 101135671
+(TrustLLM). JFL is funded by the ROCKWOOL
+Foundation (grant 1242). DE was supported by a re-
+search grant (VIL53122) from VILLUM FONDEN.
+PR is funded by the Novo Nordisk Foundation
+(grant NNF 20SA0066568).
+IK and IZ acknowledge the EuroHPC Joint Un-
+dertaking for awarding access to MareNostrum5,
+hosted at Barcelona Supercomputing Center (BSC),
+Spain, under proposals No. EHPC-DEV-2024D11-
+047 and EHPC-DEV-2024D12-031.
+References
+Martín Abadi, Paul Barham, Jianmin Chen, Zhifeng
+Chen, Andy Davis, Jeffrey Dean, Matthieu Devin,
+Sanjay Ghemawat, Geoffrey Irving, Michael Isard,
+Manjunath Kudlur, Josh Levenberg, Rajat Monga,
+Sherry Moore, Derek G. Murray, Benoit Steiner, Paul
+Tucker, Vijay Vasudevan, Pete Warden, and 3 others.
+2016. Tensorflow: A system for large-scale machine
+learning. Preprint , arXiv:1605.08695.
+David Ifeoluwa Adelani, Hannah Liu, Xiaoyu Shen,
+Nikita Vassilyev, Jesujoba O. Alabi, Yanke Mao, Hao-
+nan Gao, and En-Shiun Annie Lee. 2024. SIB-200:
+A simple, inclusive, and big evaluation dataset for
+topic classification in 200+ languages and dialects.
+InProceedings of the 18th Conference of the Euro-
+pean Chapter of the Association for Computational
+Linguistics (Volume 1: Long Papers) , pages 226–245,
+St. Julian’s, Malta. Association for Computational
+Linguistics.Yekun Chai, Qingyi Liu, Jingwu Xiao, Shuohuan Wang,
+Yu Sun, and Hua Wu. 2024. Autoregressive pre-
+training on pixels and texts. In Proceedings of the
+2024 Conference on Empirical Methods in Natu-
+ral Language Processing , pages 3106–3125, Miami,
+Florida, USA. Association for Computational Lin-
+guistics.
+Jonathan H. Clark, Dan Garrette, Iulia Turc, and John
+Wieting. 2022. Canine: Pre-training an efficient
+tokenization-free encoder for language representa-
+tion. Transactions of the Association for Computa-
+tional Linguistics , 10:73–91.
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. BERT: Pre-training of
+deep bidirectional transformers for language under-
+standing. In Proceedings of the 2019 Conference of
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies, Volume 1 (Long and Short Papers) , pages
+4171–4186, Minneapolis, Minnesota. Association for
+Computational Linguistics.
+Konstantin Dobler and Gerard de Melo. 2023. FOCUS:
+Effective embedding initialization for monolingual
+specialization of multilingual models. In Proceed-
+ings of the 2023 Conference on Empirical Methods in
+Natural Language Processing , pages 13440–13454,
+Singapore. Association for Computational Linguis-
+tics.
+Timothy Dozat and Christopher D. Manning. 2017.
+Deep biaffine attention for neural dependency pars-
+ing. In 5th International Conference on Learning
+Representations, ICLR 2017, Toulon, France, April
+24-26, 2017, Conference Track Proceedings . Open-
+Review.net.
+Wenlong Fei, Xiaohua Wang, Min Hu, Qingyu Zhang,
+and Hongbo Li. 2024. MTLS: Making texts into
+linguistic symbols. In Proceedings of the 2024 Con-
+ference on Empirical Methods in Natural Language
+Processing , pages 3521–3535, Miami, Florida, USA.
+Association for Computational Linguistics.
+Tianyu Gao, Zirui Wang, Adithya Bhaskar, and Danqi
+Chen. 2024. Improving language understanding from
+screenshots. Preprint , arXiv:2402.14073.
+Goran Glavaš and Ivan Vuli ´c. 2021. Is supervised syn-
+tactic parsing beneficial for language understanding
+tasks? an empirical investigation. In Proceedings
+of the 16th Conference of the European Chapter of
+the Association for Computational Linguistics: Main
+Volume , pages 3090–3104, Online. Association for
+Computational Linguistics.
+Naman Goyal, Cynthia Gao, Vishrav Chaudhary, Peng-
+Jen Chen, Guillaume Wenzek, Da Ju, Sanjana Kr-
+ishnan, Marc’Aurelio Ranzato, Francisco Guzmán,
+and Angela Fan. 2022. The Flores-101 evaluation
+benchmark for low-resource and multilingual ma-
+chine translation. Transactions of the Association for
+Computational Linguistics , 10:522–538.
+9Kaiming He, Xinlei Chen, Saining Xie, Yanghao Li, Pi-
+otr Dollár, and Ross Girshick. 2022. Masked autoen-
+coders are scalable vision learners. In Conference on
+Computer Vision and Pattern Recognition (CVPR) .
+Diederik P. Kingma and Jimmy Ba. 2015. Adam: A
+method for stochastic optimization. In 3rd Inter-
+national Conference on Learning Representations,
+ICLR 2015, San Diego, CA, USA, May 7-9, 2015,
+Conference Track Proceedings .
+Ilya Loshchilov and Frank Hutter. 2019. Decoupled
+weight decay regularization. In 7th International
+Conference on Learning Representations, ICLR 2019,
+New Orleans, LA, USA, May 6-9, 2019 . OpenRe-
+view.net.
+Jonas Lotz, Elizabeth Salesky, Phillip Rust, and
+Desmond Elliott. 2023. Text rendering strategies for
+pixel language models. In Proceedings of the 2023
+Conference on Empirical Methods in Natural Lan-
+guage Processing , pages 10155–10172, Singapore.
+Association for Computational Linguistics.
+Jonas F. Lotz, Hendra Setiawan, Stephan Peitz, and
+Yova Kementchedjhieva. 2025. Overcoming vocab-
+ulary constraints with pixel-level fallback. Preprint ,
+arXiv:2504.02122.
+Stephen Mayhew, Terra Blevins, Shuheng Liu, Marek
+Suppa, Hila Gonen, Joseph Marvin Imperial, Börje
+Karlsson, Peiqin Lin, Nikola Ljubeši ´c, Lester James
+Miranda, Barbara Plank, Arij Riabi, and Yuval Pinter.
+2024. Universal NER: A gold-standard multilingual
+named entity recognition benchmark. In Proceed-
+ings of the 2024 Conference of the North American
+Chapter of the Association for Computational Lin-
+guistics: Human Language Technologies (Volume
+1: Long Papers) , pages 4322–4337, Mexico City,
+Mexico. Association for Computational Linguistics.
+Arnav Mhaske, Harshit Kedia, Sumanth Doddapaneni,
+Mitesh M. Khapra, Pratyush Kumar, Rudra Murthy,
+and Anoop Kunchukuttan. 2023. Naamapadam: A
+large-scale named entity annotated data for Indic lan-
+guages. In Proceedings of the 61st Annual Meeting
+of the Association for Computational Linguistics (Vol-
+ume 1: Long Papers) , pages 10441–10456, Toronto,
+Canada. Association for Computational Linguistics.
+Alberto Muñoz-Ortiz, Verena Blaschke, and Barbara
+Plank. 2025. Evaluating pixel language models on
+non-standardized languages. In Proceedings of the
+31st International Conference on Computational Lin-
+guistics , pages 6412–6419, Abu Dhabi, UAE. Asso-
+ciation for Computational Linguistics.
+Joakim Nivre, Marie-Catherine de Marneffe, Filip Gin-
+ter, Jan Haji ˇc, Christopher D. Manning, Sampo
+Pyysalo, Sebastian Schuster, Francis Tyers, and
+Daniel Zeman. 2020. Universal Dependencies v2:
+An evergrowing multilingual treebank collection. In
+Proceedings of the Twelfth Language Resources and
+Evaluation Conference , pages 4034–4043, Marseille,
+France. European Language Resources Association.NLLB Team, Marta R. Costa-jussà, James Cross, Onur
+Çelebi, Maha Elbayad, Kenneth Heafield, Kevin Hef-
+fernan, Elahe Kalbassi, Janice Lam, Daniel Licht,
+Jean Maillard, Anna Sun, Skyler Wang, Guillaume
+Wenzek, Al Youngblood, Bapi Akula, Loic Barrault,
+Gabriel Mejia-Gonzalez, Prangthip Hansanti, and
+20 others. 2022. No language left behind: Scaling
+human-centered machine translation. arXiv preprint .
+Sungjoon Park, Jihyung Moon, Sungdong Kim, Won Ik
+Cho, Ji Yoon Han, Jangwon Park, Chisung Song, Jun-
+seong Kim, Youngsook Song, Taehwan Oh, Joohong
+Lee, Juhyun Oh, Sungwon Lyu, Younghoon Jeong,
+Inkwon Lee, Sangwoo Seo, Dongjun Lee, Hyunwoo
+Kim, Myeonghwa Lee, and 14 others. 2021. Klue:
+Korean language understanding evaluation. In Pro-
+ceedings of the Neural Information Processing Sys-
+tems Track on Datasets and Benchmarks , volume 1.
+Phillip Rust, Jonas F. Lotz, Emanuele Bugliarello, Eliz-
+abeth Salesky, Miryam de Lhoneux, and Desmond
+Elliott. 2023. Language modelling with pixels. In
+The Eleventh International Conference on Learning
+Representations .
+Gözde Gül ¸ Sahin, Clara Vania, Ilia Kuznetsov, and Iryna
+Gurevych. 2020. Linspector: Multilingual probing
+tasks for word representations. Computational Lin-
+guistics , 46(2):335–385.
+Elizabeth Salesky, David Etter, and Matt Post. 2021.
+Robust open-vocabulary translation from visual text
+representations. In Proceedings of the 2021 Confer-
+ence on Empirical Methods in Natural Language Pro-
+cessing , pages 7235–7252, Online and Punta Cana,
+Dominican Republic. Association for Computational
+Linguistics.
+Elizabeth Salesky, Neha Verma, Philipp Koehn, and
+Matt Post. 2023. Multilingual pixel representations
+for translation and effective cross-lingual transfer.
+InProceedings of the 2023 Conference on Empiri-
+cal Methods in Natural Language Processing , pages
+13845–13861, Singapore. Association for Computa-
+tional Linguistics.
+David Samuel, Andrey Kutuzov, Lilja Øvrelid, and Erik
+Velldal. 2023. Trained on 100 million words and still
+in shape: BERT meets British National Corpus. In
+Findings of the Association for Computational Lin-
+guistics: EACL 2023 , pages 1954–1974, Dubrovnik,
+Croatia. Association for Computational Linguistics.
+Yintao Tai, Xiyang Liao, Alessandro Suglia, and Anto-
+nio Vergari. 2024. PIXAR: Auto-regressive language
+modeling in pixel space. In Findings of the Associa-
+tion for Computational Linguistics: ACL 2024 , pages
+14673–14695, Bangkok, Thailand. Association for
+Computational Linguistics.
+Kushal Tatariya, Vladimir Araujo, Thomas Bauwens,
+and Miryam de Lhoneux. 2024. Pixology: Probing
+the linguistic and visual capabilities of pixel-based
+language models. In Proceedings of the 2024 Con-
+ference on Empirical Methods in Natural Language
+10Processing , pages 3307–3320, Miami, Florida, USA.
+Association for Computational Linguistics.
+Laurens Van der Maaten and Geoffrey Hinton. 2008.
+Visualizing data using t-sne. Journal of machine
+learning research , 9(11).
+Linting Xue, Aditya Barua, Noah Constant, Rami Al-
+Rfou, Sharan Narang, Mihir Kale, Adam Roberts,
+and Colin Raffel. 2022. ByT5: Towards a token-free
+future with pre-trained byte-to-byte models. Transac-
+tions of the Association for Computational Linguis-
+tics, 10:291–306.
+Linting Xue, Noah Constant, Adam Roberts, Mihir Kale,
+Rami Al-Rfou, Aditya Siddhant, Aditya Barua, and
+Colin Raffel. 2021. mT5: A massively multilingual
+pre-trained text-to-text transformer. In Proceedings
+of the 2021 Conference of the North American Chap-
+ter of the Association for Computational Linguistics:
+Human Language Technologies , pages 483–498, On-
+line. Association for Computational Linguistics.
+Daniel Zeman, Joakim Nivre, Mitchell Abrams, Elia
+Ackermann, Noëmi Aepli, Hamid Aghaei, Željko
+Agi´c, Amir Ahmadi, Lars Ahrenberg, Chika Kennedy
+Ajede, Gabriel ˙e Aleksandravi ˇci¯ut˙e, Ika Alfina, Avner
+Algom, Erik Andersen, Lene Antonsen, Katya
+Aplonova, Angelina Aquino, Carolina Aragon, Glyd
+Aranes, and 483 others. 2022. Universal depen-
+dencies 2.10. LINDAT/CLARIAH-CZ digital li-
+brary at the Institute of Formal and Applied Linguis-
+tics (ÚFAL), Faculty of Mathematics and Physics,
+Charles University.
+Yukun Zhu, Ryan Kiros, Rich Zemel, Ruslan Salakhut-
+dinov, Raquel Urtasun, Antonio Torralba, and Sanja
+Fidler. 2015. Aligning books and movies: Towards
+story-like visual explanations by watching movies
+and reading books. In The IEEE International Con-
+ference on Computer Vision (ICCV) .
+A Appendix
+This appendix section contains a summary of
+data statistics, implementation details of the down-
+stream task experiments and the rest of the LIN-
+SPECTOR word-level probing analyses.
+A.1 Data Statistics
+We summarize data statistics of the benchmark
+used in this work in this section. Table 4 contains
+statistics for SIB-200 (Adelani et al., 2024; Goyal
+et al., 2022; NLLB Team et al., 2022) and LINSPEC -
+TOR (¸ Sahin et al., 2020), where each language split
+contains same number examples for training, val-
+idation and testing purposes. Table 5 reports the
+statistics of dependency parsing treebanks used in
+this work. Lastly, we share the NER benchmarks
+statistics in Table 6.Benchmark License Train Validation Test
+SIB-200 CC BY-SA 4.0 701 99 204
+LINSPECTOR Apache 2.0 7000 2000 1000
+Table 4: Data statistics for the equally-sized SIB-200
+and LINSPECTOR language splits.
+A.2 Implementation Details
+PIXEL -M4.Table 7 lists the hyperparameter con-
+figurations used for pixel language models, PIXEL -
+M4and PIXEL -BIGRAMS , across downstream tasks.
+Overall, we use the same set of hyperparameters
+with the previous work (Lotz et al., 2023). We re-
+peat the same experiment using different random
+seeds. For reporting test results, we average the test
+scores of the five runs with the highest validation
+split performance.
+Monolingual BERT Models. All models were
+fine-tuned in 16-bit BrainFloat (Abadi et al., 2016)
+using AdamW (Kingma and Ba, 2015; Loshchilov
+and Hutter, 2019) with a maximum learning rate of
+5e−5that is warmed up over the first 100 steps and
+subsequently linearly decayed toward 0. Across all
+tasks, we fine-tune for at maximum 15,000 steps,
+while evaluating every 500 steps for dependency
+parsing and NER, whereas topic classification is
+evaluated every epoch. Early stopping of 5 eval-
+uation cycles (DP and NER) or 20 epochs with a
+threshold of 0.0 is implemented. For all tasks and
+languages, when a separate evaluation split is avail-
+able, we selected the checkpoint performing best
+on it and evaluated on the test split. If no separate
+evaluation split was available, we selected and re-
+ported the best performance on the evaluation split.
+Inputs were truncated or padded to a maximum
+length of 256 tokens for parsing and classification,
+and 196 tokens for NER. For parsing and NER, a
+batch size of 64 is used, while topic classification is
+trained with batch size 32. We followed Rust et al.
+(2023) and evaluated dependency parsing using a
+biaffine parsing head (Dozat and Manning, 2017;
+Glavaš and Vuli ´c, 2021).
+A.3 LINSPECTOR Results
+In this appendix section, we share the results for the
+rest of the word-level probing analyses on LINSPEC -
+TOR (¸ Sahin et al., 2020). We analyze our model on
+fifteen languages—Arabic, Armenian, Bulgarian,
+Dutch, Estonian, Finnish, French, German, Greek,
+Hungarian, Macedonian, Polish, Russian, Swedish,
+and Turkish—across fourteen linguistic probing
+11Language Treebank #Sentences License
+ENG English-EWT 16621 CC BY-SA 4.0
+ARA Arabic-PADT 7664 CC BY-NC-SA 3.0
+BUL Bulgarian-BTB 11138 CC BY-NC-SA 3.0
+COP Coptic-Scriptorium 2011 CC BY 4.0
+HIN Hindi-HDTB 16647 CC BY-NC-SA 4.0
+JPN Japanese-GSD 8100 CC BY-SA 4.0
+KOR Korean-GSD 6339 CC BY-SA 4.0
+RUS Russian-GSD 5030 CC BY-SA 4.0
+TAM Tamil-TTB 600 CC BY-NC-SA 3.0
+TEL Telugu-MTG 5130 CC BY-SA 4.0
+UKR Ukrainian-IU 5030 CC BY-NC-SA 4.0
+URD Urdu-UDTB 5130 CC BY-NC-SA 4.0
+VIE Vietnamese-VTB 3000 CC BY-SA 4.0
+ZHO Chinese-GSD 4997 CC BY-SA 4.0
+Table 5: Total number of sentences of Universal Dependencies v2.10 (Zeman et al., 2022; Nivre et al., 2020)
+treebanks used for dependency parsing task evaluations, including dataset licenses. Adapted from Rust et al. (2023).
+Language Source #Sentences License
+ENG English-EWT 16621 CC BY-SA 4.0
+SRP Serbian-SET 4384 CC BY-SA 4.0
+HIN Naamapadam 1M CC0
+BEN Naamapadam 967k CC0
+TAM Naamapadam 501k CC0
+TEL Naamapadam 511k CC0
+KOR KLUE 26k CC BY-SA 4.0
+ZHO Chinese-GSD 4997 CC BY-SA 4.0
+Table 6: Overview of NER datasets (Mayhew et al., 2024; Mhaske et al., 2023; Park et al., 2021).
+tasks: Case Marking (Fig. 6), Gender (Fig. 17),
+Mood (Fig. 7), Number (Fig. 8), OddFeat (Fig. 9),
+Person (Fig. 10), Polarity (Fig. 18), POS (Fig. 11),
+Possession (Fig. 19), Pseudo (Fig. 12), SameFeat
+(Fig. 13), TagCount (Fig. 14), Tense (Fig. 15), and
+Voice (Fig. 16).
+These analyses provide further support for the
+findings reported in §5. Throughout the entire net-
+work, PIXEL -M4captures more robust linguistic
+features than PIXEL -BIGRAMS on all tasks for the
+Cyrillic script languages, Bulgarian, Macedonian
+and Russian. This is again expected since PIXEL -
+M4has seen a similar language, e.g. Ukrainian,
+during pretraining. Similarly, our observations
+are the same for the languages in unseen scripts,
+Arabic, Armenian and Greek, showcasing the im-
+proved cross-lingual transfer learning capabilities
+ofPIXEL -M4. Furthermore, on Latin script lan-
+guages, both models achieve similar overall perfor-
+mances across the layers. Nonetheless, on sometasks, PIXEL -M4captures better linguistic features
+for Latin languages with diacritics (e.g. Turkish,
+Swedish). Additionally, on more complex tasks
+such as OddFeat andSameFeat ,PIXEL -M4outper-
+forms PIXEL -BIGRAMS on Latin script languages
+like German and Hungarian, where the two models
+perform similarly on the other tasks.
+12Parameter SIB-200 UDP NER
+Classification head pooling Mean — —
+Optimizer AdamW
+Adam β 0.9,0.999
+Adam ε 1e−8
+Weight decay 0
+Learning rate {1e−5,3e−5,5e−5,7e−5,9e−5}
+Learning rate schedule Linear decay
+Warmup steps 100
+Max sequence length 256 256 196
+Stride — — —
+Batch size 32 64 64
+Max steps 15 000 15 000 15 000
+Eval strategy epochs steps steps
+Eval steps — 500 500
+Early stopping ✓
+Early stopping patience 20 5 5
+Dropout probability 0.1
+Table 7: Hyperparameters used for fine-tuning and evaluating models on the SIB-200, UDP parsing, and NER tasks.
+60708090100
+Bulgarian
+ Estonian
+ Finnish
+ German
+1 2 3 4 5 6 7 8 9 10 11 1255606570758085
+Hungarian
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Polish
+1 2 3 4 5 6 7 8 9 10 11 12
+Swedish
+1 2 3 4 5 6 7 8 9 10 11 12
+Turkish
+LayerCase
+Figure 6: Word-level probing analysis on LINSPECTOR for the Case task. Each subplot shows a different language;
+in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden representations.
+7075808590
+Arabic
+ Armenian
+ Finnish
+ French
+1 2 3 4 5 6 7 8 9 10 11 12707580859095
+German
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Hungarian
+1 2 3 4 5 6 7 8 9 10 11 12
+Polish
+LayerMood
+Figure 7: Word-level probing analysis on LINSPECTOR for the Mood task. Each subplot shows a different language;
+in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden representations.
+1360708090
+Armenian
+ Finnish
+ French
+ German
+ Hungarian
+1 2 3 4 5 6 7 8 9 10 11 127075808590
+Macedonian
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Polish
+1 2 3 4 5 6 7 8 9 10 11 12
+Russian
+1 2 3 4 5 6 7 8 9 10 11 12
+Swedish
+LayerNumberFigure 8: Word-level probing analysis on LINSPECTOR for the Number task. Each subplot shows a different
+language; in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden
+representations.
+4050607080
+Armenian
+ Finnish
+ German
+ Hungarian
+ Macedonian
+1 2 3 4 5 6 7 8 9 10 11 12405060708090
+Greek
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Polish
+1 2 3 4 5 6 7 8 9 10 11 12
+Russian
+1 2 3 4 5 6 7 8 9 10 11 12
+Swedish
+1 2 3 4 5 6 7 8 9 10 11 12
+Turkish
+LayerOddFeat
+Figure 9: Word-level probing analysis on LINSPECTOR for the OddFeat task. Each subplot shows a different
+language; in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden
+representations.
+80859095100
+Arabic
+ Armenian
+ Finnish
+ French
+82.585.087.590.092.595.097.5100.0
+German
+ Hungarian
+ Macedonian
+ Greek
+1 2 3 4 5 6 7 8 9 10 11 1286889092949698100
+Polish
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Russian
+1 2 3 4 5 6 7 8 9 10 11 12
+Turkish
+LayerPerson
+Figure 10: Word-level probing analysis on LINSPECTOR for the Person task. Each subplot shows a different
+language; in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden
+representations.
+1460708090100
+Bulgarian
+ Estonian
+ Finnish
+ French
+ German
+1 2 3 4 5 6 7 8 9 10 11 127075808590
+Hungarian
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Polish
+1 2 3 4 5 6 7 8 9 10 11 12
+Swedish
+1 2 3 4 5 6 7 8 9 10 11 12
+Turkish
+LayerPOSFigure 11: Word-level probing analysis on LINSPECTOR for the Pos task. Each subplot shows a different language;
+in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden representations.
+1 2 3 4 5 6 7 8 9 10 11 125055606570
+Dutch
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+French
+1 2 3 4 5 6 7 8 9 10 11 12
+German
+1 2 3 4 5 6 7 8 9 10 11 12
+Turkish
+LayerPseudo
+Figure 12: Word-level probing analysis on LINSPECTOR for the Pseudo task. Each subplot shows a different
+language; in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden
+representations.
+5060708090
+Bulgarian
+ Dutch
+ Estonian
+ Finnish
+ French
+1 2 3 4 5 6 7 8 9 10 11 125060708090
+German
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Polish
+1 2 3 4 5 6 7 8 9 10 11 12
+Swedish
+1 2 3 4 5 6 7 8 9 10 11 12
+Turkish
+LayerSameFeat
+Figure 13: Word-level probing analysis on LINSPECTOR for the SameFeat task. Each subplot shows a different
+language; in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden
+representations.
+155060708090
+Bulgarian
+ Dutch
+ Estonian
+ Finnish
+ French
+1 2 3 4 5 6 7 8 9 10 11 1265707580859095
+German
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Hungarian
+1 2 3 4 5 6 7 8 9 10 11 12
+Polish
+1 2 3 4 5 6 7 8 9 10 11 12
+Swedish
+1 2 3 4 5 6 7 8 9 10 11 12
+Turkish
+LayerTagCountFigure 14: Word-level probing analysis on LINSPECTOR for the TagCount task. Each subplot shows a different
+language; in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden
+representations.
+7075808590
+Armenian
+ Bulgarian
+ Finnish
+ French
+7075808590
+German
+ Hungarian
+ Macedonian
+ Greek
+1 2 3 4 5 6 7 8 9 10 11 127075808590
+Polish
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Russian
+1 2 3 4 5 6 7 8 9 10 11 12
+Turkish
+LayerTense
+Figure 15: Word-level probing analysis on LINSPECTOR for the Tense task. Each subplot shows a different language;
+in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden representations.
+1 2 3 4 5 6 7 8 9 10 11 12708090100
+Arabic
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Bulgarian
+1 2 3 4 5 6 7 8 9 10 11 12
+Finnish
+1 2 3 4 5 6 7 8 9 10 11 12
+Russian
+1 2 3 4 5 6 7 8 9 10 11 12
+Swedish
+LayerVoice
+Figure 16: Word-level probing analysis on LINSPECTOR for the V oice task. Each subplot shows a different language;
+in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden representations.
+1660708090
+Arabic
+ Bulgarian
+ Macedonian
+1 2 3 4 5 6 7 8 9 10 11 12707580859095
+Greek
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Polish
+1 2 3 4 5 6 7 8 9 10 11 12
+Russian
+LayerGenderFigure 17: Word-level probing analysis on LINSPECTOR for the Gender task. Each subplot shows a different
+language; in each, the y-axis represents model accuracies and the x-axis represents layer number of the hidden
+representations.
+1 2 3 4 5 6 7 8 9 10 11 12828486889092
+Turkish
+PIXEL-BIGRAMS
+PIXEL-M4
+LayerPolarity
+Figure 18: Word -level probing analysis on LINSPECTOR
+for the Polarity task. Each subplot shows a different lan-
+guage; in each, the y -axis represents model accuracies
+and the x -axis represents layer number of the hidden
+representations.
+1 2 3 4 5 6 7 8 9 10 11 1280859095100
+Armenian
+PIXEL-BIGRAMS
+PIXEL-M4
+1 2 3 4 5 6 7 8 9 10 11 12
+Turkish
+LayerPossession
+Figure 19: Word -level probing analysis on LINSPECTOR
+for the Possession task. Each subplot shows a different
+language; in each, the y -axis represents model accu-
+racies and the x -axis represents layer number of the
+hidden representations.
+17

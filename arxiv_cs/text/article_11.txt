@@ -1,0 +1,1317 @@
+arXiv:2505.21441v1  [stat.ML]  27 May 2025Autoencoding Random Forests
+Binh Duc Vu∗
+King’s College London
+binh.vu@kcl.ac.ukJan Kapar∗
+University of Bremen
+kapar@leibniz-bips.de
+Marvin Wright
+University of Bremen
+wright@leibniz-bips.deDavid S. Watson
+King’s College London
+david.watson@kcl.ac.uk
+Abstract
+We propose a principled method for autoencoding with random forests. Our strat-
+egy builds on foundational results from nonparametric statistics and spectral graph
+theory to learn a low-dimensional embedding of the model that optimally represents
+relationships in the data. We provide exact and approximate solutions to the decod-
+ing problem via constrained optimization, split relabeling, and nearest neighbors
+regression. These methods effectively invert the compression pipeline, establishing
+a map from the embedding space back to the input space using splits learned by
+the ensemble’s constituent trees. The resulting decoders are universally consistent
+under common regularity assumptions. The procedure works with supervised or
+unsupervised models, providing a window into conditional or joint distributions.
+We demonstrate various applications of this autoencoder, including powerful new
+tools for visualization, compression, clustering, and denoising. Experiments il-
+lustrate the ease and utility of our method in a wide range of settings, including
+tabular, image, and genomic data.
+1 Introduction
+Engineering compact, informative representations is central to many learning tasks [ 53,91,8,39,76].
+In supervised applications, it can simplify regression or classification objectives, helping users better
+understand the internal operations of large, complicated models [37, 98]. In reinforcement learning,
+embeddings help agents navigate complex environments, imposing useful structure on a potentially
+high-dimensional state space [ 2,58]. In unsupervised settings, latent projections can be used for data
+compression [64], visualization [88], clustering [92], and generative modeling [87].
+The current state of the art in representation learning is dominated by deep neural networks (DNNs).
+Indeed, the tendency of these algorithms to learn rich embeddings is widely cited as a key component
+of their success [ 39], with some even arguing that large language models are essentially compression
+engines [ 25]. It is less obvious how to infer latent factors from tree-based ensembles such as random
+forests (RFs) [ 14], a popular and flexible function class widely used in areas like bioinformatics [ 19]
+and econometrics [ 3]. DNNs are known to struggle in tabular settings with mixed continuous and
+categorical covariates, where tree-based ensembles typically match or surpass their performance
+[81,43]. Though several authors have proposed methods for computing nonlinear embeddings with
+RFs (see Sect. 2), these approaches tend to be heuristic in nature. Moreover, the task of decoding
+latent vectors to recover input data in these pipelines remains unresolved.
+We propose a novel, principled method for autoencoding with RFs. Our primary contributions are: (1)
+We prove several important properties of the adaptive RF kernel, including that it is asymptotically
+∗Equal contribution.
+Preprint. Under review.universal. (2) These results motivate the use of diffusion maps to perform nonlinear dimensionality
+reduction and manifold learning with RFs. Resulting embeddings can be used for various downstream
+tasks. (3) We introduce and study multiple methods for decoding spectral embeddings back into
+the original input space, including exact and approximate solutions based on constrained optimiza-
+tion, split relabeling, and nearest neighbors regression. (4) We apply these methods in a series of
+experiments and benchmark against a wide array of neural and tree-based alternatives. Our results
+demonstrate that the RF autoencoder is competitive with the state of the art across a range of tasks
+including data visualization, compression, clustering, and denoising.
+The remainder of this paper is structured as follows. After a review of background material and
+related work (Sect. 2), we propose and study methods for encoding (Sect. 3) and decoding (Sect.
+4) data with RFs. Performance is illustrated in a series of experiments (Sect. 5). Following a brief
+discussion (Sect. 6), we conclude with directions for future work (Sect. 7).
+2 Background
+Our starting point is the well established connection between RFs and kernel methods [ 13,24,78].
+The basic insight is that classification and regression trees (CART) [ 15], which serve as basis functions
+for many popular ensemble methods, are a kind of adaptive nearest neighbors algorithm [ 61]. At the
+root of the tree, all samples are connected. Each split severs the link between one subset of the data
+and another (i.e., samples routed to left vs. right child nodes), resulting in a gradually sparser graph as
+depth increases. At completion, a sample’s “neighbors” are just those datapoints that are routed to the
+same leaf. Given some feature space X ⊂RdX, the implicit kernel of tree b,k(b):X × X 7→ { 0,1},
+is an indicator function that evaluates to 1for all and only neighboring sample pairs.2This base
+kernel can be used to define different ensemble kernels. For instance, taking an average over B >1
+trees, we get a kernel with a simple interpretation as the proportion of trees in which two samples
+colocate: kS(x,x′) =B−1PB
+b=1k(b)(x,x′). We call this the Scornet kernel after one of its noted
+proponents [ 78], who showed that kSis provably close in expectation to the Breiman RF kernel kRF
+n:
+kRF
+n(x,x′) =1
+BBX
+b=1k(b)(x,x′)Pn
+i=1k(b)(x,xi)
+, (1)
+where i∈[n] :={1, . . . , n }indexes the training samples. This kernel represents the average of
+normalized tree kernels, and fully encodes the information learned by the RF fnvia the identity:
+fn(x) =nX
+i=1kRF
+n(x,xi)yi, (2)
+which holds uniformly for all x∈ X. Though kSis sometimes referred to as “the random forest
+kernel” [24, 70], this nomenclature is misleading—only kRF
+nsatisfies Eq. 2.
+Several nonlinear dimensionality reduction techniques are based on kernels, most notably kernel
+principal component analysis (KPCA) [ 75]. We focus in particular on diffusion maps [ 21,22], which
+can be interpreted as a form of KPCA [ 47]. Bengio et al. [7]establish deep links between these
+algorithms and several related projection methods, demonstrating how to embed test data in all
+settings via the Nyström formula, a strategy we adopt below. Inverting any KPCA algorithm to map
+latent vectors to the input space is a nontrivial task that must be tailored to each specific kernel. For
+an example with Gaussian kernels, see [67].
+Previous authors have explored feature engineering with RFs. Shi and Horvath [80] perform multi-
+dimensional scaling on a dissimilarity matrix extracted from supervised and unsupervised forests.
+However, they do not explore the connections between this approach and kernel methods, nor do they
+propose any strategy for decoding latent representations. Other more heuristic approaches involve
+running PCA on a weighted matrix of all forest nodes (not just leaves), a method that works well in
+some experiments but comes with no formal guarantees [71].
+2This ignores certain subtleties that arise when trees are grown on bootstrap samples, in which case k(b)
+may occasionally evaluate to larger integers. For present purposes, we presume that trees are grown on data
+subsamples; see Appx. A.
+2…𝑋!𝑋"𝑋#…Red04.6...Blue12.3………251249408281837295138502317157344111472227201661924213344453214311513512212011413410213912412814715012714412511612114113612310810310613113012611911114210910411211313313814811712914614010542107118110132101149137145313542630101343144693923364894586199826870548160638090839756721006591959387766692865352577151786762858996755979645588987484697377777369847498885564795975968985626778517157525386926676879395916510072569783908063608154706882996158944836323994614431310302643531145137149101132110118107421051401461291171481381331131121041091421111191261301311061031081231361411211161251441271501471281241391021341141201221351151433245443321241961620272247114134715172350381529371828840491225
+00.20.40.60.81…
+−0.050−0.0250.0000.0250.050
+−0.050−0.0250.0000.025PC1PC2
+Speciessetosaversicolorvirginica
+(a)
+(b)(c)
+(d)(e)𝐊=𝐕𝚲𝐕$𝟏
+Figure 1: Visual summary of the encoding pipeline. (a) Input data can be a mix of continuous, ordinal,
+and/or categorical variables. (b) A RF (supervised or unsupervised) is trained on the data. (c) A kernel
+matrix K∈[0,1]n×nis extracted from the ensemble. (d) Kis decomposed into its eigenvectors and
+eigenvalues, as originally proposed by David Hilbert (pictured). (e) Data is projected onto the top
+dZ< n principal components of the diffusion map, resulting in a new embedding Z∈Rn×dZ.
+Several generative algorithms based on RFs have been proposed, building on the probabilistic circuit
+literature [ 23,94]. These do not involve any explicit encoding step, although the models they train
+could be passed through our pipeline to extract implicit embeddings (see Sect. 5). Existing methods
+for sum-product network encoding could in principle be applied to an RF following compilation into
+a corresponding circuit [ 90]. However, these can often increase rather than decrease dimensionality,
+and do not come with any associated decoding procedure.
+Perhaps the most similar method to ours, in motivation if not in execution, is Feng and Zhou
+[30]’s encoder forest (eForest). This algorithm maps each point to a hyperrectangle defined by the
+intersection of all leaves to which the sample is routed. Decoding is then achieved by taking some
+representative value for each feature in the subregion (e.g., the median). Notably, this approach does
+notinclude any dimensionality reduction. On the contrary, the embedding space requires minima and
+maxima for all input variables, resulting in a representation with double the number of features as the
+inputs. Working from the conjecture that optimal prediction is equivalent to optimal compression
+[73, 53, 44], we aim to represent the information learned by the RF in relatively few dimensions.
+3 Encoding
+As a preliminary motivation, we prove several important properties of the RF kernel. The following
+definitions are standard in the literature. Let Xbe a compact metric space, and let C(X)be the set of
+all real-valued continuous functions on X.
+Definition 3.1 (Positive semidefinite) .A symmetric function k:X ×X 7→ Rispositive semidefinite
+(PSD) if, for all x1, . . . ,xn∈ X,n∈N, and ci, cj∈R, we have:Pn
+i,jcicjk(xi,xj)≥0.
+The Moore-Aronszajn theorem [ 1] states that PSD kernels admit a unique reproducing kernel Hilbert
+space (RKHS) [9], providing a rich mathematical language for analyzing their behavior.
+Definition 3.2 (Universal) .We say that the RKHS Hisuniversal if the associated kernel kis dense
+inC(X)with respect to the uniform norm. That is, for any f∗∈C(X)andϵ >0, there exists some
+f∈ H such that ∥f∗−f∥∞< ϵ.
+Several variants of universality exist with slightly different conditions on X[82]. Examples of
+universal kernels include the Gaussian and Laplace kernels [83].
+Definition 3.3 (Characteristic) .The bounded measurable kernel kischaracteristic if the function
+µ7→R
+Xk(·,x)dµ(x)is injective, where µis a Borel probability measure on X.
+Characteristic kernels are especially useful for statistical testing, and have inspired flexible nonpara-
+metric methods for evaluating marginal and conditional independence [ 41,34]. For instance, Gretton
+et al. [42] show that, when using a characteristic kernel k, the maximum mean discrepancy (MMD)
+between two measures µ, νonXis zero iff µ=ν. The MMD is defined as:
+MMD2(µ, ν;k) :=Ex,x′∼µ[k(x,x′)]−2Ex∼µ,y∼ν[k(x,y)] +Ey,y′∼ν[k(y,y′)].
+With these definitions in place, we state our first result (all proofs in Appx. A).
+3Theorem 3.4 (RF kernel properties) .Assume standard RF regularity conditions (see Appx. A). Then:
+(a) For all n∈N, the function kRF
+nis PSD and the kernel matrix K∈[0,1]n×nis doubly stochastic.
+(b) Let {fn}be a sequence of RFs. Then the associated RKHS sequence {Hn}is asymptotically
+universal. That is, for any f∗∈C(X)andϵ >0, we have:
+lim
+n→∞P 
+∥f∗−fn∥∞≥ϵ
+= 0.
+(c) The RKHS sequence {Hn}is asymptotically characteristic. That is, for any ϵ >0, the Borel
+measures µ, νare equal if and only if:
+lim
+n→∞P 
+MMD (µ, ν;kRF
+n)≥ϵ
+= 0.
+The literature on kernel methods is largely focused on fixed kernels such as the radial basis function
+(RBF). Among adaptive partitioning alternatives, the Scornet kernel been studied in some detail
+[24,78,70], as has the Mondrian kernel [ 59,4,17]. However, to the best of our knowledge, we
+are the first to establish these results for the RF kernel. Thm. 3.4 confirms that kRF
+nis flexible,
+informative, and generally “well-behaved” in ways that will prove helpful for autoencoding.
+Spectral Graph Theory A key insight from spectral graph theory is that for any PSD kernel k,
+there exists an encoding g:X 7→ Z for any embedding dimension dZ< n that optimally represents
+the data, in a sense to be made precise below. This motivates our use of diffusion maps [ 22,21],
+which are closely related to Laplacian eigenmaps [ 5,6], an essential preprocessing step in popular
+spectral clustering algorithms [ 69,92,54]. These methods are typically used with fixed kernels such
+as the RBF; by contrast, we use the adaptive RF kernel, which is better suited to mixed tabular data.
+The procedure begins with a dataset of paired feature vectors x∈ X ⊂ RdXand outcomes y∈ Y ⊂ R
+sampled from the joint distribution PXY.3A RF of Btreesfnis trained on {xi, yi}n
+i=1. Using Eq.
+1, we construct the kernel matrix K∈[0,1]n×nwith entries kij=kRF
+n(xi,xj). This defines a
+weighted, undirected graph Gnover the training data. As Kis doubly stochastic, it can be interpreted
+as encoding the transitions of a Markov process. Spectral analysis produces the decomposition
+KV =VΛ, where V∈Rn×ndenotes the eigenvector matrix with corresponding eigenvalues
+λ∈[0,1]n, and Λ=diag(λ). Indexing from zero, it can be shown that V0is constant, with
+1 =λ0≥λ1≥ ··· ≥ λn. Following standard convention, we drop this uninformative dimension
+and take the leading eigenvectors from V1.
+The elements of this decomposition have several notable properties.4For instance, the resulting
+eigenvectors uniquely solve the constrained optimization problem:
+min
+V∈Rn×dZX
+i,jkij∥vi−vj∥2s.t.V⊤V=I,
+for all dZ∈[n], thereby minimizing Dirichlet energy and producing the smoothest possible represen-
+tation of the data that preserves local relationships in the graph. These eigenvectors also simplify
+a number of otherwise intractable graph partition problems, providing smooth approximations that
+motivate spectral clustering approaches [ 79,92]. If we think of Gnas a random sample from a
+Riemannian manifold M, then scaling each Vjby√nλt
+jproduces an approximation of the jth eigen-
+function of the Laplace-Beltrami operator at time t, which describes how heat (or other quantities)
+diffuse across M[5,7]. Euclidean distance in the resulting space matches diffusion distances across
+Gn, providing a probabilistically meaningful embedding geometry [22].
+The diffusion map Z=√nVΛtrepresents the long-run connectivity structure of the graph after t
+time steps of a Markov process. Test data can be projected into spectral space via the Nyström formula
+[46], i.e.Z0=K0ZΛ−1for some K0∈[0,1]m×n, where rows index test points and columns index
+training points. For more details on diffusion and spectral graph theory, see [20, 68, 92].
+3Even in the unsupervised case, we typically train the ensemble with a regression or classification objective.
+The trick is to construct some Ythat encourages the model to make splits that are informative w.r.t. PX(e.g.,
+[80,94]). For fully random partitions, Ycan be any variable that is independent of the features (e.g., [ 36,35]).
+4Observe that the eigenvectors of Kare identical to those of the graph Laplacian L=I−K, which has jth
+eigenvalue γj= 1−λj. For more on the links between diffusion and Laplacian eigenmaps, see [57, 47].
+44 Decoding
+Our next task is to solve the inverse problem of decoding vectors from the spectral embedding space
+back into the original feature space—i.e., learning the function h:Z 7→ X such that x≈h 
+g(x)
+.
+We propose several solutions, including methods based on constrained optimization, split relabeling,
+andk-nearest neighbors. To study the properties of these different methods, we introduce the notion
+of a universally consistent decoder.
+Definition 4.1 (Universally consistent decoder) .Letg∗:X 7→ Z be a lossless encoder. Then we say
+that the sequence of decoders {hn:Z 7→ X} isuniversally consistent if, for all distributions PX,
+anyx∼PX, and all ϵ >0, we have:
+lim
+n→∞P
+∥x−hn 
+g∗(x)
+∥∞≥ϵ
+= 0.
+The first two methods—constrained optimization and split relabeling—are designed to infer likely leaf
+assignments for latent vectors z. If these are correctly determined, then the intersection of assigned
+leaves defines a bounding box that contains the corresponding input vector x. Our estimate ˆxis then
+sampled uniformly from this subspace, which is generally small for sufficiently large and/or deep
+forests. As a motivation for this approach, we show that a leaf assignment oracle would constitute a
+universally consistent decoder.
+Letd(b)
+Φbe the number of leaves in tree b, and dΦ=PB
+b=1d(b)
+Φthe number of leaves in the forest
+f. The function πf:X 7→ { 0,1}dΦmaps each sample xto its corresponding leaves in f. It is
+composed by concatenating the outputs of Bunique functions π(b)
+f:X 7→ { 0,1}d(b)
+Φ, each satisfying
+∥π(b)
+f(x)∥1= 1for all x∈ X. Let ψf:Z 7→ { 0,1}dΦbe a similar leaf assignment function, but
+for latent vectors. Then for a fixed forest fand encoder g, the leaf assignment oracle ψ∗
+f,gsatisfies
+πf(x) =ψ∗
+f,g 
+g(x)
+, for all x∈ X.
+Theorem 4.2 (Oracle consistency) .Letfnbe a RF trained on {xi, yi}n
+i=1i.i.d.∼PXY. Leth∗
+n:Z 7→ X
+be a decoder that (i) maps latent vectors to leaves in fnvia the oracle ψ∗
+fn,g; then (ii) reconstructs
+data by sampling uniformly from the intersection of assigned leaves for each sample. Then, under the
+assumptions of Thm. 3.4, the sequence {h∗
+n}is universally consistent.
+4.1 Constrained Optimization
+Our basic strategy for this family of decoders is to estimate a kernel matrix from a set of embeddings,
+then use this matrix to infer leaf assignments. Let s∈ {1/[n−1]}dΦbe a vector of inverse leaf sample
+sizes, composed of tree-wise vectors s(b)with entries s(b)
+i= 1/Pn
+j=1π(b)
+i(xj). Then the canonical
+feature map for the RF kernel can be written ϕ(x) =
+ϕ(1)(x), . . . , ϕ(B)(x)
+, with tree-wise feature
+maps ϕ(b)(x) =π(b)(x)⊙√
+s(b), where ⊙denotes the Hadamard (element-wise) product. Now RF
+kernel evaluations can be calculated via the scaled inner product kRF
+n(x,x′) =B−1⟨ϕ(x), ϕ(x′)⟩,
+which is equivalent to Eq. 1.
+Say we have ntraining samples used to fit the forest fn, and mlatent vectors to decode from an
+embedding space of dimension dZ< n. We will refer to these samples as a test set, since they may
+not correspond to any training samples. We are provided a matrix of embeddings Z0∈Rm×dZ,
+from which we estimate the corresponding kernel matrix ˆK0=Z0ΛZ†, where Z†denotes the
+Moore-Penrose pseudo-inverse of Z.
+Now we must identify the most likely leaf assignments for each of our m(unseen) test samples
+X0∈Rm×dX, given their latent representation Z0. Call this target matrix Ψ∈ {0,1}m×dΦ. To
+estimate it, we start with the binary matrix of leaf assignments for training samples Π∈ {0,1}n×dΦ.
+Exploiting the inner product definition of a kernel, observe that our original (training) adjacency
+matrix Ksatisfies BK=ΦΦ⊤=ΠSΠ⊤, where Φ∈[0,1]n×dΦis the RKHS representation of
+X, andS=diag(s). We partition [dΦ]intoBsubsets L(b)that index the leaves belonging to tree b.
+Recall that each tree bpartitions the feature space XintoL(b)hyperrectangular subregions X(b)
+ℓ⊂ X ,
+one for each leaf ℓ∈[L(b)]. Let R(b)
+i∈ {X(b)
+1, . . . ,X(b)
+L(b)}denote the region to which sample iis
+5routed in tree b. Then leaf assignments for test samples can be calculated by solving the following
+integer linear program (ILP):
+min
+Ψ∈{0,1}m×dΦ∥BˆK⊤
+0−ΠSΨ⊤∥1s.t.∀i, b:X
+ℓ∈L(b)ψiℓ= 1,∀i:\
+b∈[B]R(b)
+i̸=∅. (3)
+The objective is an entry-wise L1norm that effectively treats the resulting matrix as a stacked vector.
+The first constraint guarantees that test samples are one-hot encoded on a per-tree basis. The second
+constraint states that the intersection of all assigned hyperrectangles is nonempty. We call these the
+one-hot andoverlap constraints, respectively. Together they ensure consistent leaf assignments both
+within and between trees. The ILP approach comes with the following guarantee.
+Theorem 4.3 (Uniqueness) .Assume we have a lossless encoder g∗:X 7→ Z such that the estimated
+ˆK0coincides with the ground truth K∗
+0. Then, under the assumptions of Thm. 3.4, as n→ ∞ , with
+high probability, the ILP of Eq. 3 is uniquely solved by the true leaf assignments Ψ∗.
+Together with Thm. 4.2, Thm. 4.3 implies that the ILP approach will converge on an exact recon-
+struction of the data under ideal conditions. While this may be encouraging, there are two major
+obstacles in practice. First, this solution scales poorly with manddΦ. Despite the prevalence of
+highly optimized solvers, ILPs are NP-complete and therefore infeasible for large problems. Second,
+even with an oracle for solving this program, results may be misleading when using noisy estimates
+ofˆK0. Since this will almost always be the case for dZ≪n—an inequality that is almost certain to
+hold in most real-world settings—the guarantees of Thm. 4.3 will rarely apply. We describe a convex
+relaxation in Appx. C via the exclusive lasso [ 101,16], an approach that is more tractable than the
+ILP but still turns each decoding instance into a nontrivial optimization problem.
+4.2 Split Relabeling
+Another strategy for computing leaf assignments front-loads the computational burden so that down-
+stream execution requires just a single pass through a pretrained model, as with neural autoencoders.
+We do this by exploiting the tree structure itself, relabeling the splits in the forest so that they apply
+directly in embedding space.
+The procedure works as follows. Recall that each split is a literal of the form Xj▷ ◁ x for some
+j∈[dX], x∈ Xj, where ▷ ◁∈ {<,=}(the former for continuous, the latter for categorical data). At
+each node, we create a synthetic dataset ˜Xby drawing uniformly from the corresponding region. We
+embed these points with a diffusion map to create the corresponding matrix ˜Z. Samples are labeled
+with a binary outcome variable Yindicating whether they are sent to left or right child nodes. Next,
+we search for the axis-aligned split in the embedding space that best predicts Y. The ideal solution
+satisfies Zk< z⇔Xj▷ ◁ x, for some k∈[dZ], z∈ Zk. Perfect splits may not be possible, but
+optimal solutions can be estimated with CART. Once all splits have been relabeled, the result is a tree
+with the exact same structure as the original but a new semantics, effectively mapping a recursive
+partition of the input space onto a recursive partition of the embedding space.
+This strategy may fare poorly if no axis-aligned split in Zapproximates the target split in X. In
+principle, we could use any binary decision procedure to route samples at internal nodes. For example,
+using logistic regression, we could create a more complex partition of Zinto convex polytopes. Of
+course, this increase in expressive flexibility comes at a cost in complexity. The use of synthetic data
+allows us to choose the effective sample size for learning splits, which is especially advantageous in
+deep trees, where few training points are available as depth increases.
+4.3 Nearest Neighbors
+Our final decoding strategy elides the leaf assignment step altogether in favor of directly estimating
+feature values via k-nearest neighbors ( k-NN). First, we find the most proximal points in the latent
+space. Once nearest neighbors have been identified, we reconstruct their associated inputs using
+the leaf assignment matrix Πand the splits stored in our forest fn. From these ingredients, we
+infer the intersection of all leaf regions for each training sample—what Feng and Zhou [30] call the
+“maximum compatible rule”—and generate a synthetic training set ˜Xby sampling uniformly in these
+subregions. Observe that this procedure guarantees g(˜X) =Zby construction.
+6tree depth = 1 tree depth = 2 tree depth = 4 tree depth = 8 tree depth = 16
+−1.0 −0.5 0.0 0.5 1.0 1.5 −1.0 −0.5 0.0 0.5 1.0 1.5 −1.0 −0.5 0.0 0.5 1.0 1.5 −1.0 −0.5 0.0 0.5 1.0 1.5 −1.0 −0.5 0.0 0.5 1.0 1.5−1012
+KPC1KPC2Label
+3
+4
+8
+9Figure 2: Diffusion maps visualize RF training. Using a subsample of the MNIST dataset, we find
+that digits become more distinct in the embedding space as tree depth increases.
+Neighbors are weighted in inverse proportion to their diffusion distance from the target z0, producing
+the weight function w:Z 7→ ∆k−1. Let K⊂[n]denote the indices of the selected points and
+{˜xi}i∈Kthe corresponding synthetic inputs. Then the jth entry of the decoded vector ˆx0is given by
+ˆx0j=P
+i∈Kwi(z0) ˜xij. For categorical features, we take the most likely label across all neighbors,
+weighted by w, with ties broken randomly. The k-NN decoder comes with similar asymptotic
+guarantees to the previous methods, without assuming access to a leaf assignment oracle.
+Theorem 4.4 (k-NN consistency) .Letk→ ∞ andk/n→0. Then under the assumptions of Thm.
+3.4, the k-NN decoder is universally consistent.
+This approach is arguably truer to the spirit of RFs, using local averaging to decode inputs instead of
+just predict outputs. Like the split relabeling approach, this is a modular decoding solution that does
+not rely on any particular encoding scheme. However, it is uniquely well suited to spectral embedding
+techniques, which optimally preserve kernel structure with respect to L2norms in the latent space.
+5 Experiments
+In this section, we present a range of experimental results on visualization, reconstruction and
+denoising. Further details on all experiments can be found in Appx. B, along with additional results.
+Code for reproducing all figures and tables is included in the supplement.
+Visualization As a preliminary proof of concept, we visualize the embeddings of a RF classifier
+with 200 trees as it trains on a subset of the MNIST dataset [ 26] including samples with labels 3, 4,
+8, and 9 (see Fig. 2). Plotting a sequence of diffusion maps with dZ= 2at increasing tree depth,
+we find the model learning to distinguish between the four digits, which gradually drift into their
+own regions of the latent space. Early in training, the data are clumped around the origin. As depth
+increases, the manifold blooms and samples concentrate by class label. KPC1 appears to separate 3
+and 8 from 4 and 9, which makes sense given that these respective pairs are often hard to distinguish
+in some handwritten examples. Meanwhile, KPC2 further subdivides 3 from 8. The relative proximity
+of 4’s and 9’s demonstrates that the RF is somewhat uncertain about these samples, although with
+extra dimensions we find clearer separation (not shown). In other words, the embeddings suggest a
+highly interpretable recursive partition, as we might expect from a single decision tree.
+Reconstruction We limit our decoding experiments in this section to the k-NN method, which
+proved the fastest and most accurate in our experiments (for a comparison, see Appx. B.2). Hence-
+forth, this is what we refer to as the RF autoencoder (RFAE).
+dZ= 2
+dZ= 4
+dZ= 8
+dZ= 16
+dZ= 32
+Original
+Figure 3: MNIST digit reconstructions with vary-
+ing latent dimension sizes; original images are dis-
+played in the bottom row.As an initial inspection of RFAE’s recon-
+struction behavior, we autoencode the first
+occurrence of each digit in the MNIST test
+set for varying latent dimensionalities dZ∈
+{2,4,8,16,32}in Fig. 3. For this experiment,
+we fit an (unsupervised) completely random for-
+est [12] with B= 1000 trees, train the encoder
+on full training data, project the test samples
+intoZvia Nyström, and decode them back us-
+ingk= 50 nearest neighbors. Although RFAEs
+are not optimized for image data, the recon-
+structions produce mostly recognizable digits
+even with very few latent dimensions, with out-
+puts that partially correspond to the wrong class.
+7plpn spambase student telco wqhd king marketing mushroom obesitychurn credit diabetes dry_bean forestfiresabalone adult banknote bc car
+0.250.500.751.00 0.250.500.751.00 0.250.500.751.00 0.250.500.751.00 0.250.500.751.000.00.20.40.6
+0.50.60.70.80.9
+0.20.30.4
+0.20.40.60.80.20.30.40.50.6
+0.00.10.20.30.4
+0.000.050.100.15
+0.050.100.150.200.250.000.250.500.75
+0.40.60.81.0
+0.10.20.30.40.5
+0.350.400.450.500.550.600.10.20.30.40.5
+0.30.40.5
+0.30.40.50.6
+0.40.50.60.70.80.20.40.6
+0.20.40.60.8
+0.40.60.8
+0.20.40.6
+Compression FactorDistortion
+Method RFAE TVAE TTVAE AE VAEFigure 4: Compression-distortion trade-off on twenty benchmark tabular datasets. Shading represents
+standard errors across ten bootstraps.
+Best results can be observed at dZ= 32 , where the reconstructions appear quite similar to the
+originals. Additional results examining the influence of other parameters are presented in Appx. B.2.
+Next, we compare RFAE’s compression-distortion trade-off against two state-of-the-art neural ar-
+chitectures for autoencoding tabular data (TV AE and TTV AE), along with standard and variational
+autoencoders (AE and V AE, respectively) that are not optimized for this task. Although there are
+some other notable deep learning algorithms designed for tabular data (e.g., CTGAN [ 97], TabSyn
+[100], and TabPFN [ 51]), these do not come with inbuilt methods for decoding back to the input space
+at variable compression ratios. We also do not include eForest [ 30], another RF based autoencoder,
+because it only works with a fixed dZ= 2dXand is not capable of compression. For RFAE, we use
+the unsupervised ARF algorithm [94] with 500trees and set k= 20 for decoding.
+In standard AEs, reconstruction error is generally estimated via L2loss. This is not sensible with a
+mix of continuous and categorical data, so we create a combined measure that evaluates distortion on
+continuous variables via 1−R2(i.e., the proportion of variance unexplained) and categorical variables
+via classification error. Since both measures are on the unit interval, so too is their average across all
+dXfeatures. We plot this measure across a range of compression factors (i.e., inverse compression
+ratios dZ/dX) in 20 benchmark tabular datasets (see Fig. 4). For more details on these datasets, see
+Appx. B.1, Table 1. We evaluate performance over ten bootstrap samples at each compression factor,
+testing on the randomly excluded out-of-bag data. We find that RFAE is competitive in all settings,
+and has best average performance in 12 out of 20 datasets (see Appx. B.1, Table 2).
+Denoising As a final experiment, we consider a denoising example with single-cell RNA-
+sequencing (scRNA-seq) data. Pooling results from different labs is notoriously challenging in
+scRNA-seq due to technical artifacts collectively known as “batch effects” [ 60]. We propose to
+harmonize data across batches by training a RFAE on a large baseline study and passing new samples
+through the autoencoding pipeline.
+As an illustration, we compare two studies of the mouse brain transcriptome. Using the top dX= 5000
+genes, we learn a dZ= 64 -dimensional embedding of the Zeisel et al. [99] dataset ( n= 2874 ).
+Our RF is a completely random forest with B= 1000 trees. We project the Tasic et al. [86] data
+(m= 1590 ) into the latent space and decode using the top k= 100 nearest neighbors. Results are
+8presented in Fig. 5. To avoid potential biases from reusing our own embeddings, we compare original
+and denoised samples using PCA [55] and tSNE [88], two dimensionality reduction techniques that
+are widely used in scRNA-seq. In both cases, we find that denoising with RFAE helps align the
+manifolds, thereby minimizing batch effects.
+6 Discussion
+OriginalBatch Corrected
+−40−20020−2002040−40−2002040
+−2502550
+tSNE1tSNE2
+StudyTasic et al., 2016Zeisel et al., 2015OriginalBatch Corrected
+−40−20020−2002040−40−2002040
+−2502550
+tSNE1tSNE2A
+OriginalBatch Corrected
+−2002040−40−20020−20020
+−20020
+PC1PC2B
+Figure 5: Denoising with RFAE alleviates batch
+effects in scRNA-seq data.The building blocks of our encoding scheme
+are well established. Breiman himself took a
+kernel perspective on RFs [ 13], a direction that
+has been picked up by numerous authors since
+[24,78,4]. The theory of diffusion maps and
+KPCA goes back some twenty years [ 21,22,75].
+However, just as much RF theory has focused on
+idealized variants of the algorithm [ 11], no prior
+works appear to have studied the properties of
+the true RF kernel, opting instead to analyze sim-
+pler approximations. And while there have been
+some previous attempts to generate RF embed-
+dings [ 80,71], these have been largely heuristic
+in nature. By contrast, we provide a principled
+approach to dimensionality reduction in RFs,
+along with various novel decoding strategies.
+One notable difference between our method and
+autoencoding neural networks is that RFAE is
+not trained end-to-end. That is, while a deep au-
+toencoder simultaneously learns to encode and
+decode, RFAE is effectively a post-processing
+procedure for a pre-trained RF, with independent modules for encoding and decoding. We high-
+light that end-to-end training represents a fundamentally different objective. Whereas traditional
+autoencoders are necessarily unsupervised, our method works in tandem with either supervised or
+unsupervised RFs. As such, the goal is not necessarily to learn an efficient representation for its own
+sake, but rather to reveal the inner workings of a target model. One upshot of this decoupling is that
+our split relabeling and k-NN decoders can work in tandem with any valid encoding scheme. For
+instance, we could relabel an RF’s splits to approximate the behavior of sample points in principal
+component space, or indeed any Zfor which we have a map g:X 7→ Z .
+We highlight two notable limitations of our approach. First, the computational demands of our
+decoding strategies are nontrivial. (For a detailed analysis, see Appx. D.) Second, when using the
+k-NN approach, results will vary with the choice of k. However, we observe that autoencoding is a
+difficult task in general, and top deep learning models pose far greater computational burdens than
+RFAE. Moreover, having just a single hyperparameter to worry about is a rare luxury in this field,
+where leading algorithms often require bespoke architectures and finely tuned regularization penalties.
+Compared to the leading alternatives, RFAEs are relatively lightweight and simple.
+Autoencoders are often motivated by appeals to the minimum description length principle [ 73,50,44].
+Information theory provides a precise formalism for modeling the communication game that arises
+when one agent (say, Alice) wants to send a message to another (say, Bob) using a code that is
+maximally efficient with minimal information loss. This is another way to conceive of RFAE—as a
+sort of cryptographic protocol, in which Alice and Bob use a shared key (the RF itself) to encrypt and
+decrypt messages in the form of latent vectors z, which is presumably more compact (and not much
+less informative) than the original message x.
+Several authors have persuasively argued that learning expressive, efficient representations is central
+to the success of deep neural networks [ 8,39]. Our work highlights that RFs do something very
+similar under the hood, albeit through entirely different mechanisms. This insight has implications
+for how we use tree-based ensembles and opens up new lines of research for this function class.
+97 Conclusion
+We have introduced novel methods for encoding and decoding data with RFs. The procedure is
+theoretically sound and practically useful, with a wide range of applications including compression,
+clustering, data visualization, and denoising. Future work will investigate extensions to generative
+modeling, as well as other tree-based algorithms, such as gradient boosting machines [ 31,18].
+Another promising direction is to use the insights from this study to perform model distillation
+[49,33], compressing the RF into a more compact form with similar or even identical behavior. This
+is not possible with current methods, which still require the original RF to compute adjacencies and
+look up leaf bounds.
+Acknowledgements
+This research was supported by the UK Engineering and Physical Sciences Research Council
+(EPSRC) [Grant reference number EP/Y035216/1] Centre for Doctoral Training in Data-Driven
+Health (DRIVE-Health) at King’s College London and by the German Research Foundation (DFG),
+Emmy Noether Grant 437611051.
+References
+[1]N. Aronszajn. Theory of reproducing kernels. Transactions of the American Mathematical Society , 68(3):
+337–404, 1950.
+[2]Kai Arulkumaran, Marc Peter Deisenroth, Miles Brundage, and Anil Anthony Bharath. Deep reinforce-
+ment learning: A brief survey. IEEE Signal Processing Magazine , 34(6):26–38, 2017.
+[3]Susan Athey, Julie Tibshirani, and Stefan Wager. Generalized random forests. Ann. Statist. , 47(2):
+1148–1178, 2019.
+[4]M. Balog, B. Lakshminarayanan, Z. Ghahramani, D. M. Roy, and Y . W. Teh. The Mondrian kernel. In
+Proceedings of the 32nd Conference on Uncertainty in Artificial Intelligence , pages 32–41, 2016.
+[5]Mikhail Belkin and Partha Niyogi. Laplacian eigenmaps for dimensionality reduction and data represen-
+tation. Neural Computation , 15(6):1373–1396, 2003.
+[6]Mikhail Belkin and Partha Niyogi. Towards a theoretical foundation for Laplacian-based manifold
+methods. Journal of Computer and System Sciences , 74(8):1289–1308, 2008.
+[7]Yoshua Bengio, Olivier Delalleau, Nicolas Le Roux, Jean-François Paiement, Pascal Vincent, and Marie
+Ouimet. Learning eigenfunctions links spectral embedding and kernel PCA. 16(10):2197–2219, 2004.
+[8]Yoshua Bengio, Aaron C. Courville, and Pascal Vincent. Representation learning: A review and new
+perspectives. IEEE Transactions on Pattern Analysis and Machine Intelligence , 35:1798–1828, 2012.
+[9]Alain Berlinet and Christine Thomas-Agnan. Reproducing kernel Hilbert spaces in probability and
+statistics . Springer, New York, 2003.
+[10] Gérard Biau. Analysis of a random forests model. J. Mach. Learn. Res. , 13:1063–1095, 2012.
+[11] Gérard Biau and Erwan Scornet. A random forest guided tour. TEST , 25(2):197–227, 2016.
+[12] Gérard Biau, Luc Devroye, and Gábor Lugosi. Consistency of random forests and other averaging
+classifiers. J. Mach. Learn. Res. , 9(66):2015–2033, 2008.
+[13] Leo Breiman. Some infinity theory for predictor ensembles. Technical Report 579, Statistics Department,
+UC Berkeley, 2000.
+[14] Leo Breiman. Random forests. Mach. Learn. , 45(1):1–33, 2001.
+[15] Leo Breiman, Jerome Friedman, C. J. Stone, and R. A. Olshen. Classification and Regression Trees .
+Taylor & Francis, Boca Raton, FL, 1984.
+[16] Frederick Campbell and Genevera I. Allen. Within group variable selection through the exclusive lasso.
+Electron. J. Stat. , 11(2):4220–4257, 2017.
+10[17] Matias D. Cattaneo, Jason M. Klusowski, and William G. Underwood. Inference with Mondrian random
+forests. arXiv preprint, 2310.09702, 2023.
+[18] Tianqi Chen and Carlos Guestrin. Xgboost: A scalable tree boosting system. In Proceedings of the
+22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining , page 785–794,
+2016.
+[19] Xi Chen and Hemant Ishwaran. Random forests for genomic data analysis. Genom. , 99(6):323–329,
+2012.
+[20] F. Chung. Spectral graph theory . Conference Board of the Mathematical Sciences, Washington, 1997.
+[21] R. R. Coifman, S. Lafon, A. B. Lee, M. Maggioni, B. Nadler, F. Warner, and S. W. Zucker. Geometric
+diffusions as a tool for harmonic analysis and structure definition of data: Diffusion maps. Proc. Natl.
+Acad. Sci. , 102(21):7426–7431, 2005.
+[22] Ronald R. Coifman and Stéphane Lafon. Diffusion maps. Applied and Computational Harmonic Analysis ,
+21(1):5–30, 2006.
+[23] Alvaro Correia, Robert Peharz, and Cassio P de Campos. Joints in random forests. In Advances in Neural
+Information Processing Systems , volume 33, pages 11404–11415, 2020.
+[24] Alex Davies and Zoubin Ghahramani. The random forest kernel and other kernels for big data from
+random partitions. arXiv preprint, 1402.4293, 2014.
+[25] Grégoire Delétang, Anian Ruoss, Paul-Ambroise Duquenne, Elliot Catt, Tim Genewein, Christopher
+Mattern, Jordi Grau-Moya, Li Kevin Wenliang, Matthew Aitchison, Laurent Orseau, Marcus Hutter, and
+Joel Veness. Language modeling is compression. In The 12th International Conference on Learning
+Representations , 2024.
+[26] Li Deng. The MNIST database of handwritten digit images for machine learning research [best of the
+web]. IEEE Signal Processing Magazine , 29(6):141–142, 2012.
+[27] Misha Denil, David Matheson, and Nando De Freitas. Narrowing the gap: Random forests in theory and
+in practice. In Proceedings of the 31st International Conference on Machine Learning , pages 665–673,
+2014.
+[28] Luc Devroye, László Györfi, and Gábor Lugosi. A Probabilistic Theory of Pattern Recognition . Springer-
+Verlag, New York, 1996.
+[29] Dheeru Dua and Casey Graff. UCI machine learning repository, 2019. URL http://archive.ics.
+uci.edu/ml .
+[30] Ji Feng and Zhi-Hua Zhou. Autoencoder by forest. In Proceedings of the 32nd AAAI Conference on
+Artificial Intelligence , 2018.
+[31] Jerome H. Friedman. Greedy function approximation: A gradient boosting machine. Ann. Stat. , 29(5):
+1189 – 1232, 2001.
+[32] Jerome H. Friedman, Trevor Hastie, and Rob Tibshirani. Regularization paths for generalized linear
+models via coordinate descent. J. Stat. Softw. , 33(1):1–22, 2010.
+[33] Nicholas Frosst and Geoffrey Hinton. Distilling a neural network into a soft decision tree. arXiv preprint,
+1711.09784, 2017.
+[34] Kenji Fukumizu, Arthur Gretton, Xiaohai Sun, and Bernhard Schölkopf. Kernel measures of conditional
+dependence. In Advances in Neural Information Processing Systems , volume 20, 2007.
+[35] Robin Genuer. Variance reduction in purely random forests. J. Nonparametr. Stat. , 24(3):543–562, 2012.
+[36] Pierre Geurts, Damien Ernst, and Louis Wehenkel. Extremely randomized trees. Mach. Learn. , 63(1):
+3–42, 2006.
+[37] Amirata Ghorbani, James Wexler, James Y Zou, and Been Kim. Towards automatic concept-based
+explanations. In Advances in Neural Information Processing Systems , volume 32, 2019.
+[38] T. R. Golub, D. K. Slonim, P. Tamayo, C. Huard, M. Gaasenbeek, J. P. Mesirov, H. Coller, M. L. Loh,
+J. R. Downing, M. A. Caligiuri, C. D. Bloomfield, and E. S. Lander. Molecular classification of cancer:
+Class discovery and class prediction by gene expression monitoring. Science , 286(5439):531–537, 1999.
+11[39] Ian Goodfellow, Yoshua Bengio, and Aaron Courville. Deep Learning . MIT Press, 2016. http:
+//www.deeplearningbook.org .
+[40] Arthur Gretton, Karsten Borgwardt, Malte Rasch, Bernhard Schölkopf, and Alex Smola. A kernel method
+for the two-sample-problem. In B. Schölkopf, J. Platt, and T. Hoffman, editors, Advances in Neural
+Information Processing Systems , volume 19, 2006.
+[41] Arthur Gretton, Kenji Fukumizu, Choon Teo, Le Song, Bernhard Schölkopf, and Alex Smola. A kernel
+statistical test of independence. In Advances in Neural Information Processing Systems , volume 20, 2007.
+[42] Arthur Gretton, Karsten M. Borgwardt, Malte J. Rasch, Bernhard Schölkopf, and Alexander Smola. A
+kernel two-sample test. J. Mach. Learn. Res. , 13(25):723–773, 2012.
+[43] Leo Grinsztajn, Edouard Oyallon, and Gael Varoquaux. Why do tree-based models still outperform deep
+learning on typical tabular data? In 36th Conference on Neural Information Processing Systems Datasets
+and Benchmarks Track , 2022.
+[44] Peter Grünwald. The minimum description length principle . The MIT Press, Cambridge, MA, 2007.
+[45] László Györfi, Michael Kohler, Adam Krzy ˙zak, and Harro Walk. A Distribution-Free Theory of Nonpara-
+metric Regression . Springer-Verlag, New York, 2002.
+[46] Fredrik Hallgren. Kernel PCA with the Nyström method. arXiv preprint, 2109.05578, 2021.
+[47] Jihun Ham, Daniel D. Lee, Sebastian Mika, and Bernhard Schölkopf. A kernel view of the dimensionality
+reduction of manifolds. In Proceedings of the 21st International Conference on Machine Learning , 2004.
+[48] Irina Higgins, Loic Matthey, Arka Pal, Christopher Burgess, Xavier Glorot, Matthew Botvinick, Shakir
+Mohamed, and Alexander Lerchner. beta-V AE: Learning basic visual concepts with a constrained
+variational framework. In International Conference on Learning Representations , 2017.
+[49] Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. arXiv
+preprint, 1503.02531, 2015.
+[50] Geoffrey E Hinton and Richard Zemel. Autoencoders, minimum description length and Helmholtz free
+energy. Advances in neural information processing systems , 6, 1993.
+[51] Noah Hollmann, Samuel Müller, Lennart Purucker, Arjun Krishnakumar, Max Körfer, Shi Bin Hoo,
+Robin Tibor Schirrmeister, and Frank Hutter. Accurate predictions on small data with a tabular foundation
+model. Nature , 637(8045):319–326, 2025.
+[52] Allison Marie Horst, Alison Presmanes Hill, and Kristen B Gorman. palmerpenguins: Palmer Archipelago
+(Antarctica) penguin data , 2020. URL https://allisonhorst.github.io/palmerpenguins/ . R
+package version 0.1.0.
+[53] M. Hutter. Universal Artificial Intelligence: Sequential Decisions Based on Algorithmic Probability .
+Springer Berlin Heidelberg, Berlin, 2004.
+[54] Christopher R John, David Watson, Michael R Barnes, Costantino Pitzalis, and Myles J Lewis. Spectrum:
+fast density-aware spectral clustering for single and multi-omic data. Bioinformatics , 36(4):1159–1166,
+2019.
+[55] I.T. Jolliffe. Principal Component Analysis . Springer, New York, second edition, 2002.
+[56] Richard M. Karp. Reducibility among Combinatorial Problems , pages 85–103. Springer US, Boston,
+MA, 1972.
+[57] Risi Imre Kondor and John D. Lafferty. Diffusion kernels on graphs and other discrete input spaces. In
+Proceedings of the 19th International Conference on Machine Learning , page 315–322, 2002.
+[58] Pawel Ladosz, Lilian Weng, Minwoo Kim, and Hyondong Oh. Exploration in deep reinforcement
+learning: A survey. Information Fusion , 85:1–22, 2022.
+[59] Balaji Lakshminarayanan, Daniel M Roy, and Yee Whye Teh. Mondrian forests: Efficient online random
+forests. In Advances in Neural Information Processing Systems , volume 27, 2014.
+[60] Jeffrey T. Leek, Robert B. Scharpf, Héctor Corrada Bravo, David Simcha, Benjamin Langmead, W. Evan
+Johnson, Donald Geman, Keith Baggerly, and Rafael A. Irizarry. Tackling the widespread and critical
+impact of batch effects in high-throughput data. Nat. Rev. Genet. , 11(10):733–739, 2010.
+12[61] Yi Lin and Yongho Jeon. Random forests and adaptive nearest neighbors. J. Am. Stat. Assoc. , 101(474):
+578–590, 2006.
+[62] King’s College London. King’s computational research, engineering and technology environment (create).
+https://doi.org/10.18742/rnvf-m076 , 2022. Retrieved May 10, 2025.
+[63] Gábor Lugosi and Andrew Nobel. Consistency of data-driven histogram methods for density estimation
+and classification. Ann. Stat. , 24(2):687 – 706, 1996.
+[64] David J.C. MacKay. Information theory, inference, and learning algorithms . Cambridge University Press,
+Cambridge, 2003.
+[65] Nicolai Meinshausen. Quantile regression forests. J. Mach. Learn. Res. , 7:983–999, 2006.
+[66] Defeng Sun Meixia Lin, Yancheng Yuan and Kim-Chuan Toh. A highly efficient algorithm for solving
+exclusive lasso problems. Optim. Methods Softw. , 39(3):489–518, 2024.
+[67] Sebastian Mika, Bernhard Schölkopf, Alex Smola, Klaus-Robert Müller, Matthias Scholz, and Gunnar
+Rätsch. Kernel PCA and de-noising in feature spaces. In Advances in Neural Information Processing
+Systems , volume 11, 1998.
+[68] Boaz Nadler, Stéphane Lafon, Ronald R. Coifman, and Ioannis G. Kevrekidis. Diffusion maps, spectral
+clustering and reaction coordinates of dynamical systems. Appl. Comput. Harmon. Anal. , 21(1):113–127,
+2006. Special Issue: Diffusion Maps and Wavelets.
+[69] Andrew Ng, Michael Jordan, and Yair Weiss. On spectral clustering: Analysis and an algorithm. In
+Advances in Neural Information Processing Systems , volume 14. The MIT Press, 2001.
+[70] Sambit Panda, Cencheng Shen, and Joshua T. V ogelstein. Learning interpretable characteristic kernels
+via decision forests. arXiv preprint, 1812.00029, 2018.
+[71] Konstantinos Pliakos and Celine Vens. Mining features for biomedical data using clustering tree ensembles.
+J. Biomed. Inform. , 85:40–48, 2018.
+[72] Carl Edward Rasmusssen and Christopher K.I. Williams. Gaussian processes for machine learning . The
+MIT Press, Cambridge, MA, 2006.
+[73] Jorma Rissanen. Stochastic complexity in statistical inquiry . World Scientific, Singapore, 1989.
+[74] Bernhard Schölkopf and Alexander J. Smola. Learning with Kernels: Support Vector Machines, Regular-
+ization, Optimization, and Beyond . The MIT Press, Cambridge, MA, 2001.
+[75] Bernhard Schölkopf, Alexander Smola, and Klaus-Robert Müller. Nonlinear component analysis as a
+kernel eigenvalue problem. Neural Computation , 10(5):1299–1319, 1998.
+[76] Bernhard Schölkopf, Francesco Locatello, Stefan Bauer, Nan Rosemary Ke, Nal Kalchbrenner, Anirudh
+Goyal, and Yoshua Bengio. Toward causal representation learning. Proc. IEEE , 109(5):612–634, 2021.
+[77] Erwan Scornet. On the asymptotics of random forests. J. Multivar. Anal. , 146:72–83, 2016.
+[78] Erwan Scornet. Random forests and kernel methods. IEEE Trans. Inf. Theory , 62(3):1485–1500, 2016.
+[79] Jianbo Shi and J. Malik. Normalized cuts and image segmentation. IEEE Trans. Pattern Anal. Mach.
+Intell. , 22(8):888–905, 2000.
+[80] Tao Shi and Steve Horvath. Unsupervised learning with random forest predictors. J. Comput. Graph.
+Stat., 15(1):118–138, 2006.
+[81] Ravid Shwartz-Ziv and Amitai Armon. Tabular data: Deep learning is not all you need. Inf. Fusion , 81:
+84–90, 2022.
+[82] Bharath K. Sriperumbudur, Kenji Fukumizu, and Gert R.G. Lanckriet. Universality, characteristic kernels
+and RKHS embedding of measures. J. Mach. Learn. Res. , 12(70):2389–2410, 2011.
+[83] Ingo Steinwart. On the influence of the kernel on the consistency of support vector machines. J. Mach.
+Learn. Res. , 2:67–93, March 2002.
+[84] Charles J. Stone. Consistent nonparametric regression. Ann. Statist. , 5(4):595 – 620, 1977.
+[85] Cheng Tang, Damien Garreau, and Ulrike von Luxburg. When do random forests fail? In Advances in
+Neural Information Processing Systems , volume 31, 2018.
+13[86] Bosiljka Tasic, Vilas Menon, Thuc Nghi Nguyen, Tae Kyung Kim, Tim Jarsky, Zizhen Yao, Boaz Levi,
+Lucas T Gray, Staci A Sorensen, Tim Dolbeare, Darren Bertagnolli, Jeff Goldy, Nadiya Shapovalova,
+Sheana Parry, Changkyu Lee, Kimberly Smith, Amy Bernard, Linda Madisen, Susan M Sunkin, Michael
+Hawrylycz, Christof Koch, and Hongkui Zeng. Adult mouse cortical cell taxonomy revealed by single
+cell transcriptomics. Nat. Neurosci. , 19(2):335–346, 2016.
+[87] Jakub Tomczak. Deep generative modeling . Springer, New York, 2022.
+[88] Laurens van der Maaten and Geoffrey Hinton. Visualizing data using t-SNE. J. Mach. Learn. Res. , 9(86):
+2579–2605, 2008.
+[89] Joaquin Vanschoren, Jan N. van Rijn, Bernd Bischl, and Luis Torgo. OpenML: networked science in
+machine learning. ACM SIGKDD Explorations Newsletter , 15(2):49–60, 2013.
+[90] Antonio Vergari, Robert Peharz, Nicola Di Mauro, Alejandro Molina, Kristian Kersting, and Floriana Es-
+posito. Sum-product autoencoding: Encoding and decoding representations using sum-product networks.
+InProceedings of the 32nd AAAI Conference on Artificial Intelligence , 2018.
+[91] Pascal Vincent, Hugo Larochelle, Isabelle Lajoie, Yoshua Bengio, and Pierre-Antoine Manzagol. Stacked
+denoising autoencoders: Learning useful representations in a deep network with a local denoising criterion.
+J. Mach. Learn. Res. , 11(110):3371–3408, 2010.
+[92] Ulrike von Luxburg. A tutorial on spectral clustering. Stat. Comput. , 17(4):395–416, 2007.
+[93] Stefan Wager and Susan Athey. Estimation and inference of heterogeneous treatment effects using random
+forests. J. Am. Stat. Assoc. , 113(523):1228–1242, 2018.
+[94] David S. Watson, Kristin Blesch, Jan Kapar, and Marvin N. Wright. Adversarial random forests for
+density estimation and generative modeling. In Proceedings of the 26th International Conference on
+Artificial Intelligence and Statistics , pages 5357–5375, 2023.
+[95] Marvin N. Wright and Andreas Ziegler. ranger: A fast implementation of random forests for high
+dimensional data in c++ and r. J. Stat. Softw. , 77(1), 2017.
+[96] Qinghua Wu and Jin-Kao Hao. A review on algorithms for maximum clique problems. European Journal
+of Operational Research , 242(3):693–709, 2015.
+[97] Lei Xu, Maria Skoularidou, Alfredo Cuesta-Infante, and Kalyan Veeramachaneni. Modeling tabular data
+using conditional GAN. In H. Wallach, H. Larochelle, A. Beygelzimer, F. d 'Alché-Buc, E. Fox, and
+R. Garnett, editors, Advances in Neural Information Processing Systems , volume 32, 2019.
+[98] Chih-Kuan Yeh, Been Kim, Sercan Arik, Chun-Liang Li, Tomas Pfister, and Pradeep Ravikumar. On
+completeness-aware concept-based explanations in deep neural networks. In Advances in Neural Infor-
+mation Processing Systems , volume 33, pages 20554–20565, 2020.
+[99] Amit Zeisel, Ana B. Muñoz-Manchado, Simone Codeluppi, Peter Lönnerberg, Gioele La Manno, Anna
+Juréus, Sueli Marques, Hermany Munguba, Liqun He, Christer Betsholtz, Charlotte Rolny, Gonçalo
+Castelo-Branco, Jens Hjerling-Leffler, and Sten Linnarsson. Cell types in the mouse cortex and hippocam-
+pus revealed by single-cell RNA-seq. Science , 347(6226):1138–1142, 2015.
+[100] Hengrui Zhang, Jiani Zhang, Zhengyuan Shen, Balasubramaniam Srinivasan, Xiao Qin, Christos Falout-
+sos, Huzefa Rangwala, and George Karypis. Mixed-type tabular data synthesis with score-based diffusion
+in latent space. In The Twelfth International Conference on Learning Representations , 2024.
+[101] Yang Zhou, Rong Jin, and Steven Chu–Hong Hoi. Exclusive lasso for multi-task feature selection. In
+Proceedings of the 13th International Conference on Artificial Intelligence and Statistics , pages 988–995,
+2010.
+14A Proofs
+Since several of our results rely on RF regularity conditions, we review these here for completeness.
+We say that a sequence of functions {fn}isuniversally consistent if it converges in probability on
+any target function. That is, for any f∗∈C(X)and all ϵ >0, we have:
+lim
+n→∞P(∥f∗−fn∥∞> ϵ) = 0 .
+Under certain assumptions, it can be shown that RFs are universally consistent in this sense [ 65,27,
+11, 77, 93]. Specifically, we assume:
+(A1) Training data for each tree is split into two subsets: one to learn split parameters, the other
+to assign leaf labels.
+(A2) Trees are grown on subsamples rather than bootstraps, with subsample size n(b)satisfying
+n(b)→ ∞ , n(b)/n→0asn→ ∞ .
+(A3) At each internal node, the probability that a tree splits on any given Xjis bounded from
+below by some ρ >0.
+(A4) Every split puts at least a fraction γ∈(0,0.5]of the available observations into each child
+node.
+(A5) For each tree b∈[B], the total number of leaves d(b)
+Φsatisfies d(b)
+Φ→ ∞ , d(b)
+Φ/n→0as
+n→ ∞ .
+Under (A1)-(A5), decision trees satisfy the criteria of Stone’s theorem [ 84] and are therefore univer-
+sally consistent (see Devroye et al. [28, Thm. 6.1 ]and Györfi et al. [45, Thm. 4.2 ]). The consistency
+of the ensemble follows from the consistency of the basis functions [ 12]. There is some debate in the
+literature as to whether these assumptions are necessary for universal consistency—(A1) and (A2) in
+particular may be overly strong—but they are provably sufficient. See Biau [10, Rmk. 8 ], Wager and
+Athey [93, Appx. B], and Tang et al. [85] for a discussion.
+A.1 Proof of Thm. 3.4 (RF kernel properties)
+This theorem makes three separate claims: that RF kernels are (a) PSD and stochastic; (b) asymptoti-
+cally universal; and (c) asymptotically characteristic.
+(a) PSD Take PSD first. It is well known that any convex combination of PSD kernels is PSD [ 74],
+so to secure part (a) it is sufficient to prove that the standard decision tree kernel is PSD. This is
+simply a normalized indicator kernel:
+kDT(x,x′) =k(b)(x,x′)Pn
+i=1k(b)(x,xi),
+which either evaluates to zero (if the samples do not colocate) or the reciprocal of the leaf sample
+size (if they do).
+To show that kDTis PSD, we take a constructive approach in which we explicitly define the canonical
+feature map ϕ:X 7→ H , which maps input vectors to an inner product space H. This suffices to
+establish the PSD property, since for any finite dataset the resulting kernel matrix KDT∈[0,1]n×n
+is a Gram matrix with entries kDT
+ij=⟨ϕ(xi), ϕ(xj)⟩. As described in Sect. 4, the DT feature map
+for tree bis given by:
+ϕ(b)(x) =π(b)(x)⊙p
+s(b),
+where π(b):X 7→ { 0,1}d(b)
+Φis a standard basis vector indicating which leaf xroutes to in tree b, and
+s∈ {1/[n−1]}d(b)
+Φis a vector of corresponding inverse leaf sample sizes. Concatenating these maps
+overBtrees and taking the inner product for sample pairs, we get an explicit formula for the RF
+feature map, thereby establishing that kRFis PSD.
+Part (a) makes an additional claim, however—that kRF
+nisstochastic . This means that, for any x∈ X,
+the kernel kRF
+n(x,xi)defines a probability mass function over the training data as iranges from 1
+ton. It is easy to see that the kernel is nonnegative, as all entries are either zero (if samples do not
+15colocate) or some positive fraction representing average inverse leaf sample size across the forest (if
+they do). All that remains then is to show that the values sum to unity. Consider the sum over all n
+training points:
+nX
+i=1kRF
+n(x,xi) =nX
+i=11
+BBX
+b=1 
+k(b)(x,xi)Pn
+j=1k(b)(x,xj)!
+=1
+BBX
+b=1nX
+i=1 
+k(b)(x,xi)Pn
+j=1k(b)(x,xj)!
+=1
+BBX
+b=1Pn
+i=1k(b)(x,xi)Pn
+j=1k(b)(x,xj)
+=1
+BBX
+b=11
+= 1.
+Since the kernel is symmetric, the training matrix K∈[0,1]n×nof kernel entries is doubly stochastic
+(i.e., all rows and columns sum to one).
+(b) Universal Recall that the Moore-Aronszajn theorem tells us that every PSD kernel defines a
+unique RKHS [ 1]. Given that kRF
+nis PSD, universality follows if we can show that the associated
+RKHS His dense in C(X). Of course, this is provably false at any fixed n, asdΦ=o(n)by (A5),
+and a finite-dimensional Hnecessarily contains “gaps”—i.e., some functions f∗∈C(X)such that
+⟨f∗, h⟩= 0for all h∈ H.
+However, as nanddΦgrow, these gaps begin to vanish. Since these two parameters increase at
+different rates, and it is the latter that more directly controls function complexity, we interpret the
+subscript ℓonHℓas indexing the leaf count. (As noted above, we focus on the single tree case, as
+ensemble consistency follows immediately from this.)
+The following lemma sets up our asymptotic universality result.
+Lemma A.1 (RF subalgebra) .LetHℓdenote the set of continuous functions on the compact metric
+spaceXrepresentable by a tree with ℓleaves, trained under regularity conditions (A1)-(A5). Define:
+A:=∞[
+ℓ=1Hℓ.
+ThenAis a subalgebra of C(X)that contains the constant function and separates points.
+Proof. The lemma makes three claims, each of which we verify in turn.
+(1)Ais a subalgebra of C(X).
+EachHℓconsists of continuous, piecewise constant functions on X, induced by recursive
+binary partitions of Xintoℓleaf regions. These spaces are closed under addition, scalar
+multiplication, and multiplication, as the sum or product of two piecewise constant functions
+is piecewise constant over the common refinement of their partitions. Since Ais the union
+of these Hℓ, it is closed under addition, multiplication, and scalar multiplication.
+(2)Acontains the constant functions.
+This follows immediately, as any tree (and hence any Hℓ) can represent constant functions—
+for instance, a trivial tree with no splits assigns the same value to all points.
+(3)Aseparates points.
+By regularity conditions (A3) and (A4), every coordinate has a nonzero probability ρ >0
+of being selected for splitting at any node, and every split allocates at least a fraction
+γ∈(0,0.5]of the points to each child node. Meinshausen [65, Lemma 2 ]has shown that,
+under these conditions, the diameter of each leaf goes to zero in probability. This amount
+16to an asymptotic injectivity guarantee. Since Xis compact, for any pair of distinct points
+x,x′∈ X, there exists an index ℓsuch that some fℓ∈ Hℓassigns different values to xand
+x′. In other words, some tree in Ais guaranteed to route xandx′to different leaves.
+We now invoke the Stone-Weierstrass theorem to conclude the density of A.
+Theorem A.2 (Stone–Weierstrass) .LetXbe a compact Hausdorff space. If a subalgebra AofC(X)
+contains the constant functions and separates points, then Ais dense in C(X)with respect to the
+uniform norm.
+Combining Lemma A.1 with this classical result, we conclude that the sequence {Hℓ}converges on
+a universal RKHS.
+(c) Characteristic Item (c) follows from (b) under our definition of universality. This was first
+shown by Gretton et al. [40, Thm. 3 ]in the non-asymptotic regime (although Sriperumbudur et al.
+[82] prove that the properties can come apart under slightly different notions of universality). We
+adapt the result simply by substituting a sufficiently close approximation in H, where proximity is
+defined w.r.t. the supremum norm. Since the existence of such a close approximation is guaranteed
+by (b), the sequence {Hℓ}is asymptotically characteristic.
+A.2 Proof of Thm. 4.2 (Oracle consistency)
+This result follows trivially from the universal consistency of the RF algorithm itself. Any partition
+ofXthat satisfies regularity conditions (A1)-(A5) converges on the true joint distribution PXas
+n, dΦ→ ∞ (see [ 63, Thm. 1] and [ 23, Thm. 2]). Resulting leaves have shrinking volume, effectively
+converging on individual points xwith coverage proportional to the density p(x). Because there
+are no gaps in these leaves (i.e., no subregions of zero density), a weighted mixture of uniform
+draws—with weights given by the leaf coverage—is asymptotically equivalent to sampling from PX
+itself. A leaf assignment oracle would therefore be guaranteed to map each latent vector z∈ Z to the
+corresponding input point x∈ X, since leaf assignments effectively determine feature values in the
+large sample limit.
+A.3 Proof of Thm. 4.3 (Uniqueness)
+It is immediately obvious that when ˆK0=K∗
+0, the true leaf assignment matrix Ψ∗drives the ILP
+objective to zero and automatically satisfies the one-hot and overlap constraints. Our task, therefore,
+is to demonstrate that no other binary matrix ˆΨ̸=Ψ∗can do the same.
+For simplicity, consider just a single test point ( m= 1). LetF ⊂ { 0,1}dΦdenote the feasible region
+of leaf assignment vectors, i.e. all and only those that satisfy the one-hot and overlap constraints. A
+sufficient condition for our desired uniqueness result is that no two feasible leaf assignments produce
+the same kernel values. More formally, if there exist no ψ,ψ′∈ F such that ΠSψ⊤=ΠSψ′⊤,
+then the map ψ7→ΠSψ⊤is injective over F, in which case only a single solution can minimize the
+ILP objective.
+Note that this injectivity property cannot be shown to hold in full generality. As a minimal coun-
+terexample, consider a case where the feature space is a pair of binary variables X={0,1}2and our
+forest contains just two trees, the first placing a single split on X1and the second placing a single
+split on X2. Now, say our training data comprises just two points, x= [0,0]andx′= [1,1]. We
+observe the kernel entries k(x0,x) =k(x0,x′) = 1 /2. In this case, we know that x0colocates with
+each training sample exactly once, and therefore that it shares exactly one coordinate with each of
+our two training points. However, we do not have enough information to determine where these
+colocations occur, since both [0,1]and[1,0]are plausible feature vectors for x0.
+Such counterexamples become increasingly rare as the forest grows more complex. As previously
+noted, under (A3) and (A4), leaf diameter vanishes in probability [ 65, Lemma 2]. This is why random
+forests are asymptotically injective, a property we exploited in the proof for part (b) of Thm. 3.4. A
+17corollary of Meinshausen’s lemma is that for all distinct points x,x′∈ X:
+lim
+n→∞P 
+fn(x) =fn(x′)
+= 0.
+By modus tollens, it follows that if function outputs converge on the same value, then corresponding
+inputs must be identical. This is important, since with fixed training labels Y, model predictions
+are fully determined by kernel evaluations via Eq. 2. If two distinct vectors ψ,ψ′produce identical
+values when left-multiplied by ΠS, then the corresponding inputs x,x′cannot be separated by fn.
+Therefore, with probability tending toward 1 as sample size grows, we conclude that the ILP of Eq. 3
+is uniquely solved by the true leaf assignments.
+A.4 Proof of Thm. 4.4 ( k-NN consistency)
+To secure the result, we must show that
+(a)˜xp→x: sampling uniformly from the intersection of each sample’s assigned leaf regions
+asymptotically recovers the original inputs; and
+(b)ˆxp→˜x:k-NN regression in the spectral embedding space is universally consistent.
+Item (a), which amounts to a universal consistency guarantee for the eForest method of Feng and
+Zhou [30], follows immediately from our oracle consistency result (Thm. 4.2), plugging in the
+identity function for g. Since we know the true leaf assignments for each training sample, under
+universal consistency conditions for RFs, we can reconstruct the data by taking uniform draws from
+all leaf intersections.
+Item (b) follows from the properties of the k-NN algorithm, which is known to be universally
+consistent as k→ ∞ , k/n→0[84].
+B Experiments
+RFs are trained either using the ranger package [ 95], or the arfpackage [ 94], which also returns
+a trained forest of class ranger . Truncated eigendecompositions are computed using RSpectra .
+Memory-efficient methods for sparse matrices are made possible with the Matrix package. We use
+theRANN package for fast k-NN regression with kd-trees. For standard lasso, we use the glmnet
+package [ 32], and ExclusiveLasso for the exclusive variant [ 16]. In both cases, we do not tune the
+penalty parameter λ, but simply leave it fixed at a small value ( 0.0001 in our experiments). This is
+appropriate because we are not attempting to solve a prediction problem, but rather a ranking problem
+over coefficients.
+B.1 Reconstruction benchmark
+We describe the setup for the experiments presented in the main text, Sect. 5.
+For the compression reconstruction benchmark, we use 20 datasets sourced from the UCI Machine
+Learning Repository [ 29], OpenML [ 89], Kaggle, and the R palmerpenguins [52] package. In
+each dataset, we remove all rows with missing values. We also remove features that are not rele-
+vant to this task (e.g., customer names), features that duplicate in meaning (e.g., education and
+education_num inadult ) and date-time features. We report the subsequent in Table 1, describing
+for each used dataset the number of rows, features, and the proportion of categorical features in the
+total feature set, as a measure of the ’mixed’-ness of the tabular data.
+Then, our pipeline proceeds as follows:
+•For each dataset, we take ten different bootstrap samples, to form ten training sets, and use
+the remaining out-of-bag data as the testing set. We do this to ensure data is not unnecessarily
+unused, which could skew results in datasets with a small n.
+•For each dataset, we define 10 compression ratios, or latent rates, going uniformly from 0.1
+(10% of the number of features) to 1 (100% the number of features). For each value, we
+finddZ=dX×latent_rate
+18Table 1: Summary of datasets used. % Categorical indicates the proportion of categorical features. #
+Classes indicates the total cardinality of all the categorical features.
+Dataset Code #Samples #Numerical #Categorical # Total %Categorical #Classes
+Abalone abalone 4177 8 1 9 0.11 3
+Adult adult 45222 5 9 14 0.64 100
+Banknote Auth. banknote 1372 4 1 5 0.20 2
+Breast Cancer bc 570 30 1 32 0.03 2
+Car car 1728 0 7 7 1.00 25
+Bank Cust. Churn churn 10000 6 5 11 0.56 11
+German Credit credit 1000 7 14 21 0.67 56
+Diabetes diabetes 768 8 1 9 0.11 2
+Dry Bean dry_bean 13611 16 1 17 0.06 7
+Forest Fires forestfires 517 11 2 13 0.15 19
+Heart Disease hd 298 7 7 14 0.50 23
+King County Housing king 21613 19 0 19 0.00 0
+Bank Marketing marketing 45211 7 10 17 0.59 44
+Mushroom mushroom 8124 0 22 22 1.00 119
+Obesity Levels obesity 2111 8 8 16 0.50 30
+Palmer Penguins plpn 333 5 3 8 0.38 8
+Spambase spambase 4601 58 1 59 0.02 2
+Student Performance student 649 16 17 33 0.52 43
+Telco Churn telco 7032 3 17 20 0.85 43
+Wine Quality wq 4898 12 0 12 0.00 0
+•For each dataset and bootstrap, we run each method with the specified dZfor the dimension-
+ality of their latent embeddings. This involves training the method on the bootstrap training
+data, then passing the testing data through its encoding and decoding stages to produce a
+reconstruction.
+•We then compute the distortion of these reconstructions compared to the original test
+samples, using metrics described in the main text. For each bootstrap and dZon a dataset,
+we aggregate the results into a mean, and report the standard error as error bars. This
+standard error represents a combination of any stochastic component of the methods used,
+as well as the finite sample uncertainty of the used data.
+Within this specification, we run each method 20×10×10 = 2000 times, and for 5 methods this
+balloons to 10,000 runs. To meet these computational demands, we run these experiments from
+a high-performance computing partition, with 12 AMD EPYC 7282 CPUs, 64GB RAM, and an
+NVIDIA A30 graphics card. These high-performance computing units were used as part of King’s
+College London’s CREATE HPC [62]
+Next, we describe in detail each of the methods used in the reconstruction benchmark:
+•TV AE & TTV AE: For both the TV AE and TTV AE models, we do not make any changes to
+the underlying model architecture. However, we make minor modifications to not perform
+any sampling/interpolation at the latent stage, and simply decode the same embeddings that
+we acquired from the encoder.
+•Autoencoder: We use an MLP-based autoencoder for this benchmark. This is in contrast
+to a CNN-based autoencoder, which is more suited to image data, but is not relevant in
+tabular data tasks, where there is no inherent structure that could be extracted by convolution
+kernels. We structure our network to have five hidden layers, where the size of these layers
+are adaptive to dXanddZ. In particular, we want to structure the network such that the size
+of each hidden layer reduces uniformly from dXtodZat encoding and increases uniformly
+from dZtodXat decoding. Our structure then is:
+Input( dX)→Dense( dX−(dX−dZ)×1/3)→Dense( dX−(dZ−dZ)×2/3)→
+Latent( dZdZ)→Dense( dX−(dX−dZ)×2/3)→Dense( dX−(dX−dZ)×1/3)→
+Output( dX).
+IfdX= 8, dZ= 2then with this rule the network will be 8→6→4→2→4→6→8.
+For hyperparameters, we use common defaults: epochs = 50 ,optimizer = ADAM . We
+use ReLU activations at hidden layers, a sigmoid for the output, and a random 10% validation
+set from the training data.
+19Table 2: Mean distortion (with standard deviation) for each method and dataset, across all dZvalues
+used and all runs. Best result per row is bolded.
+Dataset RFAE TV AE TTV AE AE V AE
+abalone 0.167 (0.002) 0.309 (0.005) 0.260 (0.003) 0.230 (0.025) 0.211 (0.006)
+adult 0.326 (0.007) 0.158 (0.005) 0.195 (0.007) 0.401 (0.003) 0.391 (0.004)
+banknote 0.100 (0.012) 0.312 (0.013) 0.276 (0.023) 0.724 (0.023) 0.771 (0.013)
+bc 0.333 (0.003) 0.564 (0.003) 0.359 (0.005) 0.287 (0.008) 0.578 (0.003)
+car 0.320 (0.011) 0.195 (0.014) 0.107 (0.015) 0.349 (0.012) 0.313 (0.011)
+churn 0.352 (0.012) 0.603 (0.011) 0.422 (0.014) 0.861 (0.005) 0.731 (0.006)
+credit 0.315 (0.004) 0.450 (0.005) 0.375 (0.011) 0.450 (0.005) 0.456 (0.004)
+diabetes 0.479 (0.016) 0.726 (0.007) 0.643 (0.014) 0.799 (0.011) 0.895 (0.004)
+dry_bean 0.137 (0.002) 0.273 (0.002) 0.303 (0.008) 0.083 (0.014) 0.206 (0.001)
+forestfires 0.575 (0.008) 0.804 (0.003) 0.705 (0.008) 0.782 (0.007) 0.790 (0.003)
+hd 0.432 (0.008) 0.582 (0.003) 0.605 (0.006) 0.892 (0.003) 0.916 (0.002)
+king 0.308 (0.008) 0.352 (0.006) 0.348 (0.008) 0.377 (0.011) 0.518 (0.004)
+marketing 0.292 (0.009) 0.304 (0.005) 0.259 (0.011) 0.357 (0.007) 0.372 (0.004)
+mushroom 0.083 (0.001) 0.093 (0.003) 0.011 (0.003) 0.055 (0.004) 0.035 (0.004)
+obesity 0.227 (0.008) 0.354 (0.004) 0.299 (0.008) 0.306 (0.009) 0.358 (0.003)
+plpn 0.176 (0.006) 0.282 (0.006) 0.224 (0.011) 0.384 (0.013) 0.410 (0.009)
+spambase 0.558 (0.005) 0.825 (0.002) 0.807 (0.003) 0.446 (0.010) 0.784 (0.001)
+student 0.371 (0.002) 0.424 (0.001) 0.426 (0.004) 0.536 (0.003) 0.551 (0.002)
+telco 0.177 (0.003) 0.155 (0.003) 0.091 (0.007) 0.128 (0.005) 0.130 (0.005)
+wq 0.240 (0.005) 0.691 (0.008) 0.759 (0.006) 0.467 (0.019) 0.708 (0.004)
+Average Rank 1.80 3.38 2.45 3.27 4.10
+•Variational Autoencoder: Similar to the autoencoder, we use an MLP-based variational
+autoencoder. For comparison, we mimic the autoencoder’s architecture, activation function,
+and defaults, only changing epochs = 100 and adding batch_size = 32 . We also
+impose a βcoefficient inspired from [48]. However, we select a β= 0.1, to avoid pos
+The RF training approach we use here is the adversarial random forests (ARFs) [ 94]. Using this
+algorithm allows us to train the forest unsupervised, and preserve all features. Other approaches
+involving unsupervised random forests can also be used, such as the ones proposed in Shi and Horvath
+[80] or Feng and Zhou [30]. However, we choose ARF on the basis that our decoders’ complexity
+scale on dΦ, which is smaller for the ARF than others, because it learns its structure over several
+iterations of training.
+We present the results in Table 2 corresponding to the plots in Fig. 4.
+B.2 Additional results
+We present the results of additional experiments comparing different decoding methods, multip as
+well as supervised vs. unsupervised RF embeddings.
+Decoder Comparison We compare the performance of three decoders that we describe in section
+4: the kNN, the split relabelling and the LASSO decoder, on a smaller compression / reconstruction
+benchmark. We follow the same experimental setup as the previous experiment, but only use two
+datasets of small size ( credit &student ), and for each of these, we only use the first 5 bootstrap
+splits. This is because we only aim to illustrate the performance of these decoders side by side, and
+also because of the both the relabeling and LASSO’s decoder much higher complexity compared
+to kNN. We maintain the RFAE setup as previously described in Appx. B.1. To make comparison
+easier, for each iteration we run the encoding stage once, and apply the three decoders to the same
+embeddings. We describe the relabeling and the LASSO decoder in more detail:
+•Relabeling Decoder: For the relabeling decoder, we take the original RF object, and go
+through each split to find a corresponding split with the data on the latent space with the
+highest simple matching coefficient (SMC) to replace it. This process is global, so all data
+points are used in each split.
+20An alternative approach to this is to re-find splits locally, i.e., only use the data located at
+each split in the original forest. However, in practice, the lack of training points at high
+depths will cause the relabeled splits to be inaccurate, so we use the global approach. Once
+the forest is ’relabeled’, we can pass the embeddings for test data through it, and sample by
+using the leaf bounds of the original forest.
+•LASSO Decoder: For the LASSO decoder, we follow the derivations in the main text and
+compute the kernel matrix ˆK0=Z0ΛZ†, and recover the leaf assignments for test samples
+via the LASSO & greedy leaf search algorithm in Appx. C. Once the leaf assignments are
+recovered, we once again sample by using the forest’s leaf bounds.
+To reduce complexity, we impose a sparsity on the number of training samples allowed in
+the LASSO, sorted by the the values of the estimated kernel matrix. Because in most cases,
+a test sample will only land in the same leaf with a small number of training samples, even
+across an entire forest, this allows us to narrow the search space significantly with minimal
+impact on the model performance. For our datasets with 649 and 1000 samples, we set
+sparsity = 100 .
+We present the results in figure 6, where the kNN method is denoted as RFAE.
+credit student
+0.25 0.50 0.75 1.00 0.25 0.50 0.75 1.000.40.50.60.7
+0.30.40.50.60.7
+Compression FactorDistortion
+Method RFAE LASSO RELABEL
+Figure 6: Compression-distortion trade-off on student andcredit . Shading represents standard
+errors across five bootstraps.
+From this plot, we can see that the kNN decoder dominates performance. Several reasons can explain
+the poor performance that the other decoders display. For the relabeling decoder, because our only
+criteria is to find the best matching split, if all candidates are bad, the best matching split does not
+have to be an objectively good choice. Given the forest’s hierarchical nature, inaccuracies can be
+compounded traversing down the tree, and the final forest is completely dissimilar to the original.
+The small dZalso means more variance is introduced into the process.
+For the LASSO decoder, several things may have caused this performance. First, the estimation
+ofˆKmay not be accurate, which is passed on to the LASSO optimization. The LASSO is also an
+approximate optimization, and variance here can lead to the greedy leaf algorithm to find the wrong
+leaf assignments for the test samples. This, in combination with the high complexity, motivate us to
+use the kNN decoder for RFAE.
+MNIST reconstruction: hyperparameter analysis Figure 7 complements Figure 3 in Section 5
+by showing the effects of different parameters on the reconstruction performance for MNIST test
+digits: the number of trees B(Figure 7a), the number of samples ntrain_enc used for encoder training
+(Figure 7b), the diffusion time step t(Figure 7c), and the number kof nearest neighbors used for
+decoding (Figure 7d). In each subplot, the respective parameter varies in a pre-defined range, while all
+other ones are kept fixed at B= 1000 ,ntrain_enc = 30 000 ,t= 1, andk= 50 ; the latent dimension is
+set to dZ= 32 throughout.
+21B= 50
+B= 100
+B= 200
+B= 500
+B= 1000
+Original
+(a) Varying number of decision trees Bin random
+forest.
+ntrain enc = 1000
+ntrain enc = 5000
+ntrain enc = 10000
+ntrain enc = 30000
+ntrain enc = 60000
+Original
+(b) Varying number of training points ntrain_enc used
+for encoder training.
+t= 0
+t= 1
+t= 2
+t= 3
+t= 10
+t= 50
+Original
+(c) Varying number of time steps tfor diffusion
+map encoding.
+k= 1
+k= 2
+k= 3
+k= 5
+k= 10
+k= 20
+k= 50
+Original
+(d) Varying number of nearest neighbors kused
+fork-NN-based decoding.
+Figure 7: MNIST digit reconstructions produced by RFAE with varying parameter values; original
+images are displayed in the bottom row.
+RFAE (supervised)
+RFAE (completely random)
+ConvAE
+Original
+Figure 8: MNIST digit reconstructions produced by RFAE using supervised and copmletely random
+forests, and by a convolutional autoencoder; original images are displayed in the bottom row.
+Figure 8 compares RFAE reconstructions using supervised and (unsupervised) completely random
+forests with those produced by a convolutional autoencoder with three convolutional layers. All
+models were trained on full training data and with dZ= 32 .
+22Supervised Unsupervised
+−1.0 −0.5 0.0 0.5 −0.4 0.0 0.4−0.50.00.5
+0.00.51.0
+KPC1KPC2
+Class ALLAMLFigure 9: Embeddings can represent supervised or
+unsupervised RFs. Data from the Golub et al. [38]
+leukemia transcriptomics study.Supervised vs. unsupervised embeddings
+RF embeddings provide different perspectives
+on the data depending on whether we use su-
+pervised or unsupervised learning objectives.
+We train a standard RF classifier to distinguish
+acute lymphoblastic (ALL) from acute myeloid
+(AML) leukemia samples in a well known tran-
+scriptomic dataset [ 38]. After filtering, the
+feature matrix includes expression values for
+dX= 3572 genes recorded in n= 72 patients.
+These kind of short, wide datasets are common
+in bioinformatics, but can be challenging for
+many learning algorithms. RFs excel in these
+settings, attaining out-of-bag accuracy of 98% on this task. KPC1 clearly separates the two classes in
+the left panel, while KPC2 appears to isolate a potential outlier within the AML cohort. Using an
+unsupervised adversarial RF [ 94], we find far greater overlap among the two classes (as expected),
+although ALL and AML samples are hardly uniform throughout the latent space. This example
+demonstrates the flexibility of our method. Whereas standard spectral embedding algorithms with
+fixed kernels are limited to unsupervised representations, RFAE can take any RF input.
+C Leaf assignments via lasso and greedy search
+In this section, we briefly describe the lasso relaxation of the ILP in Eq. 3. First, we split the task into
+mseparate subproblems, one for each test vector. Let ˆk0denote a row of ˆK0, say for test point x0.
+Observe that this adjacency vector is generally sparse, since most training points are unlikely to be
+neighbors of x0.5Leta=∥ˆk0∥0be the number of neighbors for x0, and write ˆk↓
+0∈[0,1]afor the
+reduction of ˆk0to just its nonzero entries. We also write L(b)↓⊆L(b)for the set of leaves to which
+x0’s neighbors are routed in tree b, with cardinality d(b)↓
+Φ≤d(b)
+Φ, and d↓
+Φ=P
+bd(b)↓
+Φ. (Though the
+reduction operation is defined only w.r.t. some x0, we suppress the dependency to avoid clutter.)
+This implies corresponding reductions of Φto the submatrix Φ↓∈ {0,1}k×d↓
+Φ, with one row per
+neighbor of x0and columns for each leaf to which at least one neighbor is routed in f; andSto
+S↓∈[0,1]d↓
+Φ×d↓
+Φ, with diagonal entries for each leaf inS
+bL(b)↓.
+Following these simplifications, we solve:
+min
+ψ∈[0,1]d↓
+Φ∥Bˆk↓⊤
+0−Φ↓S↓ψ⊤∥2
+2+λX
+b∈[B]X
+ℓ∈L(b)↓ψℓ2
+, (4)
+where the penalty factor λpromotes a sparse solution with a similar effect to the one-hot constraint
+above. Specifically, it encourages competition both within trees (via the L1norm), and between trees
+(via the L2norm). Eq. 4 is an exclusive lasso problem, which can be efficiently solved via coordinate
+descent [ 101,16] or dual Newton methods [ 66]. The interval (rather than integer) constraints on
+our decision variables effectively allow for “fuzzy” leaf membership, in which samples may receive
+nonzero weight in multiple leaves of the same tree.
+Exploiting these fuzzy leaf assignments, we propose a greedy method to determine leaf member-
+ship. The method provisionally assigns a sample to the leaves with maximal entries in ˆψ. If any
+inconsistencies arise, we replace the “bad” assignments—i.e., those less likely to overlap with other
+assigned regions—with the next best leaves according to ˆψ. The procedure repeats until assignments
+are consistent. Though convergence is guaranteed, greedy search may prove inaccurate if coefficients
+are poorly estimated.
+Alg. 1 provides an overview of the greedy leaf assignment procedure. This is run for a single sample
+x∈ X, which has associated fuzzy leaf assignment vector ˆp∈[0,1]dΦ. We select the leaf coordinates
+associated with tree b∈[B]by writing ˆp(b)∈[0,1]d(b)
+Φ. We overload notation somewhat by writing
+R(b)
+i⊂ X to denote the hyperrectangular region associated with leaf i∈[d(b)
+Φ]of tree b∈[B]in step
+5That neighbors vanish as a proportion of training samples is a common consistency condition for nonpara-
+metric models in general and local averaging estimators in particular [84].
+23Algorithm 1 GREEDY LEAFASSIGNMENTS
+Input : Fuzzy leaf assignments ˆp∈[0,1]dΦ
+Output : Hard leaf assignments q∈ {1, . . . , d(b)
+Φ}B
+1: Initialize: t←0,C(t)← ∅,S(t)← X ,converged ←FALSE
+2:while not converged do
+3: t←t+ 1
+4: forall trees b∈[B]do
+5: Find leaf with maximum fuzzy value in the feasible region:
+q(b)(t)←arg max
+i∈[d(b)
+Φ]ˆp(b)
+i s.t.R(b)
+i∩S(t)̸=∅
+6: Let R(b)
+q(t)be the region corresponding to leaf q(b)(t)
+7: end for
+8: Let G(t) =⟨[B],E(t)⟩be a graph with edges:
+E(t) :={i, j∈[B] :R(i)
+q(t)∩R(j)
+q(t)̸=∅}
+9: ifG(t)is complete then
+10: converged ←TRUE
+11: else
+12: ifthe maximal clique of G(t)is unique then
+13: Let C(t)⊂[B]be the unique maximal clique of G(t)
+14: else if the maximal cliques of G(t)have nonempty intersection then
+15: Let C(t)⊂[B]be the intersection of all maximal cliques of G(t)
+16: else
+17: Let C(t)⊂[B]be any maximal clique of G(t)
+18: end if
+19: Let S(t)←T
+b∈C(t)R(b)
+q(t)be the feasible region associated with C(t)
+20: end if
+21:end while
+22:q←q(t)
+5; and then R(b)
+q(t)to denote the region associated with leaf q(b)(t), which maximizes ˆp(b)among
+all leaves that intersect with the feasible region S(t). If the arg max in step 5 is not unique, then we
+select among the maximizing arguments at random. Similarly, if there are multiple non-overlapping
+maximal cliques, then we select one at random in step 14. (This should be exceedingly rare in
+sufficiently large forests.) The undirected graph G(t)encodes whether the regions associated with
+assigned leaves overlap. Since consistent leaf assignments require intersecting regions for all trees,
+the algorithm terminates only when G(t)is complete. The procedure is greedy in the sense that edges
+can only be added and never removed, leading to larger maximal cliques C(t)and smaller feasible
+regions S(t)with each passing round.
+While the algorithm is guaranteed to converge on a consistent set of leaf assignments, this may only
+be achievable by random sampling of leaves under a consistency constraint. Such uninformative
+results are likely the product of noisy estimates for ˆK0. Note that while the maximal clique problem
+is famously NP-complete [ 56], we must solve this combinatorial task at most once (at t= 1). In
+subsequent rounds t≥2, we simply check whether any new nodes have been added to C(t−1).
+Maximal clique solvers are highly optimized and have worst-case complexity O(2B/3), but are often
+far more efficient due to clever heuristics [ 96]. In practice, the method tends to find reasonable leaf
+assignments in just a few rounds. When computing leaf assignments for multiple test points, we may
+run Alg. 1 in parallel, as solutions are independent for each sample.
+D Computational complexity
+In this section, we study the complexity of different RFAE pipelines.
+The encoding step requires O(n2)space to store the adjacency matrix. For large datasets, this can
+be approximated by using a subsample of all training points to compute K, at the cost of losing the
+24exact functional equivalence of Eq. 2. Similar tricks are common in kernel methods such as Gaussian
+process regression [72].
+While the ILP solution is generally intractable, the lasso relaxation requires O(d3
+Φ)operations [ 16]
+to score leaves (although dΦcan in fact be reduced to ai=∥ki∥0for each test point i∈[m]; see
+Appx. C). The subsequent greedy leaf assignment algorithm searches for the maximal clique in a
+graph with Bnodes for each test sample, incurring worst-case complexity O 
+exp(B)
+. Though the
+maximal clique problem is famously NP-complete [ 56], modern solvers often execute very quickly
+due to clever heuristics [ 96]. We can also parallelize over the test samples, as each greedy solution is
+independent. Note that both the cubic term in the exclusive lasso task and the exponential term in the
+greedy leaf assignment algorithm are user-controlled parameters that can be reduced by training a
+forest with fewer and/or shallower trees. Alternatively, we could use just a subset of the RF’s trees
+to reduce the time complexity of decoding via constrained optimization, much like we could use a
+subset of training samples to reduce the space complexity of encoding.
+The split relabeling method is essentially an iterated CART algorithm, and therefore requires
+O(dZ˜nlog ˜n)time to relabel each split, where ˜nis the number of synthetic samples ˜X. How-
+ever, since the number of splits is generally exponential in tree depth, this can still be challenging for
+deep forests.
+The most efficient decoder is the k-NN method, which proceeds in two steps. First, we find the nearest
+neighbors in embedding space, which for reasonably small dZcan be completed in O(mlogn)time
+using kd-trees. Next, we compute the intersection of all leaf regions for selected neighbors, incurring
+a cost of O(kmd ΦdX).
+25

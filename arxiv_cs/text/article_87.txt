@@ -1,0 +1,1123 @@
+arXiv:2505.21025v1  [cs.SD]  27 May 2025SUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 1
+Text-Queried Audio Source Separation via
+Hierarchical Modeling
+Xinlei Yin, Xiulian Peng, Xue Jiang, Zhiwei Xiong, Yan Lu
+Abstract —Target audio source separation with natural lan-
+guage queries presents a promising paradigm for extracting
+arbitrary audio events through arbitrary text descriptions. Ex-
+isting methods mainly face two challenges, the difficulty in
+jointly modeling acoustic-textual alignment and semantic-aware
+separation within a blindly-learned single-stage architecture, and
+the reliance on large-scale accurately-labeled training data to
+compensate for inefficient cross-modal learning and separation.
+To address these challenges, we propose a hierarchical decom-
+position framework, HSM-TSS , that decouples the task into
+global-local semantic-guided feature separation and structure-
+preserving acoustic reconstruction. Our approach introduces a
+dual-stage mechanism for semantic separation, operating on
+distinct global and local semantic feature spaces. We first perform
+global-semantic separation through a global semantic feature
+space aligned with text queries. A Q-Audio architecture is
+employed to align audio and text modalities, serving as pre-
+trained global-semantic encoders. Conditioned on the predicted
+global feature, we then perform the second-stage local-semantic
+separation on AudioMAE features that preserve time-frequency
+structures, followed by acoustic reconstruction. We also propose
+an instruction processing pipeline to parse arbitrary text queries
+into structured operations, extraction orremoval , coupled with
+audio descriptions, enabling flexible sound manipulation. Our
+method achieves state-of-the-art separation performance with
+data-efficient training while maintaining superior semantic con-
+sistency with queries in complex auditory scenes.
+Index Terms —text-queried audio source separation, hierarchi-
+cal modeling, audio representation learning.
+I. I NTRODUCTION
+REAL-world environmental sounds typically comprise di-
+verse audio events from multiple sources. Target sound
+separation, which isolates specific sound components from
+mixtures across domains like speech [1], [2], [3], general
+audio [4], and music [5], conventionally relies on single-source
+training samples and focuses on separating predefined source
+types [6]. Recent advances in universal sound separation (USS)
+[7] have expanded this capability to arbitrary sound sources
+in real-world recordings. However, the inherent complexity
+of separating overlapping audio events with varying char-
+acteristics persists as a fundamental challenge. Text-queried
+Xinlei Yin and Zhiwei Xiong are with the University of Science
+and Technology of China (email: xyxl 231829@mail.ustc.edu.cn; zwx-
+iong@ustc.edu.cn).
+Xue Jiang is with the School of Information and Communication Engi-
+neering, Communication University of China, Beijing 100024, China (e-mail:
+jiangxhoho@cuc.edu.cn).
+Xiulian Peng and Yan Lu are with the Microsoft Research Asia, Beijing
+100080, China (e-mail: xipe@microsoft.com; yanlu@microsoft.com).
+This work has been submitted to the IEEE for possible publication.
+Copyright may be transferred without notice, after which this version may
+no longer be accessible.
+This paper is the result of an open-source project starting from Jan. 2024.
+Separator Encoder DecoderText
+Separator
+(global -semantic) Separator
+(local -semantic) DecoderEncoder
+(global -semantic)Text
+Encoder
+(local -semantic)(a) Previous single -stage separation structure
+(b) Proposed hierarchical modeling structureacoustic token global -semantic token local -semantic toke nFig. 1. Comparison between previous blind single-stage and our hierarchical
+modeling frameworks.
+target sound extraction (TSE), which uses natural language
+descriptions to selectively separate sounds, has emerged as
+a promising solution. Unlike audio-visual [8], [9] and audio-
+queried [7], [10], [11] methods, it provides greater flexibility in
+query formulation. It also outperforms label-queried [12], [13],
+[14] methods by eliminating the need for fixed label categories,
+thereby supporting queries of any type and facilitating open-
+domain generalization.
+The principal challenge in text-queried target sound ex-
+traction lies in establishing robust cross-modal associations
+between linguistically diverse queries and intricate acoustic
+patterns. Natural language instructions may contain temporally
+ordered event sequences (e.g. “A man talks to himself happily
+before playing the violin.”) or detailed sound characteristics
+(e.g. heavy rain, high/low frequency engine), requiring precise
+alignment with corresponding audio segments in potentially
+overlapping mixtures.
+Recently, an increasing number of studies have explored
+this task, which can mainly be divided into two categories:
+mask-based separators [15], [16], [17], [4] and conditional
+generative models [18], [19], [20]. The dominant mask-based
+approaches typically employ separation networks to estimate
+a multiplicative time-frequency mask through conditioned U-
+Net architectures. These methods incorporate a conditioning
+signal into the audio U-Net with a query network to predict
+the target mask. The other stream, the emerging generative
+paradigm by transformer [21] or diffusion [22] models, for-
+mulates separation as a specialized audio editing task [18].
+Despite their varied frameworks, these methods all em-SUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 2
+ploy a joint optimization of cross-modal understanding and
+acoustic separation within a single-stage end-to-end frame-
+work (shown in Figure 1 (a)). This predominantly data-driven
+approach could potentially lead to training instability and an
+increased risk of overfitting, necessitating the use of large-
+scale audio-text datasets. The fundamental limitations persist
+when operating on the spectrograms [4] or V AEs’ latent
+[18] representations, as they lack explicit semantics. This
+forces models to resolve ambiguities through acoustic details
+alone, often resulting in under-separation or inconsistent audio
+events. Furthermore, commonly used weakly-labeled datasets
+like AudioSet [23] and VGGSound [24] contain significant
+label noise and irrelevant audio content, which can confuse
+the trained models and further complicate text instruction
+understanding.
+In this work, we decompose the text-queried audio separa-
+tion into semantic-feature-level manipulation at different levels
+followed by acoustic reconstruction. Different from acoustic
+representations (e.g., spectrograms or V AE latents), we attempt
+to operate separation in a more compact global-local semantic
+feature space. The global semantic space aligns audio and
+text, inside which we can extract target semantic hints. In the
+local semantic space that preserves not only event semantics
+but also local time-frequency details for reconstruction, we
+can extract more fine-grained semantic features conditioned
+on previous-stage predicted global hints. Such a fine-grained
+feature is then utilized to reconstruct the waveform through a
+generative model. This hierarchical modeling with dual-stage
+separation (shown in Figure 1 (b)) effectively separates target
+audio events that align well with the text query without using
+large weakly-labeled datasets.
+Our contributions can be summarized as follows:
+1) We propose a hierarchical modeling paradigm, HSM-
+TSS, to separate audios on different feature levels
+queried by text. The decomposition of global and fine-
+grained local semantic representations relieves the bur-
+den of learning audio-text alignment and extracting
+semantically-correct audio events simultaneously, effec-
+tively increasing the data efficiency and our model
+generalizability.
+2) We pretrain a text-audio aligned audio representation, Q-
+Audio , through contrastive learning, which outperforms
+the commonly used CLAP [25], [26] in several bench-
+marks.
+3) We design an instruction parsing pipeline with large
+language models (LLMs) to turn arbitrary textual queries
+into structured separation types, extraction orremoval ,
+and targeted audio descriptions, better facilitating query
+understanding with bidirectional sound manipulation.
+4) We conduct experiments on several source separation
+benchmarks and demonstrate that the proposed hierar-
+chical modeling achieves state-of-the-art performance by
+both signal-level and semantic-level metrics.
+II. R ELATED WORK
+A. Unconditional sound separation
+Unconditional audio separation aims to decompose mixed
+audio signals into individual sources without relying on exter-nal queries or prior knowledge. Early research primarily fo-
+cuses on domain-specific tasks, such as speech separation [6],
+[3] and music source separation [27]. These methods address
+label ambiguity problem by permutation invariant training
+(PIT) [28] that permutes predictions to match target signals
+during training, and often require post-processing to select
+target sources from separated outputs. However, they typically
+rely on single-source training data, limiting the scalability
+to real-world mixtures. To mitigate this, mixture invariant
+training (MixIT) [29] introduces unsupervised learning with
+multi-source mixtures. However, it tends to over-separate and
+requires post-selection. Subsequent work combines MixIT
+with pre-trained sound classifiers [30], yet these classifiers
+still require single-source annotations. Other approaches, like
+MixPIT [31], attempted direct prediction from mixtures but
+encountered under-separation problems. Weakly supervised
+methods [32] utilized sound classifiers but were constrained
+by fixed label categories. These limitations underscore the
+challenge of achieving open-domain separation without single-
+source supervision or post-processing.
+B. Text-queried sound separation
+Text-queried audio separation leverages natural language
+descriptions or labels to guide the extraction of target sounds
+from mixtures. Early methods explored label-queried separa-
+tion [12], [13], which relies on predefined class labels and
+struggles with generalization to unseen categories. A paradigm
+shift emerged with language-queried audio source separation
+(LASS), which allowed for flexible separation using free-form
+text queries. Pioneering efforts like LASS-Net [15] introduced
+end-to-end training with audio-text pairs, while CLIPSep [16]
+utilized contrastive language-image pretraining (CLIP) [33] to
+align text and audio embeddings through a visual modality,
+achieving zero-shot separation. Recent advancements have
+incorporated multi-modal supervision [34] and hybrid training
+[35] to tackle data scarcity. For instance, AudioSep [4] scaled
+training with large audio-language datasets and showcased ro-
+bust open-domain generalization. Despite these advancements,
+challenges remain in handling linguistic diversity (e.g., para-
+phrased descriptions) and noisy real-world data. Alternative
+approaches, like audio-visual separation [36], [9], used visual
+cues but were sensitive to occlusions or off-screen sounds.
+Conversely, text-based methods possess broader applicability,
+as natural language offers a scalable and intuitive interface for
+specifying target sources.
+C. Audio editing with generative models
+The most common approach for audio editing is to train
+specialized models for particular tasks, like style transfer [37],
+[38] or inpainting [39], [40]. Recently, some works have
+studied general audio editing following human instructions.
+AUDIT [18] designs several editing tasks involving adding,
+removal, inpainting, replacement, and super-resolution based
+on latent diffusion models. UniAudio [19] is an audio founda-
+tion model which takes adding, dropping and super-resolution
+as general audio editing tasks. In terms of this, target sound
+separation can be seen as a sub-task of instruction-basedSUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 3
+audio editing. However, they still leveraged common acoustic
+representations, like V AEs’ latent or neural codec tokens, and
+typically suffered from under-separation or over-separation
+problems. Instead, our approach investigates the hierarchical
+semantic modeling paradigm with pretrained representations
+at different feature levels, with which it achieves superior
+performance with carefully synthesized training data with
+accurate labels.
+D. Audio representation learning
+Recent advancements in self-supervised learning (SSL) have
+significantly shaped audio representation learning, empower-
+ing models to extract meaningful features from raw audio data
+without labeled supervision. These approaches can be broadly
+categorized into predictive, contrastive, and masked predictive
+modeling techniques, each addressing distinct challenges in
+audio processing. Predictive modeling approaches, such as
+autoregressive predictive coding (APC) [41], [42], have been
+pivotal in learning sequential audio representations by predict-
+ing future elements of a sequential audio input based on past
+data. In masked predictive approach, MAE-AST [43] adapted
+the masked autoencoders (MAEs) [44] for audios, combining
+discriminative and generative objectives for training. It splits
+audio spectrogram into patches, mask a portion of them, and
+use transformers to reconstruct the masked segments. The
+work AudioMAE [45], further investigated shifting windows
+and local self-attention mechanisms to enhance modeling.
+Unlike predictive and masked approaches, contrastive learning
+has largely been utilized to learn cross-modal representations
+such as CLIP [33] in computer vision. It has also been adapted
+for audio , as seen in CLAP [26], [25], which unifies general
+audio and text into a joint embedding space. These multi-
+modal approaches provide weak supervision for tasks like
+multi-source sound separation, further enriching audio repre-
+sentation learning. Motivated by BLIP-2 [46] that leverages
+a Q-Former for vision-language representation learning, we
+introduce a lightweight module Q-Audio as a bridge between
+text and audio with frozen audio and text encoders in our
+hierarchical modeling.
+III. T HE PROPOSED FRAMEWORK
+A. Overview
+Letxmix∈RLdenote the audio mixture of the target audio
+xtgt∈RLand an interfering audio xother∈RL, given by
+xmix=xtgt+xother. (1)
+Lis the audio length. The goal is to separate the target audio
+source xtgtbased on a given text instruction T. This separation
+process can be formalized as H: (xmix,T)7→xtgt, where H
+denotes the separation model. Conventional TSE methods [15],
+[16], [17], [4] typically rely on a purely data-driven approach
+through a single-stage end-to-end blind learning architecture,
+where semantic and acoustic information are entangled in the
+mixture and it struggles to distinguish target audio events from
+the interference. Inspired by audio and speech generative mod-
+els [22], [47], we reformulate the TSE task as a regeneration
+process by H: (xmix,T)7→S7→xtgt. Here, an intermediatefeature Sis introduced to decouple semantic separation with
+acoustic reconstruction. Such an intermediate representation
+Sis both semantic and information-rich in containing local
+semantics to reconstruct the target audio. We take it as local
+semantic feature in our approach.
+To provide more robust semantic guidance, we further
+decompose the semantic feature Sby extracting a semantic-
+only global feature Gon top of it, which captures high-level
+audio event descriptions (e.g., dog barking ) without spatial or
+acoustic details, and aligns well with the text feature space.
+Comparatively, Sis more fine-grained, which integrates both
+semantic representation (e.g. what happened in the audio ) and
+acoustic properties (e.g., pitch or spatial positioning ) neces-
+sary for waveform reconstruction. This motivates a hierarchi-
+cal framework that divides the feature-level separation into
+global-semantic andlocal-semantic stages, with the predicted
+global feature ˆGacting as a conditioning input to refine the
+extraction of the local feature ˆS. The decomposition process
+can be denoted as H: (xmix,T)7→G7→S7→xtgt.
+This hierarchical design generates audio representations
+across three distinct levels: the global-semantic level (via ˆG),
+the local-semantic level (via ˆS), and the acoustic-only level
+(viaxtgt). Consequently, our proposed framework is structured
+into three sequential components:
+H1: (xmix,T)7→ˆG, (2)
+H2: (xmix,T,ˆG)7→ˆS, (3)
+H3:ˆS7→xtgt. (4)
+H1,H2,H3denote global-semantic separation, local-semantic
+separation and acoustic decoder, respectively. As depicted in
+Figure 2 (b), each stage yields a specialized representation
+tailored to its role in the separation pipeline. The acoustic
+decoder maps the local-semantic feature ˆSto the acoustic
+domain and then reconstructs the target waveform using a
+neural codec decoder. In the following sections III-C, III-D
+and III-E, we will describe these three modules in detail.
+To enhance the model’s ability to interpret diverse instruc-
+tions, we leverage a pre-trained LLM to decompose the text
+input into two components: the task type Ttaskand the caption
+Tcap, as shown in the input of Figure 2. By isolating the
+captions from task types, we can exploit the strengths of audio-
+language contrastive learning that aligns text and audio in a
+shared representation space. We define two separation tasks:
+removal and extraction , allowing the captions to describe
+either the audio events to be removed or those to be retained,
+thereby increasing the flexibility of user instructions. This
+process is elaborated in Section III-F.
+Compared to single-stage methods, this hierarchical frame-
+work offers several advantages. It disentangles semantic and
+acoustic processing to mitigate the impact of interference,
+enables modular optimization of each stage, and improves ro-
+bustness in scenarios where target and interfering audio events
+overlap significantly. By integrating instruction decomposition
+with staged feature extraction, our approach achieves precise
+and flexible text-queried sound separation.SUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 4
+Fig. 2. Overview of our proposed hierarchical modeling and separation frameworks. (a) Two-level audio feature representation. (b) Text-queried two-level
+separation.
+B. Hierarchical audio representations
+1) Local semantic representation: We leverage the Au-
+dioMAE [45], a self-supervised learned audio representation,
+for the local semantic feature S. Unlike discrete neural codec
+codes that prioritizes acoustic fidelity but lacks semantic rep-
+resentativeness, or contrastively learned cross-modal features
+CLAP that lose details, AudioMAE balances acoustic details
+and semantic information by predicting masked acoustic fea-
+tures. This makes it a good local-semantic representation,
+clustering semantically similar audio events while retaining
+spatial-temporal structure.
+AudioMAE takes a Vision Transformer (ViT)-based
+encoder-decoder structure. It takes the log mel spectrogram
+X∈RT×Fof an audio signal xas input, splits it into
+P×Ppatches, and embeds them into a Cs-dimensional latent
+space, yielding features of a shapeT
+P×F
+P×Cs.TandFare
+the number of frames and mel-frequency bins, respectively.
+Its masked autoencoder design uses an asymmetric structure,
+pairing large encoders with small decoders and scales well for
+linear probing, thanks to a high masking ratio that reduces
+encoding complexity [44]. Following MW-MAE [48], we
+adopt a small 4-layer transformer-based decoder with a width
+of 384 and 8 attention heads and pretrain it on AudioSet [23].
+2) Global semantic representation: While AudioMAE cap-
+tures both semantic and acoustic details, it lacks alignment
+with text feature space, limiting cross-modal understanding.
+To address this, we introduce Q-Audio as the cross-modal
+global semantic feature extractor, inspired by BLIP-2 [46].
+As depicted in Figure 2 (a), Q-Audio bridges features from
+a frozen local semantic audio encoder (our pretrained Au-
+dioMAE) and a frozen FLAN-T5 text encoder [49] into a
+shared space. It comprises two feature extractors that utilize
+a transformer structure and share self-attention layers. The
+audio part extracts semantic components from AudioMAE via
+a self-attention followed by a cross-attention, and the text
+feature extractor utilizes only self-attention layers. We adopt
+one learnable query embedding to interact with the frozen
+audio features through cross-attention layers. The query alsointeracts with the text branch in self-attention layers through
+masking. This structure distills global semantic information
+from the local-semantic representation while alleviating text
+comprehension demands through FLAN-T5, which is different
+from the original BLIP-2 design [46]. This design makes the
+extractor an audio-language aligner with a much lower com-
+plexity than the original one. What’s more, extracting global
+feature G∈R1×Cgfrom the local-semantic representation
+S∈RT
+P×F
+P×Csfurther ensures the correlation and consis-
+tency between two-level representations, better facilitating our
+hierarchical modeling and separation design.
+During the learning phase, the main objective is to en-
+able the learnable query to extract audio representations that
+are most informative for the corresponding text input. We
+adopt the original optimization design in [46] with three
+training objectives: audio-language contrastive learning, audio-
+language matching, and audio-grounded text generation, each
+leveraging a different attention masking mechanism to regulate
+the interaction between the learnable query and the text branch
+in self-attention layers. As shown in Figure 2, we use the audio
+branch of Q-Audio as the global-semantic audio encoder, and
+the text branch as the text encoder for the two-level separation.
+C. Global-semantic separation
+The first stage H1: (xmix,T)7→ˆGof our separation
+framework operates in the Q-Audio feature space to separate
+semantic representations of the target audio. We use Q-Audio
+as the mixture audio and text encoders and employ a 6-layer
+non-autoregressive (NAR) transformer to predict the target
+semantic feature Gtgt∈R1×Cg. This prediction is conditioned
+on the concatenation of the mixture audio feature Gmix∈
+R1×Cg, the text feature Tcap∈RN×Ct, and the task token
+Ttask.Nis the sequence length of text tokens and Ctis the
+token dimension. The semantic alignment between audio and
+text feature inputs enables the transformer to accurately model
+audio-text relationships and guide the separation process.
+The optimization involves two objectives: a similarity loss
+and an L1 loss. The similarity loss is defined as the cosineSUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 5
+similarity between target Gtgtand predicted features ˆG, which
+is given by
+Lsim= 1−cos(ˆG, G tgt). (5)
+The L1 loss is the L1-norm distance between two features
+given by
+LL1=||ˆG−Gtgt||1. (6)
+The total loss is a weighted combination of these two terms
+with weights λ1andλ2, ensuring both vector-wise and
+element-wise accuracy. It is defined as follows
+Lglobal =λ1Lsim+λ2LL1. (7)
+The predicted ˆGserves as a semantic guidance for the subse-
+quent local-semantic separation stage.
+D. Local-semantic separation
+The second stage H2: (xmix,T,ˆG)7→ˆSoperates in
+the more fine-grained AudioMAE feature space. This stage
+takes the mixture audio feature Smix∈RT
+P×F
+P×Csby
+AudioMAE encoder as input to predict the target feature
+Stgt∈RT
+P×F
+P×Cs. The previous-stage output ˆG, text feature
+Tcap∈RN×Ct, and the task token Ttask are concatenated as
+the conditioning input, as shown in Figure 2. During training,
+ground-truth global audio feature Gtgtis used instead of the
+prediction ˆG.
+We leverage the L1-based regression loss for this stage
+optimization, which is
+Llocal=||ˆS−Stgt||1, (8)
+Where ˆSis the predicted output. To mitigate possible error
+propagation between two stages, we further conduct joint fine-
+tuning by Equations 7 and 8 after optimizing each stage inde-
+pendently. We introduce a switcher to control the conditioning
+input of the second stage, selecting ground-truth Gtgtwith
+a probability of Pgt, and prediction ˆGwith a probability of
+Ppred = 1−Pgt. This joint fine-tuning optimizes the two
+stages end-to-end, minimizing inconsistencies and improving
+separation accuracy.
+E. Acoustic decoder
+After the two-stage separation, the last part H3:ˆS7→xtgt,
+the acoustic decoder, aims to reconstruct the waveform from
+the predicted local semantic feature. In light of the power of
+generative models, we leverage auto-regressive transformer for
+this stage. Specifically, we encode xtgtinto discrete acoustic
+tokens Ausing a neural audio codec, and leverage an au-
+toregressive transformer to generate audio tokens conditioned
+onˆS, followed by a neural codec decoder to reconstruct the
+waveform, similar to that in UniCodec [50].
+1) Autoregressive audio token generation: As illustrated in
+Figure 3, an autoregressive transformer decoder is employed
+to convert local semantic tokens into acoustic tokens, given by
+p(A|Stgt;θ) =TaY
+t=0p(at|a<t, Stgt;θ), (9)
+Fig. 3. Overview of the acoustic decoder. The autoregressive transformer
+generates acoustic tokens by our neural codec TF-Codec, conditioned on local
+semantic features.
+where Tadenotes the acoustic token sequence length, and at
+is the t-th frame token of A.a−1andaTaare start and end
+tokens, respectively. θdenotes the network parameters. The
+decoder is trained using a teacher-forcing approach with a
+cross-entropy loss by
+Lce=−logTaY
+t=0p(at|a<t, Stgt;θ). (10)
+The generated tokens are then used by the neural codec de-
+coder to reconstruct waveforms. During inference, predictions
+are made token by token, using each predicted token as input
+for the next.
+2) Reconstruction via TF-Codec: TF-Codec [51] is a low-
+latency neural speech codec designed for high-quality speech
+at low bitrates. We retrain a non-predictive version of TF-
+Codec to adapt to general audio for acoustic tokens. It employs
+a VQ-V AE framework, including an encoder, a group vector
+quantizer, and a decoder optimized end to end. To ensure
+high perceptual quality for diverse general audio, we apply
+adversarial training with a multi-scale mel discriminator [19]
+to replace the original single-scale frequency-domain discrimi-
+nator in [51]. Other training losses are the same as that in [51].
+Instead of training from scratch, we finetune from the pre-
+trained TF-Codec speech codec model for better performance.
+Similar to UniCodec [50], in autoregressive token generation
+of Equation 9, all groups of t-th step are simultaneously
+generated in a single stage, leading to a short token length.
+F . Instruction semantic parsing
+In text-guided audio separation, users typically provide de-
+scriptive prompts to retain some audio components or remove
+some undesired audio events. This instruction is arbitrary and
+may target at single or multiple sound sources with specified
+characteristics. To facilitate this open-vocabulary text prompts
+with bidirectional operations, our framework introduces dual
+separation operations: removal and extraction , allowing theSUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 6
+Fig. 4. The pipeline of processing arbitrary text instructions.
+model to isolate target audio through complementary ap-
+proaches. We also utilize pre-trained LLMs to parse text
+prompts into this task type and a target audio description. For
+example, an input “ Could you help me separate the sound of a
+dog barking and the background music? ” is decomposed into a
+task type “ extraction ” and an audio description “ a dog barking
+and the background music ”, enabling distinct processing of
+operation intent and acoustic context.
+This process offers two critical advantages. It enhances
+the prompt understanding capability of the separation model.
+What’s more, the decomposition of event description from
+operation types makes it feasible to leverage audio-language
+contrastive learning to extract aligned audio-text features, im-
+proving the separation model’s ability to capture cross-modal
+correlations. We introduce a dual-channel text conditioning
+mechanism for this decomposed processing. The task type
+is encoded using pretrained token representations from T5’s
+vocabulary, producing continuous task tokens Ttask∈RL×Ct,
+where Lis the token length and Ctis the embedding dimen-
+sion. Simultaneously, the event description is processed by the
+semantic text encoder, denoted as Tcap∈RN×Ct, where N
+is the length of the caption sequence. These two streams of
+tokens are concatenated along the sequence dimension to form
+the final text conditioning input [Ttask, Tcap]∈R(L+N)×Ct,
+as shown in Figure 2 (b).
+IV. E XPERIMENTAL SETTING
+A. Dataset and preprocessing
+1) Semantic separation: We utilize audio data from Au-
+dioCaps [52], ESC-50 [53], Clotho v2 [54], FSD50K [55]
+and WavCaps [56] due to their relatively accurate and diverse
+labels or captions. Each audio contains single or multiple
+audio events with or without overlaps. AudioCaps is a sub-
+set of AudioSet [23] with handcrafted captions and we use
+45K audio clips. Clotho v2 provides human-annotated cap-
+tions, and we use 3,839 training clips, each accompanied by
+five captions. ESC-50 comprises 2,000 environmental audio
+recordings, evenly distributed across 50 semantic classes,
+including natural sounds, non-speech human sounds, domestic
+sounds, and urban noises. FSD50K contains approximately
+40K audio clips with 200 classes, varying in duration from 0.3
+to 30 seconds. WavCaps includes four subsets: AudioSet SL,Freesound, SoundBible, and BBC Sound Effect. We use the
+entire AudioSet SL subset, exclude Freesound with inaccurate
+captions, and filter the SoundBible and BBC Sound Effect sub-
+sets by removing audios longer than 60 seconds. Ultimately,
+we select 121K audio clips from WavCaps. All audios are
+resampled to 16 kHz and we normalize all of them to 10
+seconds by cropping or padding. In total, we compile 230K
+ten-second audio clips with class labels or captions as the
+source data for generating mixtures.
+For semantic separation, we employ triplet data (mixed
+audio, target audio, instruction) for supervised training. In-
+structions are generated using two task types and audio
+descriptions. We generate bidirectional instructions for each
+triplet and randomly select one during training, balancing the
+model’s ability to interpret both target and undesired audio
+events. Given that most source audios contain multiple audio
+events, when randomly selecting two samples to create each
+mixture, we follow the rule that the separated two audios
+do not have any overlap in audio classes. As text-audio
+pairs from various datasets feature diverse audio descriptions
+(e.g. FSD50K and ESC-50 provide different fixed sets of
+class labels, while AudioCaps, WavCaps and Clotho v2 offer
+detailed captions), it is necessary to unify the class labels to
+distinguish audio event types during audio mixing. We employ
+GPT-41[57] to semantically categorize different audio types
+of different datasets and summarize audio event tags from
+captions. For example, “ rain” and “ raindrop ” are the same
+type and GPT-4 extracts tags “ man speech, thump, frog croak ”
+from the original caption “ An adult male speaks while thumps
+occur in the background, then frogs croak .” It is noted that
+these unified tags are only used in audio mixing to avoid
+mixing audios including the same categories. The instruction
+part will keep the original caption and labels to preserve the
+diversity. In total, we create 1.7M mixture-target audio pairs
+for training, containing approximately 4500 hours.
+2) Q-Audio and AudioMAE: To pretrain the Q-Audio mod-
+ule, we use the same datasets as that in Section IV-A1,
+i.e. AudioCaps, ESC-50, Clotho v2, FSD50K and WavCaps,
+which provide detailed captions or class labels paired with
+each audio. Following the approaches of AudioMAE and MW-
+MAE [48], we train the MAE model using AudioSet-2M [23],
+encompassing both balanced and unbalanced subsets.
+3) Acoustic decoder: The acoustic decoder is trained using
+audios only without text labels. We gather data from AudioSet
+for general sounds, the Jamendo dataset for music [58], and a
+multilingual speech dataset with 6k hours for clean speech [50]
+that combines the Libri-Light medium subset [59], the multi-
+lingual speech subsets of the ICASSP 2021 DNS Challenge
+corpus [60], and A VSpeech [61]. All audios are resampled to
+16 kHz. We randomly sample 2,000 hours from each category.
+During TF-Codec training, audios are cropped to 3-second
+segments. For autoregressive audio token generation module,
+we set the maximum duration of each training audio to 10
+seconds and perform padding masks on audio shorter than 10
+seconds.
+1https://chatgpt.com/SUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 7
+B. Evaluation benchmark and metrics
+1) Evaluation benchmark: We compile evaluation data
+from the test sets of AudioCaps, FSD50K, and Clotho v2, for
+general audio assessment. The mixing strategy is the same
+as that used for training. As shown in Table I, we also
+create a “3 Sets” that combine three datasets with an equal
+number of randomly sampled audio clips from each source
+dataset. Mixing sources from different datasets can account
+for distribution biases, leading to better approximations of real-
+world recordings. The average SNR between two components
+of the mixture is controlled within [-15dB, 15dB].
+TABLE I
+DETAILS OF TEST SETS
+Dataset Num.sources Caption Duration(sec) Num.pairs
+AudioCaps 952 ✓ 10 500
+Clotho 1045 ✓ 15-30 500
+FSD50K 10231 ✗ 5-30 500
+3 Sets 4000 ✓ 10 1000
+Additionally, we assess zero-shot audio separation perfor-
+mance on MUSIC dataset [8], which comprises 536 video
+recordings of individuals playing musical instruments across
+11 classes (e.g., accordion, acoustic guitar, cello). Following
+[16], we downloaded 46 video recordings from the test split,
+randomly selected two clips from different instrument classes
+and mixed them into 10-second segments, producing 500 audio
+pairs. The average SNR in mixing is within [-5dB, 5dB].
+2) Objective metrics: We evaluate our separation perfor-
+mance using log spectral distance (LSD), peak signal-to-
+noise ratio (PSNR), and Kullback-Leibler divergence (KL),
+following the AudioLDM eval audio generation evaluation
+pipeline2. LSD quantifies the difference between spectrograms
+of the predicted and target samples. PSNR measures the
+logarithmic ratio of the maximum possible signal power to the
+mean squared error between the predicted and target signals.
+KL divergence measures the similarity between the predicted
+and target audio with the label calculated by an audio tagging
+model.
+To further evaluate the semantic correction of predicted
+audios, we leverage the CLAP score [62], which calculates
+audio-text similarity based on CLAP models [26], [25]. The
+MSCLAP [26] is chosen for this measurement in our exper-
+iment. As CLAP tends to poorly capture temporal semantics
+and complex multi-source audio semantics [63], we further
+introduce another semantic score, AFSim , by calculating a
+cosine similarity between predicted and target signals on their
+semantic embeddings based on large audio language models
+(AudioLLM). Specifically, we leverage Audio Flamingo [64],
+an audio LLM with advanced audio understanding capabilities,
+extract the feature from the penultimate (last second) layer by
+using the captioning prompt, and perform a mean-pooling to
+get the final embedding AF∈R1×2048, which is taken as
+the semantic embedding for our AFSim score measurement.
+The superior semantic representation capability of the AF
+over CLAP is demonstrated in Table VI in audio captioning
+evaluation.
+2https://github.com/haoheliu/audioldm evalC. Implementation details
+For the Q-Audio module, we use a two-layer transformer
+with two self-attention layers and two cross-attention layers.
+The loss weights of the three losses are all set to 1.0.
+We choose FLAN-T5-base as the text encoder. The global-
+semantic separation module takes a 6-layer NAR transformer,
+with the Q-Audio audio and text encoders kept frozen during
+training. λ1andλ2are all set to 1.0.
+We train the local-semantic separation module with a 12-
+layer NAR transformer which has 8 attention heads, and a
+hidden dimenion of 768. During two-stage joint fine-tuning,
+we utilize the same training data and fintune the parameters of
+two NAR transformers, with other modules kept frozen. Pgt
+is set to 0.1. The loss weights of Lglobal andLlocal are set to
+0.1 and 1.0, respectively.
+The acoustic decoder includes two parts. The autoregressive
+transformer has 12 layers with 8 attention heads and a hidden
+dimension of 1024. We take TF-Codec with a bitrate of 6 kbps
+with a causal setting, similar to that in [50].
+V. R ESULTS
+In this section, we evaluate the performance of our HSM-
+TSS approach and its modules including global-local repre-
+sentations and neural audio codec.
+A. Evaluation results on general audio
+We compare the separation performance of our HSM-TSS
+with several text-queried audio separation methods, LASS-
+Net [15], AudioSep [4], CLIPSep [16] and BiModalSep
+[17], which are all frequency-domain mask-based approaches.
+LASS-Net employs a pre-trained BERT as the text query en-
+coder and ResUNet as the separation model, while AudioSep
+further integrates a CLAP text encoder as the query network
+and trains on a much larger dataset, yielding substantial
+performance gains. CLIPSep adopts CLIP as the query encoder
+and a Sound-of-Pixels (SOP)-based separation model, trained
+on approximately 500 hours of noisy audio-visual data from
+the VGGSound [24] dataset using hybrid vision-text supervi-
+sion. BiModalSep introduces a weakly-supervised approach
+and leverages bi-modal semantic similarity via CLAP to
+align single-source language prompts with audio predictions,
+achieving robust separation without curated single-source data.
+We evaluate their performance using the official open-sourced
+models on our benchmarks.
+To show the effectiveness of our hierarchical modeling, we
+also compare with a single-separation-stage variant of our
+HSM-TSS, termed “Ours single” in Table II. It removes the
+first global-semantic separation stage and only leverages the
+local-semantic separation stage. The text encoder is FLAN-T5
+without Q-Audio in this variant. We also provide results for
+not only “extraction” as used in four compared methods but
+also “removal” task types that produce the same target audios.
+As shown in Table II, the proposed HSM-TSS, noted as
+“Ours”, outperforms both baseline methods and its single-
+separation-stage variant across various metrics. When com-
+pared to four methods, LASSNet, CLIPSep, AudioSep, and
+BiModalSep, our approach consistently achieves higher scoresSUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 8
+TABLE II
+OBJECTIVE EVALUATION OF SEPARATION FOR GENERAL AUDIO
+Model Train.Data 3 Sets Clotho AudioCaps FSD50K
+(hrs) KL (↓) LSD (↓) PSNR (↑) KL(↓) LSD (↓) PSNR (↑) KL(↓) LSD (↓) PSNR (↑) KL(↓) LSD (↓) PSNR (↑)
+LASS-Net 17 2.577 3.170 16.42 2.713 1.696 18.21 2.446 2.276 17.64 2.474 4.528 15.17
+CLIPSep 550 2.320 3.197 14.38 2.616 1.634 18.43 2.738 2.464 17.07 2.967 4.475 17.15
+BiModalSep 670 1.634 3.118 19.49 1.819 1.613 19.71 1.441 2.256 19.44 1.789 4.428 18.89
+AudioSep 14100 1.027 3.037 22.50 1.191 1.616 21.57 1.002 2.142 21.17 1.172 4.313 23.66
+Extraction
+Ours single 600 0.999 2.878 25.50 1.144 1.395 23.80 0.960 1.916 23.49 0.948 4.197 27.11
+Ours 600 0.924 2.848 25.77 1.089 1.378 24.05 0.910 1.884 23.93 0.889 4.156 27.34
+Removal
+Ours single 600 1.079 2.869 25.50 1.184 1.383 23.98 1.148 1.919 23.66 1.069 4.209 26.65
+Ours 600 1.007 2.852 25.66 1.112 1.373 23.94 1.105 1.908 23.88 1.041 4.179 27.00
+TABLE III
+SEMANTIC EVALUATION FOR GENERAL AUDIO
+Model 3 Sets Clotho AudioCaps FSD50K
+AFSim (↑) CLAP (↑) AFSim (↑) CLAP (↑) AFSim (↑) CLAP (↑) AFSim (↑) CLAP (↑)
+GT - 0.481 - 0.437 - 0.575 - 0.466
+LASS-Net 0.615 0.268 0.590 0.314 0.641 0.264 0.592 0.223
+CLIPSep 0.514 0.229 0.487 0.257 0.519 0.214 0.525 0.203
+BiModalSep 0.678 0.420 0.674 0.385 0.713 0.501 0.631 0.387
+AudioSep 0.730 0.357 0.720 0.401 0.752 0.376 0.699 0.305
+Extraction
+Ours single 0.744 0.420 0.734 0.379 0.763 0.500 0.721 0.428
+Ours 0.752 0.436 0.737 0.393 0.767 0.511 0.729 0.437
+Removal
+Ours single 0.738 0.419 0.730 0.377 0.755 0.486 0.718 0.420
+Ours 0.741 0.428 0.733 0.380 0.763 0.492 0.720 0.425
+in the three metrics, especially for the 3 Sets benchmark,
+highlighting its effectiveness in separating target audio events
+from complex mixtures. In contrast to the single-separation-
+stage setting, our dual-stage separation allows for progressive
+refinement of audio features from coarse to fine, leading to
+more precise separation of target sounds, as demonstrated in
+Table II. We can also see that our model with “removal” in-
+struction achieves comparable scores with “extraction”, show-
+ing the bidirectional operation capability of our method.
+Table III shows the evaluation results on semantic consis-
+tency of the output audios with instructions. For “removal”
+setting, we use the same audio description as “extraction” to
+calculate the CLAP score. We can see that our method con-
+sistently outperforms other methods and the single-separation-
+stage variant in both AFSim and CLAP scores, showing its
+superior capability to follow instructions with diverse audio
+descriptions. For all these comparisons, we only use the simple
+“extract” and “removal” instruction templates as the compared
+methods are not designed for open vocabulary separation
+instruction inputs but only target audio captions. Our method
+has good arbitrary instruction following capability, as shown
+in our demo page3.
+B. Zero-shot performance on unseen datasets
+We perform zero-shot evaluation on mixtures of music
+instruments from the MUSIC dataset, as we do not use any
+specialized music data during training. We can see from Table
+IV that our method outperforms all other methods in all met-
+rics. It’s worth noting that the audio clips with clear musical
+instrument labels in our training data primarily come from
+3https://hsm-tss.github.ioTABLE IV
+EVALUATION ON ZERO -SHOT MUSIC DATASET
+Model KL (↓) LSD (↓) PSNR (↑) CLAP (↑) AFSim (↑)
+GT - - - 0.490 -
+LASS-Net 4.180 2.066 13.23 0.126 0.503
+CLIPSep 2.179 2.554 14.07 0.372 0.657
+BiModalSep 2.607 2.250 14.35 0.374 0.671
+AudioSep 0.535 1.624 22.01 0.342 0.804
+Extraction
+Ours single 0.585 1.400 23.22 0.463 0.799
+Ours 0.501 1.375 23.85 0.470 0.811
+FSD50K, accounting for less than 5% of the entire dataset,
+significantly lower than the proportion in AudioSep’s training
+dataset, AudioSet and VGGSound, that contain rich YouTube-
+sourced music instrument data. The superior performance of
+our HSM-TSS method demonstrates its strong generalization
+capability across diverse music content.
+C. Visualization
+1) t-SNE visualization: To show how the global-semantic
+separation performs, we visualize the extracted features from
+this stage with t-SNE [65]. In Figure 5, each color shows
+a sound event class and we present the ground-truth global
+audio semantic feature and the separated output with different
+markers. It can be observed that our global-semantic separation
+model effectively extracts target audio features with good
+clustering.
+2) Visualization of attention maps: To show how the pre-
+dicted global semantic feature helps the local-semantic separa-
+tion stage, we visualize the attention map from the last layer of
+the NAR transformer. In Figure 6, the bottom two subfiguresSUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 9
+Fig. 5. t-SNE visualization of global-semantic features: ground-truth vs.
+predicted.
+Fig. 6. Visualization of attention weights. The upper subfigures are the
+spectrograms of the mixed and target audios, respectively. The bottom two
+subfigures show the attention weights of the global audio feature attending to
+local AudioMAE patches for ground-truth and predicted global feature inputs,
+respectively.
+show the attention weights of the global feature attending to
+all 512 local semantic patches in temporal order, with the
+upper one takes ground-truth global feature as input and the
+bottom one uses previous global-semantic separation stage
+output feature. We can observe that the high peaks happen
+where target audio event occurs, which well demonstrates the
+semantic alignment of predicted global feature with target
+audio.
+3) Visualization of separation outputs: We show the spec-
+trograms for mixture input, target audio and the separated
+audio with text queries for both “extraction” and “removal”
+commands in Figure 7. We can see that the spectrograms from
+separated output audios closely resemble the target one, and
+the two commands achieve similar results, consistent with our
+objective evaluation results.D. Hierarchical representations
+1) Global semantic feature evaluation: To evaluate the
+cross-modal alignment and semantic representation capbility
+of our Q-Audio, we follow the settings of LAION-CLAP [25]
+on AudioCaps and Clotho datasets. Table V shows the text-to-
+audio retrieval results. Compared to the widely used LAION-
+CLAP [25] and MSCLAP [26], Q-Audio achieves better
+performance, underscoring its capability in audio-language
+modeling. Table VI shows the audio captioning evaluation,
+where a linear mapping layer and a pretrained GPT2 [66] are
+used as the downstream model to generate audio captions.
+Here we only train the downstream model and keep audio fea-
+ture extraction frozen. Although our Q-Audio is not pretrained
+on the captioning task as CLAP models, it still achieves higher
+scores on the three metrics, showing its excellent semantic
+representation capability.
+TABLE V
+TEXT-TO-AUDIO RETRIEVAL PERFORMANCE
+Model Clotho AudioCaps
+R@1 R@5 R@10 R@1 R@5 R@10
+LAION-CLAP 14.6 37.3 49.9 20.4 49.7 64.3
+MSCLAP 15.6 38.6 51.3 25.4 55.6 69.7
+Q-Audio 17.1 41.4 54.1 26.6 56.8 70.4
+TABLE VI
+AUDIO CAPTIONING ON AUDIO CAPS AND CLOTHO
+Model METEOR (↑) SPICE (↑) SPIDEr (↑)
+LAION-CLAP 0.115 0.152 0.311
+MSCLAP 0.116 0.160 0.326
+Q-Audio 0.118 0.164 0.329
+AF 0.121 0.170 0.336
+2) Local semantic feature evaluation: We evaluate our
+pretrained AudioMAE model on the HEAR benchmark [67]
+and three tasks, ESC-50, SC-5h and NS-5h, where only the
+downstream model is trained. As shown in Table VII, our
+pretrained model achieves good performance, outperforming
+the official AudioMAE-B [45].
+TABLE VII
+EVALUATION OF AUDIO MAE ONHEAR BENCHMARK
+Model ESC-50 (↑) SC-5h (↑) NS-5h (↑)
+AudioMAE-B [45] 57.6 33.9 61.4
+Our pretrained AudioMAE 83.7 77.1 66.0
+E. Neural codec performance
+In Table VIII, we assess the reconstruction quality of general
+audio by our neural codec TF-Codec. We randomly sample
+1000 audios from AudioSet validation set for evaluation. All
+models have a bitrate of 6 kbps. We can see that although
+our general audio TF-codec has a low latency by using a
+causal structure and much less parameters, it achieves good
+performance, superior than EnCodec [68]. DAC [69] achieves
+the best performance but it is much heavier with a non-causal
+structure. It should be noted that we utilize TF-Codec just as a
+proof of concept, and future works may utilize any non-causal
+codec with superior performances.SUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 10
+Fig. 7. Visualization of mixture, target and the separated audio by our method.
+TABLE VIII
+NEURAL CODEC PERFORMANCE ON GENERAL AUDIO AT 6KBPS
+Model #param Causal MEL-D (↓) LSD(↓) VISQOL (↑)
+EnCodec 14.85M ✓ 1.047 4.058 4.209
+DAC 74.17M ✗ 0.630 3.556 4.521
+Our TF-Codec 7.63M ✓ 0.797 3.588 4.375
+VI. C ONCLUSION AND FUTURE WORKS
+In this study, we propose a hierarchical modeling and sepa-
+ration framework for text-queried audio source separation, de-
+coupling multi-level semantic feature separation and acoustic
+reconstruction. Leveraging Q-Audio for global-semantic mod-
+eling on top of AudioMAE for structure-preserving representa-
+tions, our model achieves superior separation performance and
+semantic correctness, outperforming existing methods. The
+instruction parser enhances flexibility in handling diverse text
+queries with frozen LLMs. In future work, we will scale up
+the model in training data coverage which incorporates speech
+as well, and explore more fantastic editing options besides
+separation.
+REFERENCES
+[1] Y . Liu and D. Wang, “Divide and conquer: A deep casa approach to
+talker-independent monaural speaker separation,” IEEE/ACM Transac-
+tions on Audio, Speech, and Language Processing , vol. 27, no. 12, pp.
+2092–2102, 2019.
+[2] ——, “A casa approach to deep learning based speaker-independent co-
+channel speech separation,” in 2018 IEEE International Conference on
+Acoustics, Speech and Signal Processing (ICASSP) , 2018, pp. 5399–
+5403.
+[3] Y . Luo and N. Mesgarani, “Conv-tasnet: Surpassing ideal time–
+frequency magnitude masking for speech separation,” IEEE/ACM trans-
+actions on audio, speech, and language processing , vol. 27, no. 8, pp.
+1256–1266, 2019.
+[4] X. Liu, Q. Kong, Y . Zhao, H. Liu, Y . Yuan, Y . Liu, R. Xia, Y . Wang,
+M. D. Plumbley, and W. Wang, “Separate anything you describe,”
+IEEE/ACM Transactions on Audio, Speech, and Language Processing ,
+2024.[5] Q. Kong, Y . Cao, H. Liu, K. Choi, and Y . Wang, “Decoupling magnitude
+and phase estimation with deep resunet for music source separation,”
+inInternational Society for Music Information Retrieval Conference ,
+2021. [Online]. Available: https://api.semanticscholar.org/CorpusID:
+237491546
+[6] D. Wang and J. Chen, “Supervised speech separation based on deep
+learning: An overview,” IEEE/ACM transactions on audio, speech, and
+language processing , vol. 26, no. 10, pp. 1702–1726, 2018.
+[7] Q. Kong, K. Chen, H. Liu, X. Du, T. Berg-Kirkpatrick, S. Dubnov,
+and M. D. Plumbley, “Universal source separation with weakly labelled
+data,” arXiv preprint arXiv:2305.07447 , 2023.
+[8] H. Zhao, C. Gan, A. Rouditchenko, C. V ondrick, J. McDermott, and
+A. Torralba, “The sound of pixels,” in Proceedings of the European
+conference on computer vision (ECCV) , 2018, pp. 570–586.
+[9] E. Tzinis, S. Wisdom, A. Jansen, S. Hershey, T. Remez, D. P. Ellis, and
+J. R. Hershey, “Into the wild with audioscope: Unsupervised audio-visual
+separation of on-screen sounds,” arXiv preprint arXiv:2011.01143 , 2020.
+[10] K. Chen, X. Du, B. Zhu, Z. Ma, T. Berg-Kirkpatrick, and S. Dubnov,
+“Zero-shot audio source separation through query-based learning from
+weakly-labeled data,” in Proceedings of the AAAI Conference on Artifi-
+cial Intelligence , vol. 36, no. 4, 2022, pp. 4441–4449.
+[11] B. Gfeller, D. Roblek, and M. Tagliasacchi, “One-shot conditional audio
+filtering of arbitrary sounds,” in ICASSP 2021-2021 IEEE International
+Conference on Acoustics, Speech and Signal Processing (ICASSP) .
+IEEE, 2021, pp. 501–505.
+[12] B. Veluri, J. Chan, M. Itani, T. Chen, T. Yoshioka, and S. Gollakota,
+“Real-time target sound extraction,” in ICASSP 2023-2023 IEEE In-
+ternational Conference on Acoustics, Speech and Signal Processing
+(ICASSP) . IEEE, 2023, pp. 1–5.
+[13] M. Delcroix, J. B. V ´azquez, T. Ochiai, K. Kinoshita, Y . Ohishi, and
+S. Araki, “Soundbeam: Target sound extraction conditioned on sound-
+class labels and enrollment clues for increased performance and continu-
+ous learning,” IEEE/ACM Transactions on Audio, Speech, and Language
+Processing , vol. 31, pp. 121–136, 2022.
+[14] H. Wang, D. Yang, C. Weng, J. Yu, and Y . Zou, “Improving tar-
+get sound extraction with timestamp information,” arXiv preprint
+arXiv:2204.00821 , 2022.
+[15] X. Liu, H. Liu, Q. Kong, X. Mei, J. Zhao, Q. Huang, M. D. Plumbley,
+and W. Wang, “Separate what you describe: Language-queried audio
+source separation,” arXiv preprint arXiv:2203.15147 , 2022.
+[16] H.-W. Dong, N. Takahashi, Y . Mitsufuji, J. McAuley, and T. Berg-
+Kirkpatrick, “Clipsep: Learning text-queried sound separation with noisy
+unlabeled videos,” arXiv preprint arXiv:2212.07065 , 2022.
+[17] T. Mahmud, S. Amizadeh, K. Koishida, and D. Marculescu, “Weakly-
+supervised audio separation via bi-modal semantic similarity,” arXiv
+preprint arXiv:2404.01740 , 2024.SUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 11
+[18] Y . Wang, Z. Ju, X. Tan, L. He, Z. Wu, J. Bian et al. , “Audit: Audio
+editing by following instructions with latent diffusion models,” Advances
+in Neural Information Processing Systems , vol. 36, pp. 71 340–71 357,
+2023.
+[19] D. Yang, J. Tian, X. Tan, R. Huang, S. Liu, X. Chang, J. Shi, S. Zhao,
+J. Bian, X. Wu et al. , “Uniaudio: An audio foundation model toward
+universal audio generation,” arXiv preprint arXiv:2310.00704 , 2023.
+[20] B. Han, J. Dai, W. Hao, X. He, D. Guo, J. Chen, Y . Wang, Y . Qian, and
+X. Song, “Instructme: an instruction guided music edit framework with
+latent diffusion models,” in Proceedings of the Thirty-Third International
+Joint Conference on Artificial Intelligence , 2024, pp. 5835–5843.
+[21] F. Kreuk, G. Synnaeve, A. Polyak, U. Singer, A. D ´efossez, J. Copet,
+D. Parikh, Y . Taigman, and Y . Adi, “Audiogen: Textually guided audio
+generation,” arXiv preprint arXiv:2209.15352 , 2022.
+[22] H. Liu, Y . Yuan, X. Liu, X. Mei, Q. Kong, Q. Tian, Y . Wang, W. Wang,
+Y . Wang, and M. D. Plumbley, “Audioldm 2: Learning holistic audio
+generation with self-supervised pretraining,” IEEE/ACM Transactions
+on Audio, Speech, and Language Processing , 2024.
+[23] J. F. Gemmeke, D. P. Ellis, D. Freedman, A. Jansen, W. Lawrence, R. C.
+Moore, M. Plakal, and M. Ritter, “Audio set: An ontology and human-
+labeled dataset for audio events,” in 2017 IEEE international conference
+on acoustics, speech and signal processing (ICASSP) . IEEE, 2017, pp.
+776–780.
+[24] H. Chen, W. Xie, A. Vedaldi, and A. Zisserman, “Vggsound: A large-
+scale audio-visual dataset,” in ICASSP 2020-2020 IEEE International
+Conference on Acoustics, Speech and Signal Processing (ICASSP) .
+IEEE, 2020, pp. 721–725.
+[25] Y . Wu, K. Chen, T. Zhang, Y . Hui, T. Berg-Kirkpatrick, and S. Dubnov,
+“Large-scale contrastive language-audio pretraining with feature fusion
+and keyword-to-caption augmentation,” in ICASSP 2023-2023 IEEE
+International Conference on Acoustics, Speech and Signal Processing
+(ICASSP) . IEEE, 2023, pp. 1–5.
+[26] B. Elizalde, S. Deshmukh, M. Al Ismail, and H. Wang, “Clap learning
+audio concepts from natural language supervision,” in ICASSP 2023-
+2023 IEEE International Conference on Acoustics, Speech and Signal
+Processing (ICASSP) . IEEE, 2023, pp. 1–5.
+[27] N. Takahashi and Y . Mitsufuji, “Densely connected multi-dilated con-
+volutional networks for dense prediction tasks,” in Proceedings of the
+IEEE/CVF conference on computer vision and pattern recognition , 2021,
+pp. 993–1002.
+[28] D. Yu, M. Kolbæk, Z.-H. Tan, and J. Jensen, “Permutation invariant
+training of deep models for speaker-independent multi-talker speech sep-
+aration,” in 2017 IEEE International Conference on Acoustics, Speech
+and Signal Processing (ICASSP) . IEEE, 2017, pp. 241–245.
+[29] S. Wisdom, E. Tzinis, H. Erdogan, R. Weiss, K. Wilson, and J. Her-
+shey, “Unsupervised sound separation using mixture invariant training,”
+Advances in neural information processing systems , vol. 33, pp. 3846–
+3857, 2020.
+[30] S. Wisdom, A. Jansen, R. J. Weiss, H. Erdogan, and J. R. Hershey,
+“Sparse, efficient, and semantic mixture invariant training: Taming in-
+the-wild unsupervised sound separation,” in 2021 IEEE Workshop on
+Applications of Signal Processing to Audio and Acoustics (WASPAA) .
+IEEE, 2021, pp. 51–55.
+[31] E. Karamatlı and S. Kırbız, “Mixcycle: Unsupervised speech separation
+via cyclic mixture permutation invariant training,” IEEE Signal Process-
+ing Letters , vol. 29, pp. 2637–2641, 2022.
+[32] F. Pishdadian, G. Wichern, and J. Le Roux, “Finding strength in weak-
+ness: Learning to separate sounds with weak supervision,” IEEE/ACM
+Transactions on Audio, Speech, and Language Processing , vol. 28, pp.
+2386–2399, 2020.
+[33] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal,
+G. Sastry, A. Askell, P. Mishkin, J. Clark et al. , “Learning transferable
+visual models from natural language supervision,” in International
+conference on machine learning . PmLR, 2021, pp. 8748–8763.
+[34] R. Tan, A. Ray, A. Burns, B. A. Plummer, J. Salamon, O. Nieto, B. Rus-
+sell, and K. Saenko, “Language-guided audio-visual source separation
+via trimodal consistency,” in Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition , 2023, pp. 10 575–10 584.
+[35] K. Kilgour, B. Gfeller, Q. Huang, A. Jansen, S. Wisdom, and
+M. Tagliasacchi, “Text-driven separation of arbitrary sounds,” arXiv
+preprint arXiv:2204.05738 , 2022.
+[36] R. Gao and K. Grauman, “Co-separating sounds of visual objects,” in
+Proceedings of the IEEE/CVF International Conference on Computer
+Vision , 2019, pp. 3879–3888.
+[37] S.-L. Wu and Y .-H. Yang, “Musemorphose: Full-song and fine-grained
+piano music style transfer with one transformer vae,” IEEE/ACM Trans-actions on Audio, Speech, and Language Processing , vol. 31, pp. 1953–
+1967, 2023.
+[38] V . Popov, I. V ovk, V . Gogoryan, T. Sadekova, M. Kudinov, and J. Wei,
+“Diffusion-based voice conversion with fast maximum likelihood sam-
+pling scheme,” arXiv preprint arXiv:2109.13821 , 2021.
+[39] Z. Borsos, M. Sharifi, and M. Tagliasacchi, “Speechpainter: Text-
+conditioned speech inpainting,” arXiv preprint arXiv:2202.07273 , 2022.
+[40] A. Marafioti, P. Majdak, N. Holighaus, and N. Perraudin, “Gacela:
+A generative adversarial context encoder for long audio inpainting of
+music,” IEEE Journal of Selected Topics in Signal Processing , vol. 15,
+no. 1, pp. 120–131, 2020.
+[41] Y .-A. Chung and J. Glass, “Generative pre-training for speech with
+autoregressive predictive coding,” in ICASSP 2020-2020 IEEE In-
+ternational Conference on Acoustics, Speech and Signal Processing
+(ICASSP) . IEEE, 2020, pp. 3497–3501.
+[42] Y .-A. Chung, H. Tang, and J. Glass, “Vector-quantized autoregressive
+predictive coding,” arXiv preprint arXiv:2005.08392 , 2020.
+[43] A. Baade, P. Peng, and D. Harwath, “Mae-ast: Masked autoencoding
+audio spectrogram transformer,” arXiv preprint arXiv:2203.16691 , 2022.
+[44] K. He, X. Chen, S. Xie, Y . Li, P. Doll ´ar, and R. Girshick, “Masked au-
+toencoders are scalable vision learners,” in Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition , 2022, pp.
+16 000–16 009.
+[45] P.-Y . Huang, H. Xu, J. Li, A. Baevski, M. Auli, W. Galuba, F. Metze, and
+C. Feichtenhofer, “Masked autoencoders that listen,” Advances in Neural
+Information Processing Systems , vol. 35, pp. 28 708–28 720, 2022.
+[46] J. Li, D. Li, S. Savarese, and S. Hoi, “Blip-2: Bootstrapping language-
+image pre-training with frozen image encoders and large language
+models,” in International conference on machine learning . PMLR,
+2023, pp. 19 730–19 742.
+[47] Z. Borsos, R. Marinier, D. Vincent, E. Kharitonov, O. Pietquin, M. Shar-
+ifi, D. Roblek, O. Teboul, D. Grangier, M. Tagliasacchi et al. , “Audi-
+olm: a language modeling approach to audio generation,” IEEE/ACM
+transactions on audio, speech, and language processing , vol. 31, pp.
+2523–2533, 2023.
+[48] S. Yadav, S. Theodoridis, L. K. Hansen, and Z.-H. Tan, “Masked
+autoencoders with multi-window local-global attention are better audio
+learners,” arXiv preprint arXiv:2306.00561 , 2023.
+[49] H. W. Chung, L. Hou, S. Longpre, B. Zoph, Y . Tay, W. Fedus, Y . Li,
+X. Wang, M. Dehghani, S. Brahma et al. , “Scaling instruction-finetuned
+language models,” Journal of Machine Learning Research , vol. 25,
+no. 70, pp. 1–53, 2024.
+[50] X. Jiang, X. Peng, Y . Zhang, and Y . Lu, “Universal speech token
+learning via low-bitrate neural codec and pretrained representations,”
+IEEE Journal of Selected Topics in Signal Processing , 2024.
+[51] X. Jiang, X. Peng, H. Xue, Y . Zhang, and Y . Lu, “Latent-domain
+predictive neural speech coding,” IEEE/ACM Transactions on Audio,
+Speech, and Language Processing , vol. 31, pp. 2111–2123, 2023.
+[52] C. D. Kim, B. Kim, H. Lee, and G. Kim, “Audiocaps: Generating
+captions for audios in the wild,” in Proceedings of the 2019 Conference
+of the North American Chapter of the Association for Computational
+Linguistics: Human Language Technologies, Volume 1 (Long and Short
+Papers) , 2019, pp. 119–132.
+[53] K. J. Piczak, “Esc: Dataset for environmental sound classification,” in
+Proceedings of the 23rd ACM international conference on Multimedia ,
+2015, pp. 1015–1018.
+[54] K. Drossos, S. Lipping, and T. Virtanen, “Clotho: An audio captioning
+dataset,” in ICASSP 2020-2020 IEEE International Conference on
+Acoustics, Speech and Signal Processing (ICASSP) . IEEE, 2020, pp.
+736–740.
+[55] E. Fonseca, X. Favory, J. Pons, F. Font, and X. Serra, “Fsd50k: an open
+dataset of human-labeled sound events,” IEEE/ACM Transactions on
+Audio, Speech, and Language Processing , vol. 30, pp. 829–852, 2021.
+[56] X. Mei, C. Meng, H. Liu, Q. Kong, T. Ko, C. Zhao, M. D. Plumbley,
+Y . Zou, and W. Wang, “Wavcaps: A chatgpt-assisted weakly-labelled
+audio captioning dataset for audio-language multimodal research,”
+IEEE/ACM Transactions on Audio, Speech, and Language Processing ,
+2024.
+[57] J. Achiam, S. Adler, S. Agarwal, L. Ahmad, I. Akkaya, F. L. Aleman,
+D. Almeida, J. Altenschmidt, S. Altman, S. Anadkat et al. , “Gpt-4
+technical report,” arXiv preprint arXiv:2303.08774 , 2023.
+[58] D. Bogdanov, M. Won, P. Tovstogan, A. Porter, and X. Serra, “The
+mtg-jamendo dataset for automatic music tagging,” in Machine learning
+for music discovery workshop, international conference on machine
+learning (ICML 2019) , 2019, pp. 1–3.
+[59] J. Kahn, M. Riviere, W. Zheng, E. Kharitonov, Q. Xu, P.-E. Mazar ´e,
+J. Karadayi, V . Liptchinsky, R. Collobert, C. Fuegen et al. , “Libri-light:SUBMITTED TO IEEE TRANSACTIONS ON AUDIO, SPEECH, AND LANGUAGE PROCESSING 12
+A benchmark for asr with limited or no supervision,” in ICASSP 2020-
+2020 IEEE International Conference on Acoustics, Speech and Signal
+Processing (ICASSP) . IEEE, 2020, pp. 7669–7673.
+[60] C. K. Reddy, H. Dubey, V . Gopal, R. Cutler, S. Braun, H. Gamper,
+R. Aichner, and S. Srinivasan, “Icassp 2021 deep noise suppression
+challenge,” in ICASSP 2021-2021 IEEE International Conference on
+Acoustics, Speech and Signal Processing (ICASSP) . IEEE, 2021, pp.
+6623–6627.
+[61] A. Ephrat, I. Mosseri, O. Lang, T. Dekel, K. Wilson, A. Hassidim, W. T.
+Freeman, and M. Rubinstein, “Looking to listen at the cocktail party:
+A speaker-independent audio-visual model for speech separation,” arXiv
+preprint arXiv:1804.03619 , 2018.
+[62] F. Xiao, J. Guan, Q. Zhu, X. Liu, W. Wang, S. Qi, K. Zhang, J. Sun, and
+W. Wang, “A reference-free metric for language-queried audio source
+separation using contrastive language-audio pretraining,” arXiv preprint
+arXiv:2407.04936 , 2024.
+[63] H.-H. Wu, O. Nieto, J. P. Bello, and J. Salamon, “Audio-text models
+do not yet leverage natural language,” in ICASSP 2023-2023 IEEE
+International Conference on Acoustics, Speech and Signal Processing
+(ICASSP) . IEEE, 2023, pp. 1–5.
+[64] Z. Kong, A. Goel, R. Badlani, W. Ping, R. Valle, and B. Catanzaro,
+“Audio flamingo: A novel audio language model with few-shot learning
+and dialogue abilities,” arXiv preprint arXiv:2402.01831 , 2024.
+[65] L. Van der Maaten and G. Hinton, “Visualizing data using t-sne.” Journal
+of machine learning research , vol. 9, no. 11, 2008.
+[66] A. Radford, J. Wu, R. Child, D. Luan, D. Amodei, I. Sutskever et al. ,
+“Language models are unsupervised multitask learners,” OpenAI blog ,
+vol. 1, no. 8, p. 9, 2019.
+[67] J. Turian, J. Shier, H. R. Khan, B. Raj, B. W. Schuller, C. J. Steinmetz,
+C. Malloy, G. Tzanetakis, G. Velarde, K. McNally et al. , “Hear: Holistic
+evaluation of audio representations,” in NeurIPS 2021 Competitions and
+Demonstrations Track . PMLR, 2022, pp. 125–145.
+[68] A. D ´efossez, J. Copet, G. Synnaeve, and Y . Adi, “High fidelity neural
+audio compression,” arXiv preprint arXiv:2210.13438 , 2022.
+[69] R. Kumar, P. Seetharaman, A. Luebs, I. Kumar, and K. Kumar, “High-
+fidelity audio compression with improved rvqgan,” Advances in Neural
+Information Processing Systems , vol. 36, pp. 27 980–27 993, 2023.

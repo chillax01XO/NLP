@@ -1,0 +1,781 @@
+arXiv:2505.20298v1  [cs.CL]  26 May 2025MangaVQA and MangaLMM:
+A Benchmark and Specialized Model for Multimodal
+Manga Understanding
+Jeonghun Baek∗Kazuki Egashira∗Shota Onohara∗Atsuyuki Miyai∗
+Yuki Imajuku Hikaru Ikuta Kiyoharu Aizawa
+The University of Tokyo
+baek@hal.t.u-tokyo.ac.jp
+https://github.com/manga109/MangaLMM/
+Abstract
+Manga, or Japanese comics, is a richly multimodal narrative form that blends
+images and text in complex ways. Teaching large multimodal models (LMMs)
+to understand such narratives at a human-like level could help manga creators
+reflect on and refine their stories. To this end, we introduce two benchmarks
+for multimodal manga understanding: MangaOCR, which targets in-page text
+recognition, and MangaVQA, a novel benchmark designed to evaluate contextual
+understanding through visual question answering. MangaVQA consists of 526 high-
+quality, manually constructed question–answer pairs, enabling reliable evaluation
+across diverse narrative and visual scenarios. Building on these benchmarks, we
+develop MangaLMM, a manga-specialized model finetuned from the open-source
+LMM Qwen2.5-VL to jointly handle both tasks. Through extensive experiments,
+including comparisons with proprietary models such as GPT-4o and Gemini 2.5,
+we assess how well LMMs understand manga. Our benchmark and model provide
+a comprehensive foundation for evaluating and advancing LMMs in the richly
+narrative domain of manga.
+1 Introduction
+Manga is a rich and distinctive form of multimodal narrative, combining complex panel layouts,
+expressive visual elements, and text embedded directly within images. As large multimodal models
+(LMMs) continue to advance in vision-language understanding, enabling them to understand manga
+presents an exciting opportunity, not only as a technical milestone, but also as a way to support
+human creativity. Such models could assist manga creators in reflecting on and refining their stories.
+To provide meaningful assistance, an LMM would need to function like a skilled editor or assistant,
+capable of reading and understanding manga in a way human does. This calls for evaluating models’
+abilities to process visual-textual content and follow the context in a coherent and human-like manner.
+Although recent efforts such as Magi [ 25,24,26] and CoMix [ 30] have tackled comic understanding,
+they primarily focus on generating transcriptions from comic pages – they do not evaluate to what
+extent models can accurately read in-page text using optical character recognition (OCR), or under-
+stand the content based on that text through visual question answering (VQA). As a result, it remains
+unclear to what extent models truly comprehend manga content in a human-like manner based on the
+embedded textual information.
+To pave a reliable path toward comprehensive manga understanding in LMMs, we believe it is
+essential to evaluate two core capabilities: OCR and VQA. To address these needs, we propose
+∗Equal contribution.
+Preprint.Figure 1: Overview of MangaVQA and MangaLMM. We present MangaVQA, a newly proposed
+benchmark for multimodal context understanding, consisting of 526 manually constructed ques-
+tion–answer pairs. We also develop MangaLMM, a manga-specialized model jointly trained to handle
+both MangaOCR and MangaVQA tasks.
+two benchmarks: MangaOCR and MangaVQA. MangaOCR focuses on detecting and recognizing
+textual content such as dialogue and sound effects. We consolidate existing annotations from the
+well-known Manga109 dataset [ 20,2] and the manga onomatopoeia dataset [ 3] to construct this
+benchmark. Further, as our primary contribution, we propose MangaVQA , a novel benchmark
+designed to evaluate an LMM’s ability to accurately answer targeted, factual questions grounded in
+both visual and textual context. It consists of 526 high-quality, manually constructed question–answer
+pairs covering a diverse range of scenarios, enabling assessment of a model’s narrative understanding.
+Together, these benchmarks provide a comprehensive framework for evaluating a model’s ability
+to understand manga as a multimodal narrative medium, with MangaVQA playing a central role in
+assessing deeper semantic and contextual comprehension.
+Furthermore, truly human-like understanding of manga requires the ability to jointly perform both
+OCR and VQA, rather than treating them as isolated tasks. Therefore, building on our two proposed
+benchmarks, we finetune an open-source LMM (Qwen2.5-VL [ 4]) to develop MangaLMM , a
+manga-specialized model designed to jointly address both OCR and VQA tasks. MangaLMM
+serves as a practical baseline for human-like manga understanding. We conduct comprehensive
+experiments, including analyses on model and dataset size, and compare MangaLMM with state-of-
+the-art proprietary models such as GPT-4o [ 12] and Gemini 2.5 [ 9] to evaluate the current landscape
+of multimodal manga understanding. Our results show that even the proprietary models struggle
+on our two benchmarks, while MangaLMM jointly handle OCR and VQA, achieving promising
+performance on both.
+An overview of our proposed MangaVQA benchmark and the MangaLMM model is shown in
+Figure 1. Our contributions are summarized as follows:
+•We present MangaVQA , a novel benchmark for evaluating multimodal question answering
+in manga, consisting of 526 manually constructed question–answer pairs. Combined with
+MangaOCR , which focuses on precise, in-page text detection and recognition —an aspect
+often overlooked in prior comic-related benchmarks, our benchmarks provide a foundational
+evaluation of multimodal manga understanding across both visual and textual dimensions.
+•We develop MangaLMM , a manga-specialized version of Qwen2.5-VL finetuned on syn-
+thetic VQA and MangaOCR annotation, designed to jointly address both VQA and OCR.
+•We perform extensive analysis on how model size and training data influence performance,
+and evaluate MangaLMM against proprietary models such as GPT-4o and Gemini 2.5 to
+assess the limitations of general-purpose LMMs in stylized visual domains.
+2 Related Work: Comic Datasets and Tasks
+Recent work, CoMix [ 30], has unified various comic-related tasks by analyzing existing datasets,
+including French comics (eBDtheque [ 10]), American comics (COMICS [ 14] and DCM772 [ 23]),
+2and Japanese comics (Manga109 [ 20] and PopManga [ 25]). CoMix primarily focuses on transcript
+generation-related tasks, including object detection, speaker identification, character re-identification,
+reading order prediction, and character naming prediction. Similarly, the recent Magi series (v1 [ 25],
+v2 [24], and v3 [ 26]) also centers on transcript generation. Notably, Magi v3 extends this pipeline by
+generating image captions from transcriptions and further producing prose based on those captions.
+Although recent studies such as CoMix and the Magi series have addressed a wide range of tasks,
+the evaluation of OCR has often been underexplored, particularly in detecting the locations of texts
+within an image and recognizing their content. One exception is COMICS TEXT+ [ 28], which
+evaluates OCR performance at the panel level, but it does not address page-level evaluation. However,
+humans typically perceive and interpret text at the page level, integrating visual and textual cues
+across the entire layout. To reflect this human reading process, we evaluate OCR performance on
+two-page spreads using MangaOCR.
+Existing studies have also largely overlooked the visual question answering (VQA) task in the context
+of comics. Among prior datasets, the Manga Understanding Benchmark (MangaUB [ 13]) is the
+most closely related to our proposed MangaVQA. While MangaUB can be considered a simple
+VQA benchmark, it contains only eight predefined question types —such as identifying the number
+of characters, the weather, or the time of day —thus offering limited question diversity. As a result,
+MangaUB does not address a broad spectrum of VQA problems centered on text understanding in
+manga. Furthermore, its scope is restricted to the panel level.
+In contrast, MangaVQA goes beyond individual panels and focuses on two-page spreads, reflecting
+how humans naturally read manga. It features diverse VQA questions grounded in textual content
+at the spread level, aiming to approximate the reading experience of human readers. In this regard,
+MangaVQA is conceptually aligned with TextVQA [ 27] and DocVQA [ 19], as it requires models to
+understand and reason over text embedded in images.
+3 The Manga109 Dataset and Our Consolidated MangaOCR Dataset
+This section presents the widely used manga dataset Manga109 [ 20] and our MangaOCR Benchmark.
+3.1 Manga109: A Widely Used Dataset for Manga Research
+Figure 2: Illustration of a two-page spread
+from the Manga109 dataset.Among the many comic datasets introduced in the
+Related Work, We selected Manga109 for its open-
+access license, diverse manga titles, and rich annota-
+tions and meta-information. It has also been widely
+used in previous comic-related research [ 24,26,3,
+15,13], making it a reliable and practical dataset for
+our study.
+Manga109 is a dataset composed of 109 volumes
+of Japanese comics (manga). Manga is a unique vi-
+sual storytelling medium characterized by spatially ar-
+ranged panels and artistic expression. The Manga109
+dataset captures many distinctive features of manga,
+including its predominantly black-and-white artwork,
+two-page spreads, right-to-left reading order, verti-
+cal text layout, and the frequent use of stylized ono-
+matopoeia (e.g., Boom, Bang) integrated into the illustrations. It also contains culturally specific
+dialogue, often incorporating honorifics and idiomatic expressions. Although these characteristics are
+not explicitly annotated, they present unique challenges for manga understanding tasks. Given these
+characteristics, Manga109 serves as a representative dataset for developing and evaluating manga
+understanding models. Figure 2 shows an example of two-page spreads from the Manga109 dataset.
+3.2 MangaOCR: A Consolidated Dataset for Manga Text Recognition
+Text in manga carries essential narrative information, appearing as speech balloons and stylized
+onomatopoeia integrated into the artwork. Recognizing such text is crucial for machine understanding
+3Page54.6%Panel45.4%(a) Required Information
+Exact Extraction44.1%MultimodalUnderstanding52.1%Image Understanding3.8% (b) Understanding Type
+What49.8%Who17.3%Why22.8%How4.0%Where4.2%When1.9% (c) 5W1H
+Seen Author(Different Title)31.9%Seen Title(Different Volume)33.8%Unseen Author34.2% (d) Author Type
+Figure 3: Distributions in MangaVQA. The dataset is structured along four key axes: (a) Required
+Information, (b) Understanding Type, (c) 5W1H, and (d) Author Type.
+of manga, as humans also rely on this information to comprehend the story. MangaOCR addresses
+this challenge by targeting two key categories of embedded text: dialogue and onomatopoeia. We
+construct the MangaOCR dataset by consolidating existing annotations from the Manga109 dataset
+and the manga onomatopoeia dataset [ 3]. It contains approximately 209K narrative text instances,
+spanning a wide variety of visual styles and layouts. Training with MangaOCR can improve the
+ability of LMMs to extract and interpret textual information in manga, contributing to better overall
+understanding. The MangaOCR task is performed on two-page spreads and primarily consists of
+two sub-tasks: text detection, which localizes textual regions, and text recognition, which reads the
+localized text.
+Table 1: Statistics of manga datasets. More de-
+tails about MangaVQA are presented in §4 and §5.
+Count type Total Train Valid Test
+Comic volumes 109 89 7 13
+Images 10,602 8,763 673 1,166
+MangaOCR
+Dialogue 148K 120K 9K 18K
+Onomatopoeia 61K 50K 4K 7K
+Total 209K 170K 13K 26K
+MangaVQA
+QA pairs 40,363 39,837 − 526Author-Aware Dataset Split. We adopt the
+dataset split protocol from prior work [ 3], with a
+few modifications. In the original split, the 109
+volumes were divided into training, validation,
+and test sets based on author information. To
+evaluate intra-series generalization, five of the
+ten test volumes belong to the same series as
+those in the training set, where the first volume
+is included in the training set and the last volume
+is in the test set. This setting tests whether a
+model trained on the beginning of a series can
+generalize to its later volumes. To evaluate intra-
+author generalization, the remaining five test
+volumes are titles by authors who also have other
+works in the training set. This allows us to assess whether a model can generalize across different
+works by the same author.
+To further evaluate out-of-distribution generalization with respect to author identity, we move three
+volumes from the validation set to the test set. These volumes are authored by individuals who did
+not contribute to any works in the training set. Table 1 shows the dataset statistics after the split.
+4 MangaVQA: A Novel Benchmark for Multimodal Context Understanding
+To evaluate model performance under realistic conditions, we manually created a set of ques-
+tion–answer (QA) pairs based on images from Manga109. Five annotators from the authors have
+created a high-quality evaluation set for MangaVQA. To ensure a more robust and unambiguous
+evaluation, we focused on questions with definite answers, avoiding those that could be inferred
+merely from the vague impressions of the image.
+As shown in Figure 3, the question types are designed based on four key axes: (a) whether solving
+the question requires information from individual panels or the entire page, (b) what type of manga
+understanding is necessary to answer the question correctly, (c) 5W1H: whether the question asks
+about a person (who), an object or action (what), a time (when), a place (where), a reason (why), or a
+method or condition (how), and (d) inclusion of the author / title in the training split.
+4Figure 4: Main categorization of MangaVQA questions. MangaVQA consists of (1) Exact
+Extraction, where the answer is directly extracted from the image; (2) Multimodal Understanding,
+where the answer requires comprehension of the story beyond simple extraction; and (3) Image
+Understanding, which can be answered without referring to the text.
+We illustrate examples along axes (b) type of manga understanding in Fig. 4. The categorization of
+(b) the type of manga understanding is as follows:
+(1) Exact Extraction (232 questions): Questions that Require Extracting Answer Words from
+the Image. These questions necessitate accurately retrieving the answer word from the manga page.
+We include one example in the left of Fig. 4. The question is “ ⾵⼦ちゃんがもらったお ⼈形の名
+前は何ですか？” (“What is the name of the doll that Fuko-chan received?”) and the answer is “ ふ
+うちゃん ” (“Fu-chan”), which is directly written in the dialogue. This category assesses the LMM’s
+basic comprehension ability to identify and extract the correct answer part from the manga panels.
+(2) Multimodal Understanding (274 questions): Questions that Require the Content Compre-
+hension in the Images. These questions go beyond simple answer word extraction and require
+comprehending the context within the manga. We include one example in the middle of Fig. 4. The
+question is “What changes did the catcher notice in the batter?”. The correct answer is “He used
+to stand with an open stance, but now he stands with a closed stance.”. This category allows us to
+evaluate whether the LMM can not only recognize the dialogue but also understand its underlying
+meaning in the context of the narrative.
+(3) Image Understanding (20 questions): Questions Solvable without Referring to the Text in
+the Image. Finally, we designed a small set of questions that can be answered without referring to
+the text within the images. We include one example on the right of Fig. 4. The question is “What
+was the man in the bottom right corner attempting to attack?”. The answer is “Baby”. This category
+relies purely on the visual depiction of characters and their actions, allowing the LMMs to infer the
+correct answer even in the absence of dialogue. We consider that including such questions provides a
+broader assessment of the LMM’s capability for the manga understanding.
+5 MangaLMM: A Specialized Model for MangaOCR and MangaVQA
+We develop MangaLMM, a specialized model designed to read and understand manga in a human-
+like manner. To build MangaLMM, we finetune the open-source LMM Qwen2.5-VL [ 4] on the
+MangaOCR and MangaVQA datasets, resulting in a joint model for both tasks. In this section, we
+describe the training data construction and training details for MangaLMM.
+5.1 Training Data Construction
+OCR Training Set TOCR.For the OCR task, we use the MangaOCR training set, as described in
+§3.2. For each image, we format the sequence of text annotations as {"bbox_2d":coordinates 1,
+"text_content":text 1},{"bbox_2d":coordinates 2, "text_content":text 2},... ,
+where coordinates icorresponds to the location of the text iin the image represented as
+xtop_left ,ytop_left ,xbottom_right ,ybottom_right .
+5Synthetic VQA Training Set TVQA.For the VQA task, we generate synthetic training data using
+GPT-4o [ 12](gpt-4o-2024-11-20 ). Following the synthetic data construction used in LLaV A [ 16],
+we generate five questions per image using both the image and its annotation from the OCR training
+setTOCR. Here we exclude < 0.1% of the images where the text annotation is not included or GPT-4o
+refused to respond (e.g., due to violent content). Although we requested GPT-4o to generate five
+questions per image, it occasionally returned fewer than five. As a result, we created a total of 39,837
+synthetic VQA samples from 8,379 images. The prompt used for question generation is provided in
+the supplementary materials. We plan to release this as a training split of our MangaVQA.
+5.2 Training Details
+LMM Selection. Our tasks require an open-source multilingual LMM that can handle Japanese and
+also has strong Japanese OCR capabilities, which are important for understanding manga. Several
+powerful multilingual LMMs have been proposed recently [ 35,31,4,17,7,21]. Among them, the
+Qwen series [ 31,4] and Phi-4 [ 21] are especially notable for their Japanese OCR performance. In this
+work, we build MangaLMM based on Qwen2.5-VL [ 4], which is one of the strongest open-source
+models in this category.
+Training Strategy. We perform continual finetuning on both TOCR andTVQA using the pretrained
+Qwen2.5-VL 7B ( Qwen2.5-VL-7B-Instruct ). Most hyperparameters follow the original Qwen2.5-
+VL configuration, with a few modifications. For Manga109 images (1654 ×1170 resolution), we
+follow Qwen2.5-VL’s image resizing mechanism, which is based on pixel count thresholds, where
+the minimum and maximum number of input pixels are 3,136 and 2,116,800, respectively.
+Elapsed Time for Training. Each dataset is trained for one epoch. Training Qwen2.5-VL 7B using
+four NVIDIA A100 GPUs took about 1 hour when using TOCR orTVQA, and about 2 hours when
+using both TOCR andTVQA.
+6 Experiments
+Evaluation Protocol for MangaOCR. We follow the evaluation protocols from prior OCR stud-
+ies [33,11] and ICDAR 2019 multilingual OCR competitions [ 6,36,29,22]. First, a predicted
+bounding box is considered a correct detection if its intersection over union (IoU) with a ground
+truth box exceeds 0.5. Based on the matched boxes, we compute precision (P), recall (R), and the
+harmonic mean (Hmean). Second, for each matched box, we calculate the normalized edit distance
+(NED) between the predicted and ground truth texts as a character-level metric. NED ranges from 0
+to 1, with higher values indicating better performance; details are in the supplementary materials.
+Since LMMs sometimes output the same word repeatedly, we apply post-processing to exclude
+repeated text segments that appear more than ten times, treating them as noise. Except for the analysis
+in § 6.3, we report only the end-to-end Hmean for simplicity.
+Evaluation Protocol for MangaVQA. Following LLaV A-Bench [ 16], we adopt the LLM-as-a-judge
+approach [ 37] as our evaluation metric. We provide GPT-4o [ 12] (gpt-4o-2024-11-20 ) with the
+question, a human-written answer, and the model’s response. Based on the human-written answer,
+GPT-4o assesses whether the model’s response is appropriate and relevant to the question, using a
+1–10 scale. The prompt used for LLM-as-a-judge is provided in the supplementary materials.
+LMMs Used for Comparison. We evaluate two proprietary LMMs, gpt-4o-2024-11-20 [12]
+and gemini-2.5-flash-preview-04-17 [9], and two open-source LMMs,
+Phi-4-multimodal-instruct [1] and Qwen2.5-VL-7B-Instruct [4].
+6.1 Main Results
+Table 2 compares LMMs for both MangaOCR and MangaVQA tasks. Overall, MangaLMM can
+handle both tasks effectively: it achieves over 70% OCR score and outperforms GPT-4o in VQA
+score (5.76 vs. 6.57).
+Analysis of Low Performance on MangaOCR. As shown in Table 2, GPT-4o, Gemini 2.5, Phi-4,
+and Qwen2.5-VL all show near-zero score on the MangaOCR benchmark. Most of their predictions
+consist of meaningless repetitions or short repeated tokens. The extremely low OCR score before
+6Table 2: Comparison of LMMs on MangaOCR
+and MangaVQA.
+MangaOCR MangaVQA
+Method Hmean (%) LLM (/10.0)
+GPT-4o 0.0 5.76
+Gemini2.5 Flash 0.0 3.87
+Phi-4-Multimodal 0.0 3.08
+Qwen2.5-VL 7B 0.9 5.36
+MangaLMM (Ours) 71.5 6.57Table 3: Effect of finetuning (FT). FT is
+performed on the OCR training set TOCR,
+the VQA training set TVQA, or both.
+MangaOCR MangaVQA
+FT data Hmean (%) LLM (/10.0)
+None 0.9 5.36
+TOCR 74.9 1.03
+TVQA 0.0 6.46
+TOCR+TVQA 71.5 6.57
+finetuning is likely due to two main factors: (1) these models are not familiar with manga data, and
+(2) their weak detection capabilities may limit OCR performance. Prior work [ 32] has shown that
+GPT-4o, for example, exhibits poor detection ability, which may also apply to the other models.
+Despite the near-zero OCR score —where not only position information is missing but even the correct
+text content is not generated —these models still manage to answer certain VQA questions that require
+interpreting text within the image. This is somewhat counterintuitive . Although the models fail to
+explicitly output the correct OCR results, they appear to capture some textual semantics from the
+image. This suggests that they are able to extract relevant information needed for answering VQA
+questions, even without performing OCR correctly.
+Analysis of the Effect of Finetuning. Table 3 shows the effect of finetuning. Finetuning Qwen2.5-
+VL on TOCR andTVQA allows the model to specialize in each respective task. On MangaOCR, the
+finetuned model achieves a significant improvement to a score of 74.9%, which we provide more
+interpretation in §6.3. On MangaVQA, while the model initially underperforms compared to GPT-4o,
+it demonstrates a notable performance gain, even surpassesing GPT-4o. These results highlight the
+effectiveness of our synthetic VQA training set TVQA, which we further analyze in §6.4.
+Analysis from the Perspective of Task Interference. MangaLMM, a Qwen2.5-VL model fine-
+tuned jointly on both TOCR andTVQA, shows a slight drop in OCR performance compared to using
+TOCR alone, but achieves a small gain in VQA score over using TVQA alone. A common issue in
+multi-task learning is task interference [18,34,8,5], where models jointly trained on multiple tasks
+(e.g., AandB) tend to perform worse on task Acompared to models trained solely on A. Under
+this assumption, one might expect the VQA performance of a jointly trained OCR+VQA model to
+degrade relative to a VQA-only model. Interestingly, we observe a slight improvement in VQA score
+under joint training, contrary to typical interference expectations. This suggests that although task
+interference may be present, the enhanced OCR capability likely provides beneficial textual cues that
+marginally improve VQA performance.
+6.2 Effect of Model and Dataset Size
+Table 4 shows the performance of Qwen2.5-VL models of different sizes (3B and 7B) under various
+finetuning settings. Similar to the 7B model, the 3B model shows a slight drop in MangaOCR
+performance when finetuned on both TOCR andTVQA, while its MangaVQA performance improves
+slightly. Table 5 shows the results of varying dataset size (25%, 50%, 75%, and 100%). We observe
+that performance generally improves as the dataset size increases.
+6.3 Performance Analysis of MangaOCR
+Table 6 shows MangaOCR performance at both the detection and end-to-end stages. The Hmean of
+detection is 78.6%, while the Hmean of end-to-end reaches 71.5%, implying that once text regions
+are detected, the model can read them with approximately 91.0% (=71.5 / 78.6) accuracy. Some false
+positives occur when the model predicts text that is indeed present in the manga but not included in the
+annotations —for example, page numbers or editorial marks that are not part of the narrative content
+such as dialogue or onomatopoeia. As a result, the precision is unlikely to reach 100%. Compared to
+precision, recall is relatively low (68.5%). This suggests that around 31.5% of ground-truth narrative
+7Table 4: Effect of model size (3B and 7B).
+MangaOCR MangaVQA
+Size FT data Hmean (%) LLM (/10.0)
+3BNone 0.1 4.30
+TOCR 73.5 3.78
+TVQA 0.0 5.71
+TOCR+TVQA 66.5 5.86
+7BNone 0.9 5.36
+TOCR 74.9 1.03
+TVQA 0.0 6.46
+TOCR+TVQA 71.5 6.57Table 5: Effect of dataset size.
+MangaOCR MangaVQA
+Ratio (%) Hmean (%) LLM (/10.0)
+25 59.0 6.15
+50 64.9 5.99
+75 68.4 6.39
+100 71.5 6.57
+Table 6: Detection and end-to-end performance
+on MangaOCR.
+Stage Prec. Recall Hmean
+Detection 82.2 75.3 78.6
+End-to-end 74.8 68.5 71.5
+text remains undetected, indicating room for improvement in capturing all semantically relevant
+content. Qualitative analysis of MangaOCR is provided in the supplementary materials.
+6.4 Performance Analysis of MangaVQA
+Category-wise VQA Performance. Figure 5 shows a breakdown of model performance across
+the annotated categories in MangaVQA. We observe performance improvements across nearly all
+tags in every annotated category, indicating that our training contributes to a consistent and balanced
+enhancement in VQA capabilities. For example, perhaps surprisingly, the model generalizes well to
+questions from unseen authors, although the performance gain is slightly smaller compared to other
+tags (rightmost figure).
+The only exception is the questions that do not require textual information ("Understanding Type =
+Image"). In this case, a slight performance drop has been observed after training. We hypothesize
+this is because our training is strongly text-aware —not only is the model trained on MangaOCR, but
+synthetic VQA generation is guided with text annotation. We do not consider this a major limitation
+as uniqueness of manga lies in its multimodality and use cases on non-textual understanding are
+relatively rare. Still, the training methods better suited for such cases is left for future work.
+Table 7: Effect of OCR Anno-
+tation on VQA Generation.
+OCR Annot. LLM (/10.0)
+5.44
+✓ 6.57Effect of OCR Annotation when Generating VQA Data. On
+creating synthetic QA pairs for training, we provide GPT-4o with the
+OCR annotation as part of the prompt. Here, we ablate the impact
+of this by comparing the effect of VQAs made with and without
+text annotation. As shown in Table 7, the performance of a model
+on VQA data generated without OCR information (5.44) does not
+outperform GPT-4o’s own score (5.76). In contrast, OCR-guided
+VQAs substantially improve the score (6.57), even outperforming the GPT-4o. These results suggest
+that OCR annotations help GPT-4o generate high-quality QA pairs beyond its inherent performance.
+Qualitative Analysis of MangaVQA. In Figure 6, we provide a few examples comparing the
+outputs of the original Qwen model and our trained model. Here, we briefly summarize our observa-
+tions: Left: The original model generates a general answer based on the panel in which the person
+in question appears, while the trained model’s answer is based on the content of a text bubble and
+is more specific, resulting in a score increase of 7 ( 3→10).Middle : The original model extracts
+text irrelevant to the question, while the trained model extracts the correct text, resulting in a score
+increase of 8 ( 2→10).Right : The original model extracts the wrong dish name, which is not asked
+about in the question. The trained model correctly identifies the target dish name but fails to extract it
+character by character, resulting in no score improvement ( 2→2).
+7 Conclusion and Discussion
+We present MangaVQA, a benchmark for evaluating to what extent LMMs can understand manga in
+a human-like way through contextual visual question answering, and MangaOCR, a consolidated
+8Panel Page0.02.55.07.5Average ScoreRequired Information
+Exact
+Extraction MultimodalImage0.02.55.07.5Understanding Type
+What Why WhoWhereHowWhen0.02.55.07.55W1H
+Seen Title
+(Different V ol.)Seen Author
+(Different Title)Unseen Author0.02.55.07.5Author TypeOriginal TrainedFigure 5: Category-wise score breakdown. Compared to the original model (Qwen2.5-VL-7B-
+Instruct), our trained MangaLMM improves scores across nearly every tag in every category.
+Question女性のアナウンサーがいるのはどこですか？Where is the female announcer?GroundTruth三光グループ主催「技術総合展」展示会場“Technology General Exhibition” venue hosted by the Sanko Group.
+女性のアナウンサーは、左側の最初のコマで、テレビスタジオのセットで話している場面にいます。The female announcer appears in the first panel on the left, speaking on a television studio set.Original Model三光グル-プ主催「技術総合展」展示会場“Technology General Exhibition” venue hosted by the Sanko Group.TrainedMangaLMM人形が女の子に対してお願いしていることは何でしょう？What is the doll asking the girl to do?自分を見つけることTo find her.
+人形は女の子に対して「消えた」ということを伝えています。The doll is telling the girl that it has disappeared.「あたしを捜して」とお願いしています。She is asking, “Please find me.”COOKING TIME でとっても変な味だったと言われているのは何という料理ですか？What dish is said to have tasted very strange on "COOKING TIME"?お米のプディングRice pudding.
+COOKING TIME でとっても変な味だったと言われている料理は「ローストチキン」です。The dish that was said to have tasted very strange on "COOKING TIME" is roast chicken.お米のプロデインバRice {random characters visually similar to “pudding”}.
+© Kurita Riku© Omi Ayuko© Masaki HidehisaScoreScore10322102
+Figure 6: Qualitative analysis on MangaVQA. The regions in the image relevant to the question or
+models’ answer are highlighted with boxes in corresponding colors. In the left and middle examples,
+the model’s performance improves significantly after training, whereas in the right example, the
+trained model still struggles to produce an accurate answer.
+benchmark for in-page text recognition. Together, they cover both textual and narrative aspects
+of multimodal manga understanding. To establish a strong baseline, we develop MangaLMM, a
+specialized model jointly finetuned on OCR and VQA tasks. Experiments show that even state-of-the-
+art proprietary LMMs struggle with manga’s unique complexity, while MangaLMM performs well
+across both tasks. By releasing open benchmarks, synthetic data, and a strong open-source baseline,
+we aim to advance research in multimodal manga understanding.
+Limitation. One limitation of our model is its slow inference speed for OCR. LMMs are much
+slower than dedicated OCR models; for instance, processing 1,166 test images with 25,651 texts takes
+several hours on an A100 GPU. In contrast, a dedicated OCR model like DeepSolo [ 33], running at
+over 10 FPS, would finish in about 2 minutes. This slowdown stems from the large number of output
+tokens and occasional repeated or looping outputs during inference.
+Impact Statement. Copyright issues surrounding manga data are often complex. In the case of
+PoPManga [ 25], its training data is not publicly available, and its test data is inaccessible from several
+Asian countries due to copyright restrictions. In contrast, the Manga109 [ 20] dataset we use consists
+only of works for which explicit permission for research use has been obtained from the manga
+authors. We hope that future research in the manga domain will increasingly rely on copyright-clear
+datasets like Manga109, enabling the field to advance in a cleaner and more reliable manner.
+9Acknowledgments
+This work was supported by JSPS KAKENHI Grant Number 24K23882 and by the NVIDIA Aca-
+demic Grant Program. This research utilized NVIDIA Saturn Cloud.
+References
+[1]Abdelrahman Abouelenin, Atabak Ashfaq, Adam Atkinson, Hany Awadalla, Nguyen Bach,
+Jianmin Bao, Alon Benhaim, Martin Cai, Vishrav Chaudhary, Congcong Chen, et al. Phi-4-mini
+technical report: Compact yet powerful multimodal language models via mixture-of-loras.
+arXiv preprint arXiv:2503.01743 , 2025.
+[2]Kiyoharu Aizawa, Azuma Fujimoto, Atsushi Otsubo, Toru Ogawa, Yusuke Matsui, Koki Tsub-
+ota, and Hikaru Ikuta. Building a manga dataset “manga109” with annotations for multimedia
+applications. IEEE MultiMedia , 2020.
+[3]Jeonghun Baek, Yusuke Matsui, and Kiyoharu Aizawa. Coo: Comic onomatopoeia dataset for
+recognizing arbitrary or truncated texts. In ECCV , 2022.
+[4]Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge, Sibo Song, Kai Dang, Peng Wang,
+Shijie Wang, Jun Tang, Humen Zhong, Yuanzhi Zhu, Mingkun Yang, Zhaohai Li, Jianqiang
+Wan, Pengfei Wang, Wei Ding, Zheren Fu, Yiheng Xu, Jiabo Ye, Xi Zhang, Tianbao Xie, Zesen
+Cheng, Hang Zhang, Zhibo Yang, Haiyang Xu, and Junyang Lin. Qwen2.5-vl technical report.
+arXiv preprint arXiv:2502.13923 , 2025.
+[5]Zeren Chen, Ziqin Wang, Zhen Wang, Huayang Liu, Zhenfei Yin, Si Liu, Lu Sheng, Wanli
+Ouyang, and Jing Shao. Octavius: Mitigating task interference in MLLMs via loRA-moe. In
+ICLR , 2024.
+[6]Chee Kheng Chng, Yuliang Liu, Yipeng Sun, Chun Chet Ng, Canjie Luo, Zihan Ni, ChuanMing
+Fang, Shuaitao Zhang, Junyu Han, Errui Ding, et al. Icdar2019 robust reading challenge on
+arbitrary-shaped text-rrc-art. In International Conference on Document Analysis and Recogni-
+tion (ICDAR) , 2019.
+[7]Cohere Labs. Aya vision 8b. https://huggingface.co/CohereLabs/aya-vision-8b ,
+2025. Accessed: 2025-05-13.
+[8]Chuntao Ding, Zhichao Lu, Shangguang Wang, Ran Cheng, and Vishnu Naresh Boddeti.
+Mitigating task interference in multi-task learning via explicit task routing with non-learnable
+primitives. In CVPR , 2023.
+[9]Google DeepMind. Gemini 2.5: Our most intelligent ai model. https://blog.google/
+technology/google-deepmind/gemini-model-thinking-updates-march-2025/ ,
+2025. Accessed: 2025-05-12.
+[10] Clément Guérin, Christophe Rigaud, Antoine Mercier, Farid Ammar-Boudjelal, Karell Bertet,
+Alain Bouju, Jean-Christophe Burie, Georges Louis, Jean-Marc Ogier, and Arnaud Revel.
+ebdtheque: a representative database of comics. In International Conference on Document
+Analysis and Recognition (ICDAR) , 2013.
+[11] Mingxin Huang, Jiaxin Zhang, Dezhi Peng, Hao Lu, Can Huang, Yuliang Liu, Xiang Bai,
+and Lianwen Jin. Estextspotter: Towards better scene text spotting with explicit synergy in
+transformer. In ICCV , 2023.
+[12] Aaron Hurst, Adam Lerer, Adam P Goucher, Adam Perelman, Aditya Ramesh, Aidan Clark,
+AJ Ostrow, Akila Welihinda, Alan Hayes, Alec Radford, et al. Gpt-4o system card. arXiv
+preprint arXiv:2410.21276 , 2024.
+[13] Hikaru Ikuta, Leslie Wohler, and Kiyoharu Aizawa. Mangaub: A manga understanding
+benchmark for large multimodal models. IEEE MultiMedia , 2025.
+10[14] Mohit Iyyer, Varun Manjunatha, Anupam Guha, Yogarshi Vyas, Jordan Boyd-Graber, Hal
+Daume, and Larry S Davis. The amazing mysteries of the gutter: Drawing inferences between
+panels in comic book narratives. In CVPR , 2017.
+[15] Yingxuan Li, Ryota Hinami, Kiyoharu Aizawa, and Yusuke Matsui. Zero-shot character
+identification and speaker prediction in comics via iterative multimodal fusion. In ACMMM ,
+2024.
+[16] Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee. Visual instruction tuning. In
+NeurIPS , 2023.
+[17] Muhammad Maaz, Hanoona Rasheed, Abdelrahman Shaker, Salman Khan, Hisham Cholakal,
+Rao M Anwer, Tim Baldwin, Michael Felsberg, and Fahad S Khan. Palo: A polyglot large
+multimodal model for 5b people. In WACV , 2024.
+[18] Kevis-Kokitsi Maninis, Ilija Radosavovic, and Iasonas Kokkinos. Attentive single-tasking of
+multiple tasks. In CVPR , 2019.
+[19] Minesh Mathew, Dimosthenis Karatzas, and CV Jawahar. Docvqa: A dataset for vqa on
+document images. In WACV , 2021.
+[20] Yusuke Matsui, Kota Ito, Yuji Aramaki, Azuma Fujimoto, Toru Ogawa, Toshihiko Yamasaki,
+and Kiyoharu Aizawa. Sketch-based manga retrieval using manga109 dataset. MTAP , 2017.
+[21] Microsoft. Phi-4-multimodal-instruct. https://huggingface.co/microsoft/
+Phi-4-multimodal-instruct , 2025. Accessed: 2025-05-13.
+[22] Nibal Nayef, Yash Patel, Michal Busta, Pinaki Nath Chowdhury, Dimosthenis Karatzas, Wafa
+Khlif, Jiri Matas, Umapada Pal, Jean-Christophe Burie, Cheng-lin Liu, et al. Icdar2019 robust
+reading challenge on multi-lingual scene text detection and recognition —rrc-mlt-2019. In
+International Conference on Document Analysis and Recognition (ICDAR) , 2019.
+[23] Nhu-Van Nguyen, Christophe Rigaud, and Jean-Christophe Burie. Digital comics image
+indexing based on deep learning. J. Imaging , 2018.
+[24] Ragav Sachdeva, Gyungin Shin, and Andrew Zisserman. Tails tell tales: Chapter-wide manga
+transcriptions with character names. In ACCV , 2024.
+[25] Ragav Sachdeva and Andrew Zisserman. The manga whisperer: Automatically generating
+transcriptions for comics. In CVPR , 2024.
+[26] Ragav Sachdeva and Andrew Zisserman. From panels to prose: Generating literary narratives
+from comics. arXiv preprint arXiv:2503.23344 , 2025.
+[27] Amanpreet Singh, Vivek Natarajan, Meet Shah, Yu Jiang, Xinlei Chen, Dhruv Batra, Devi
+Parikh, and Marcus Rohrbach. Towards vqa models that can read. In CVPR , 2019.
+[28] Gürkan Soykan, Deniz Yuret, and Tevfik Metin Sezgin. A comprehensive gold standard and
+benchmark for comics text detection and recognition. In International Conference on Document
+Analysis and Recognition (ICDAR) , 2024.
+[29] Yipeng Sun, Zihan Ni, Chee-Kheng Chng, Yuliang Liu, Canjie Luo, Chun Chet Ng, Junyu Han,
+Errui Ding, Jingtuo Liu, Dimosthenis Karatzas, et al. Icdar 2019 competition on large-scale
+street view text with partial labeling-rrc-lsvt. In International Conference on Document Analysis
+and Recognition (ICDAR) , 2019.
+[30] Emanuele Vivoli, Marco Bertini, and Dimosthenis Karatzas. Comix: A comprehensive bench-
+mark for multi-task comic understanding. In NeurIPS , 2024.
+[31] Peng Wang, Shuai Bai, Sinan Tan, Shijie Wang, Zhihao Fan, Jinze Bai, Keqin Chen, Xuejing
+Liu, Jialin Wang, Wenbin Ge, et al. Qwen2-vl: Enhancing vision-language model’s perception
+of the world at any resolution. arXiv preprint arXiv:2409.12191 , 2024.
+11[32] Yixuan Wu, Yizhou Wang, Shixiang Tang, Wenhao Wu, Tong He, Wanli Ouyang, Jian Wu, and
+Philip Torr. Dettoolchain: A new prompting paradigm to unleash detection ability of mllm. In
+ECCV , 2024.
+[33] Maoyuan Ye, Jing Zhang, Shanshan Zhao, Juhua Liu, Tongliang Liu, Bo Du, and Dacheng Tao.
+Deepsolo: Let transformer decoder with explicit points solo for text spotting. In CVPR , 2023.
+[34] Tianhe Yu, Saurabh Kumar, Abhishek Gupta, Sergey Levine, Karol Hausman, and Chelsea Finn.
+Gradient surgery for multi-task learning. In NeurIPS , 2020.
+[35] Xiang Yue, Yueqi Song, Akari Asai, Seungone Kim, Jean de Dieu Nyandwi, Simran Khanuja,
+Anjali Kantharuban, Lintang Sutawika, Sathyanarayanan Ramamoorthy, and Graham Neubig.
+Pangea: A fully open multilingual multimodal llm for 39 languages. In ICLR , 2025.
+[36] Rui Zhang, Yongsheng Zhou, Qianyi Jiang, Qi Song, Nan Li, Kai Zhou, Lei Wang, Dong Wang,
+Minghui Liao, Mingkun Yang, et al. Icdar 2019 robust reading challenge on reading chinese text
+on signboard. In International Conference on Document Analysis and Recognition (ICDAR) ,
+2019.
+[37] Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang,
+Zi Lin, Zhuohan Li, Dacheng Li, Eric Xing, et al. Judging llm-as-a-judge with mt-bench and
+chatbot arena. In NeurIPS , 2024.
+12In this supplementary material, we provide additional details including (A) OCR evaluation in comics,
+(B) synthetic VQA examples, (C) setup details, and (D) additional results.
+A OCR Evaluation in Comics
+As described in §2, the evaluation of OCR has often been underexplored. Recent works such as
+Magi [ 25] and CoMix [ 30] focus on transcription generation, which inherently includes OCR as a
+core component. CoMix, in particular, proposes a dedicated metric called the Hybrid Dialog Score
+for evaluating transcription tasks. However, this transcription-focused evaluation differs from direct
+OCR evaluation, which aims to assess whether the model accurately reads the text. First, transcription
+involves multiple subtasks beyond text detection and recognition, such as speaker identification,
+reading order prediction, and others. The quality of the final transcription output depends on the
+combined performance of these components, making it difficult to isolate and measure the accuracy
+of text recognition alone.
+Second, transcription-based evaluations do not assess the positional accuracy of recognized text.
+Spatial information plays a crucial role in OCR, especially when the same text appears in multiple
+locations, as it helps identify which text instance is correct. For example, in Figure E(a), the word
+“わあー (waa-)” appears in four different locations, only one of which is correct. Without positional
+information, it becomes impossible to identify the correct instance. Moreover, spatial information
+is crucial for content understanding, as the interpretation of the same text can vary significantly
+depending on its location.
+A proper evaluation of OCR in the manga domain allows us to better understand how well current
+LMMs can recognize text within manga. As described in the results section (§6.1), models such as
+GPT-4o exhibit near-zero OCR performance, yet are still able to answer VQA questions that rely
+on textual information. This result suggests that LMMs may be partially recognizing some text in
+the image. Our visualization of GPT-4o’s OCR output reveals that the detected text regions almost
+always appear in nonsensical locations, yet the model can still read certain parts of the text in the
+image. We provide a detailed analysis of this observation in §D.2.
+B Synthetic VQA Examples
+For training our MangaLMM, we rely on synthetic VQAs generated by GPT-4o. In Figure A, we
+provide examples of these generated VQAs. As illustrated in the figure, GPT-4o is capable of
+producing accurate and diverse question–answer pairs.
+We emphasize once again that providing GPT with text annotations is crucial for generating such
+high-quality VQAs. Without these annotations, GPT tends to produce unreliable outputs (e.g.,
+misspelled extractions and factually incorrect questions) which significantly limit the performance of
+the MangaLMM trained on such data, as discussed in §6.4.
+Human Validation. To validate the reliability of the synthetic VQA data generated by GPT, we
+conducted a manual evaluation. We randomly sampled 100 question–answer pairs and asked four
+human evaluators to assign scores to each item on a three-level scale: 0 (incorrect), 0.5 (partially
+correct), and 1 (correct). The average score is 0.78, suggesting that approximately 80% of the
+synthetic VQAs are judged to be appropriate by humans.
+C Setup Details
+Evaluation Metric. We provide a detailed description of the normalized edit distance (NED, also
+referred to as 1-NED), which was used as the evaluation metric in MangaOCR. NED scales the
+standard edit distance to a range between 0 and 1, where higher values indicate better prediction. It is
+computed as follows:
+NED = 1 −NX
+i=1ED(GT i,Pred i)
+MaxLen(GT i,Pred i)(1)
+13Generated VQAsQ1) 森魚䛿何を言いながら家を出発しましたか？ What did Morio say as he left the house?A) 「学校見てくる」と言いながら家を出発しました。He said, "I'm going to check out the school," as he left the house.
+Q3) 森魚䛿学校まで䛾道で何に戸惑っていますか？  What confused Morio on his way to school?A) 同じ建物䜀かりで方向がわからなくなり、迷っています。As all the buildings looked the same, he lost his sense of direction and got confused.
+Q5) 母親が森魚䛾態度について言ったこと䛿何ですか？  What did Morio’s mother say about his attitude?A) 「もー誰に似たんだか」と言いました。She said, "Good grief, who did you take after?"Q2) 母親が森魚に指摘したこと䛿何ですか？  What did his mother point out to Morio?A) 「荷をほどきなさい、全然かたづかないじゃない䛾」と指摘しました。She pointed out, "Unpack your things, nothing's getting cleaned up this way!"
+Q4) 森魚が最後に道を確信したきっかけ䛿何ですか？  What helped Morio finally feel sure about the way?A) 引っ越し䛾車が来るとき䛾方向を思い出したことです。He remembered the direction from which the moving truck had come.Title: “AppareKappore”
+© Hiroshi Kanno"I'm going to check out the school”“Morio, unpack your things, nothing's getting cleaned up this way!”
+“I can't figure out the direction with all these identical buildings.”
+“Good grief, who did you take after?"“When we came here, the moving truck came from that direction…”(a) An example from the manga titled AppareKappore.
+Generated VQAsQ1) こ䛾物語䛾登場人物たち䛿、何に向けて準備をしていますか？What are the characters in this story preparing for?A) 明日䛾試験に向けて準備しています。They are preparing for tomorrow's exam.
+Q3) 主人公が外国語を勉強する䛾に納得できない理由䛿何ですか？Why does the main character feel it's unreasonable to study a foreign language?A) 日本人である自分が外国語を学ぶ必要がないと考えているからです。Because he believes that, as a Japanese person, there's no need for him to learn a foreign language.
+Q5) 最後に登場人物が連れてきた「秘密兵器」と䛿何ですか？What is the “secret weapon” that a character brings in at the end?A) 具体的に䛿明かされていませんが、主人公䛾試験に対応するために連れてきた存在です。It’s not specified, but it is someone brought to help the main character with the exam.Q2) 主人公らが試験に不安を抱えるきっかけ䛿何ですか？What caused the main characters to feel anxious about the exam?A) スマイリー若松が試験䛾前日に試験䛾ことを告げたためです。Smiley Wakamatsu told them about the exam the day before it was to take place.
+Q4) 主人公䛿「国際相互理解」䛾ためにどんな行動を取ることを提案しましたか？What action did the main character suggest for promoting “international mutual understanding”?A) 外国人䛾心を理解するために外国産ゲームをすることを提案しました。He suggested playing foreign-made video games to understand the hearts of foreigners.Title: “Garakutaya Manta”
+“The test is tomorrow!”
+Damn Smiley Wakamatsu, bringing that up just one day before...“What’s the point of a Japanese person like me learning a foreign language!”“Ok, let’s play foreign-made video games to understand the hearts of foreigners!!
+“I've brought out my secret weapon for tomorrow's exam!”© Tatsuki Nouda
+(b) An example from the manga titled GarakutayaManta.
+Figure A: Examples of synthetic VQA generation results. The most relevant part of the image for
+each question-answer pair is highlighted and translated in the corresponding color.
+Here, GTiandPred idenote the i-th ground truth and the model’s prediction, respectively. ED(·)
+calculates the edit distance between two strings, and MaxLen( ·)returns the longer of the two string
+lengths. Nindicates the total number of text instances.
+C.1 Prompt
+Prompt for Synthetic VQA Generation. For creating synthetic QA pairs for training, we provide
+GPT-4o with the prompt in Table A along with the corresponding image.
+Prompt for Training and Evaluation. For training and inference, we use task-specific prompts.
+For the MangaOCR benchmark, we provide the prompt “Please perform OCR on this image and
+output the recognized Japanese text along with its position (grounding)” along with the input image.
+During training, the corresponding OCR annotations are included as supervision. When running
+OCR inference with GPT-4o, Gemini 2.5, and Phi-4, the outputs varied in format unless explicitly
+specified. Therefore, we use the prompt in Table B to align their outputs with the OCR format used
+in the training data of MangaOCR.
+14Table A: Prompt for the synthetic VQA generation.
+Original Japanese
+与えられる 画像と、そこに 書かれている 文字情報を用いて、
+質問: [質問内容]
+回答: [回答内容]
+質問: [質問内容]
+回答: [回答内容]
+...
+の形式でVQA問題を5問作ってください。 解釈が曖昧になる主観的な問題ではな
+く、書かれている 事実に基づいて客観的に判断できる問題を作ってください。ま
+たOCRのような 文字の読み取り問題にはせず、 内容理解を問う問題を作ってくだ
+さい。
+画像内の文字:
+{OCR ANNOTATION HERE}
+Translated
+Using the given image and the textual information written in it, create 5 VQA questions in
+the following format:
+Question: [Question content]
+Answer: [Answer content]
+Question: [Question content]
+Answer: [Answer content]
+...
+Avoid subjective questions that could lead to ambiguous interpretations, and instead create
+questions that can be objectively answered based on the facts presented in the image. Also,
+do not include OCR-style text recognition questions; instead, create questions that test
+understanding of the image content.
+Text in the image:
+{OCR ANNOTATION HERE}
+For the MangaVQA benchmark, we use the prompt “ あなたは 日本語の漫画に関する質問に答え
+るAIです。与えられた 画像に基づいて質問に答えてください。 (You are an AI that answers
+questions about Japanese manga. Please answer the given question based on the provided image.)”
+together with the input image and a question. The ground-truth answer is given only during training.
+For MangaVQA evaluation, the prompt in Table C is used for LLM-as-a-judge.
+15Table B: OCR inference prompt for GPT-4o, Gemini 2.5, and Phi-4.
+Please perform OCR on this image and output the recognized Japanese text along with its
+position (grounding).
+The output should be a JSON list. Each item in the list must follow the structure
+below:
+\n{"bbox_2d": [x1, y1, x2, y2], "text_content": "..."}
+The field ‘"bbox_2d"’ must be a 2D bounding box that tightly encloses the text.
+Use the format ‘[x1, y1, x2, y2]’, where:
+- ‘x1’, ‘y1’ are the coordinates of the top-left corner of the bounding box, and
+- ‘x2’, ‘y2’ are the coordinates of the bottom-right corner.
+Here is an example of the desired format:
+\n{"bbox_2d": [1490, 138, 1546, 201], "text_content": " 春休みです -"}
+Please follow this format strictly.
+Table C: Prompt for MangaVQA evaluation.
+System message
+You are an evaluator. Your task is to rate how appropriate a model’s response is to a question
+about a manga image. For each case, you will be given a question (based on a manga image),
+a human-written answer, and the model’s response. The image is not shown, but the question
+and answer are based on it. Please evaluate as if the image were available.
+Please rate how well the model’s response answers the question, considering the intended
+image context and the human answer as a reference, using a scale from 1 to 10:
+1—Completely inappropriate or unrelated to the question or image context.
+2—Mostly unrelated with major misunderstandings or incorrect information.
+3—Slightly relevant, but largely incorrect or unhelpful.
+4—Somewhat relevant, but contains significant errors or omissions.
+5—Partially correct with noticeable inaccuracies, vagueness, or missing key points.
+6—Generally okay, but missing core points or includes some incorrect interpretations.
+7—Mostly correct and relevant, with only minor issues or small omissions.
+8—Almost entirely accurate with only slight room for improvement.
+9—Very appropriate, accurate, and well-aligned with the question and image context.
+10—Perfectly appropriate, accurate, and fully answers the question as if the image were
+visible.
+Only return a single number (1–10). Do not include any explanations, justifications, or
+comments.
+User prompt
+Input:
+"question": {question},
+"human-written answer": {answer},
+"model’s response": {generated_answer},
+Your score:
+16漫画の内容から、2人を待ちくたびれているのは「いかげん」と言っています。...Based on the manga’s content, it says that “Ikagen” is the one who is tired of waiting for the two...
+Question2人を待ちくたびれているのは誰だと言っていますか？Who is said to be tired of waiting for the two of them?GroundTruthサタン様Lord Satan
+Original Modelサタン様Lord SatanTrainedMangaLMMグルメのお嬢さんは店の採点について何と言っていますか？What does the young gourmet lady say about the restaurant’s rating?まだ食べていないからわからないと言っています。She says she doesn’t know yet because she hasn’t eaten there.
+グルメのお嬢さんは、「この店の採点は？」と尋ねています。The young gourmet lady asks, “What’s this restaurant’s rating?”「まだ食べてないからわかりません!」と言っています。She says, “I don’t know yet—I haven’t eaten here!右側のページにおいて、男の子が怒っているのはどうしてですか？On the right-hand page, why is the boy angry?成瀬川が突然勝手に電話を切ったから。Because Narusegawa suddenly hung up the phone without warning.
+右側のページでは、男の子が怒っている理由は、彼が何かを誤解している...On the right-hand page, the boy may be angry because he has misunderstood something, …女の子が「思い出の女の子」について言及したため。Because the girl mentioned the “girl from his memories”.© Ken Akamatsu © Riku Kurita © Sakumi Hanada ScoreScore10324102Exact ExtractionMultimodal UnderstandingImage UnderstandingFigure B: Category-wise analysis on MangaVQA. The regions in the image relevant to the question
+or models’ answer are highlighted with boxes in corresponding colors.
+D Additional Results
+We provide additional analysis and experimental results on our benchmarks, MangaVQA and Man-
+gaOCR.
+D.1 More Analysis of MangaVQA
+12345678910
+GPT-4o Score12345678910Human ScoreMean: 6.94 (GPT) / 6.72 (Human)
+Pearson Correlation: 0.94
+Figure C: Comparison between GPT-
+Judge and Human Evaluation. Darker
+points indicate a higher concentration of
+points.Comparison with Human Evaluation. To validate the
+reliability and consistency of the GPT-judge employed in
+the MangaVQA evaluation, we conducted a comparative
+analysis between its evaluation scores and those provided
+by human annotators. Specifically, we randomly sampled
+100 items from the benchmark dataset and asked two hu-
+man evaluators to assign scores to each item, following
+the same evaluation prompt used for the GPT-judge.
+The results of this comparison are illustrated in Figure C.
+We observe a small absolute difference in average scores
+(∆ = 0 .22). Additionally, there is a strong positive corre-
+lation between the scores assigned by the GPT-judge and
+the human average ( r= 0.94). These findings suggest
+that GPT-based evaluation can serve as a practical and con-
+sistent alternative to human judgment in our MangaVQA
+benchmark.
+Table D: Effect of OCR Anno-
+tation on VQA Generation.
+OCR Annot. LLM (/10.0)
+None 5.44
+Text 6.57
+Text + Pos. 6.17More Analysis of OCR Annotation when Generating VQA
+Data. As described in §6.4, OCR annotation plays a key role
+in generating high-quality QA pairs with GPT-4o. Here, we provide
+a more detailed analysis of the effect of OCR annotation. OCR anno-
+tation consists of both bounding box positions and their text content.
+We compare the synthetic VQA data generated by GPT-4o using
+only the text content with those generated using both bounding box
+positions and text content. Table D presents the results. Interestingly,
+our experiments show that using only the text content is more effective than including both text and
+positional information. Although our current approach did not benefit from positional information,
+17leveraging it remains a promising direction for future work. Therefore, in our experiments, we use
+synthetic VQA examples generated using only the OCR text content.
+Qualitative Analysis of MangaVQA. Figure B presents category-wise examples on MangaVQA.
+For the categories on the left (Exact Extraction) and in the center (Multimodal Understanding), the
+base Qwen 2.5-VL model often fails to locate the correct region and consequently extracts the wrong
+words. However, these issues are significantly improved after training.
+On the other hand, for the category on the right (Image Understanding), which does not rely on
+textual cues, MangaLMM tends to over-prioritise text extraction, leading to incorrect answers even
+after training.
+D.2 More Analysis of MangaOCR
+We present a qualitative analysis of MangaOCR results from GPT-4o and MangaLMM. As described
+in §6, text segments that appear more than ten times are considered noise and excluded from the
+results. Therefore, such repeated segments do not appear in the visualizations.
+GPT-4o’s Results on MangaOCR. Since previous studies have rarely conducted in-depth qualitative
+analysis of GPT-4o’s OCR results, it is difficult to assess the model’s actual performance on manga
+datasets. We address this gap by providing a detailed qualitative analysis of GPT-4o’s MangaOCR
+outputs. Figure D shows GPT-4o’s results on MangaOCR. These examples demonstrate the low
+zero-shot OCR performance of GPT-4o in the manga domain. The detected text regions almost
+always appear in incorrect or nonsensical locations, although the model can still read certain parts
+of the text within the image. Because the predicted text positions are inaccurate, the outputs are
+considered entirely incorrect under OCR evaluation criteria. While some predicted text fragments
+correspond to actual text in the image, there are many cases —such as in Figure D(b) —where most of
+the text is not recognized at all. Even when text is recognized, it is often incorrect. While GPT-4o
+fails to correctly detect and recognize most of the text, it can still recognize partial text content, which
+may allow GPT-4o to answer some text-based VQA questions.
+Interestingly, when performing OCR inference with GPT-4o, the model sometimes generates dis-
+claimers such as: “The bounding box coordinates and text content are illustrative and may not perfectly
+match the actual image. For precise OCR and bounding box extraction, specialized OCR tools like
+Tesseract or Google Vision API should be used.” This suggests that GPT-4o itself acknowledges its
+limitations in precise OCR and recommends using dedicated OCR tools.
+MangaLMM’s Results on MangaOCR. Figure E shows MangaLMM’s results on MangaOCR.
+As seen in the figure, most predictions appear correct, reflecting the model’s strong OCR capability
+across a wide range of text sizes, from large to small. The red regions indicate false negatives.
+Occasionally, even text that appears large and seemingly easy to detect is missed. According to our
+manual inspection, such cases are mostly onomatopoeia. This suggests that the model struggles more
+with onomatopoeic expressions, which are often written in non-standard fonts, sizes, or orientations,
+compared to regular text.
+18(a) An example from the manga titled ShimatteIkouze.
+(b) An example from the manga titled SaladDays.
+Figure D: GPT-4o’s Results on MangaOCR. The green boxes indicate the detected text regions.
+The red text, shown near each green box, represents the predicted text fragment corresponding to
+that detected region. Each red bounding box is manually drawn to indicate where the predicted
+text fragment appears in the image. Red lines connect each predicted fragment to its corresponding
+detected position. These detected positions are almost always incorrect.
+19(a) An example from the manga titled ShimatteIkouze.
+(b) An example from the manga titled SaladDays.
+Figure E: MangaLMM’s Results on MangaOCR. The green boxes indicate the detected text regions.
+The text shown near each green box is the predicted text for that detected region. The green text
+represents correctly predicted text, while the red text indicates incorrectly predicted text. Missing
+characters are marked with small blue squares. The red boxes show false negatives —text regions that
+should be detected but are missed. Most OCR results are correct.
+20

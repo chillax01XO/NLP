@@ -1,0 +1,603 @@
+arXiv:2505.20948v1  [cs.AI]  27 May 2025Controllable Logical Hypothesis Generation for
+Abductive Reasoning in Knowledge Graphs
+Yisen Gao⋄†, Jiaxin Bai⋄, Tianshi Zheng⋄, Qingyun Sun‡, Ziwei Zhang‡, Jianxin Li‡
+Yangqiu Song⋄, Xingcheng Fu⊤
+Department of Computer Science and Engineering, HKUST, Hong Kong, China⋄
+Institute of Artificial Intelligence, Beihang University, Beijing, China†
+School of Computer Science and Engineering, Beihang University, China‡
+Key Lab of Education Blockchain and Intelligent Technology, Guangxi Normal University, China⊤
+{yisengao, sunqy, zwzhang, lijx}@buaa.edu.cn {fuxc}@gxnu.edu.cn
+{jbai,tzhengad,yqsong}@cse.ust.hk
+Abstract
+Abductive reasoning in knowledge graphs aims to generate plausible logical hy-
+potheses from observed entities, with broad applications in areas such as clinical
+diagnosis and scientific discovery. However, due to a lack of controllability, a single
+observation may yield numerous plausible but redundant or irrelevant hypotheses
+on large-scale knowledge graphs. To address this limitation, we introduce the task
+of controllable hypothesis generation to improve the practical utility of abductive
+reasoning. This task faces two key challenges when controlling for generating long
+and complex logical hypotheses: hypothesis space collapse and hypothesis oversen-
+sitivity. To address these challenges, we propose CtrlHGen , aControllable logcial
+Hypothesis Generation framework for abductive reasoning over knowledge graphs,
+trained in a two-stage paradigm including supervised learning and subsequent
+reinforcement learning. To mitigate hypothesis space collapse, we design a dataset
+augmentation strategy based on sub-logical decomposition, enabling the model to
+learn complex logical structures by leveraging semantic patterns in simpler compo-
+nents. To address hypothesis oversensitivity, we incorporate smoothed semantic
+rewards including Dice and Overlap scores, and introduce a condition-adherence
+reward to guide the generation toward user-specified control constraints. Extensive
+experiments on three benchmark datasets demonstrate that our model not only
+better adheres to control conditions but also achieves superior semantic similarity
+performance compared to baselines.
+1 Introduction
+Abduction is widely recognized as one of the three major types of reasoning in philosophy [ 1].
+Specifically, abductive reasoning [ 1] is a form of logical inference that seeks the best or most
+plausible hypothesis to explain an observed phenomenon and it plays a vital role across various
+fields [ 2]. For example, it serves as a critical tool for hypothesizing causal links between symptoms
+and underlying pathologies in clinical diagnosis [ 3,4]. Similarly, abductive methods localize system
+faults by interpreting anomalous signal patterns in anomaly detection [ 5,6]. Its power also extends
+to scientific discovery [ 7,8,9,10], including the deduction of unknown celestial bodies from
+gravitational perturbations in orbital trajectories [11].
+On the other hand, effective abductive reasoning requires high-quality interconnected information as
+premises. Knowledge graphs, whether general or domain-specific, provide an ideal structure for these
+Preprint. Under review.(a) Control Semantic Domain
+ (b) Control Structure Complexity
+Figure 1: Examples of Controllability in Abductive Reasoning
+premises, supporting robust abductive reasoning processes. Abductive reasoning in knowledge graphs
+aims to generate complex logical hypotheses that best explain a given set of observed entities, while
+maintaining consistency with the existing knowledge base. This process leverages the rich domain
+knowledge, thereby improving both the precision and reliability of the inference. AbductiveKGR [ 12]
+is the first work to realize abductive reasoning over knowledge graphs, training a hypothesis generation
+model using a supervised learning–reinforcement learning paradigm.
+However, as knowledge graphs often contain millions of facts, an observation can lead to numerous
+diverse yet plausible hypotheses, most of which may be irrelevant to the specific concerns. To address
+this challenge, we are motivated to introduce controlling mechanisms in the hypothesis generation
+process that focus on two critical aspects:
+Controlling semantic content enables aspect-specific reasoning. We prioritize semantic control
+to narrow vast hypothesis spaces to relevant aspects, essential for specialized fields where aspect-
+specific insights drive decision-making. As shown in Fig. 1a, we want to explain the observation
+involving three diseases:{Systemic Lupus Erythematosus, Antiphospholipid Syndrome, and Sjögren’s
+Syndrome}. Directing attention to specific aspects—such as pathology, treatment, or affected
+populations—yields hypotheses that are precisely aligned with each aspect. From the pathology
+aspect, these diseases produce autoantibodies and are both chronic and autoimmune. From the
+treatment aspect, these autoimmune diseases can be treated with hydroxychloroquine. Finally, from
+the susceptibility aspect, these diseases are more likely to occur in women of reproductive age who
+carry the HLA-DR3 susceptible allele. Although these hypotheses are all plausible, their usefulness
+varies when people seek explanations for different scenarios.
+Controlling structural complexity adjusts the level of granularity. We focus on complexity control to
+address varying information needs across different reasoning scenarios and align with users’ cognitive
+preferences for adjustable information density. In Fig. 1b, for an observation composed of three
+NBA players, increasing the complexity of the hypothesis structure enables the model to capture
+richer shared experiences or achievements among them. By adjusting the structural complexity,
+users can flexibly decide how much information they want to include in the generated hypotheses.
+Unfortunately, prior work [ 12] has largely overlooked controllable generation, resulting in hypotheses
+that are redundant or lack meaningful relevance.
+Motivated by these, we introduce the task of controllable abductive reasoning, aiming at controllable
+generation of hypothesis, which leads to better leverage the practical value of abductive reasoning in
+knowledge graphs. However, when implementing semantic and structural controls on complex logical
+hypotheses, we face two critical challenges: (i) Hypothesis Space Collapse: As illustrated in Fig. 2a,
+the number of plausible hypotheses drops sharply as their length increases. This steep decline severely
+constrains our ability to apply structural complexity controls, as the available hypothesis space for
+longer, more complex structures becomes extremely limited. When attempting to simultaneously
+satisfy semantic content controls or structural complexity requirements, the intersection of valid
+hypotheses may become vanishingly small. (ii) Hypothesis Oversensitivity: As shown in Figure 2b,
+2(a) Hypothesis Space Collapse
+ (b) Hypothesis Oversensitivity
+Figure 2: (a) Hypothesis quality (measured in Jaccard) and space size across three logic lengths: short
+(one predicate), medium (two predicates), and long (three predicates). Valid candidates represent
+average reference hypotheses per observation. Note the dramatic collapse of hypothesis space as
+complexity increases. (b) Hypothesis oversensitivity example: Minor errors cause significant Jaccard
+score drops, creating tension between control adherence and semantic accuracy.
+when generating long logical hypotheses under control conditions, even small errors can result in
+significant differences in the conclusions. Previous work [ 12] used the Jaccard index as a reward
+in reinforcement learning, enforcing a perfect match between the hypothesis conclusion and the
+observation. This strict requirement may cause the model to deviate from the control conditions in
+order to maintain reward stability.
+To tackle these challenges, we propose a Controllable logcial Hypothesis Generation method
+(CtrlHGen ) for abductive reasoning in knowledge graphs. To address the problem of hypothesis
+space collapse, we introduce a dataset augmentation strategy based on sub-logical decomposition.
+By leveraging the semantic similarity of simpler sub-logics derived from the decomposition of
+complex hypotheses, this approach enables the model to understand long logical structures, which
+are composed of these smaller components. The hypothesis generator is then trained using a combi-
+nation of supervised fine-tuning and reinforcement learning. To address the problem of hypothesis
+oversensitivity, we refine the semantic reward function by incorporating the Dice coefficient to
+smooth out minor discrepancies between the hypothesis and the target. Additionally, we introduce
+a condition-adherence reward to encourage the generation of hypotheses that adhere to the control
+constraints during exploration. Our main contributions are as follows:
+•We are the first to introduce the task of controllable abductive reasoning, enabling abductive
+reasoning in knowledge graphs to better satisfy practical needs by controlling semantic content and
+structural complexity.
+•We propose an observation-hypothesis pair augmentation strategy via sub-logical decomposition to
+address the challenge of hypothesis space collapse when generating complex logical structures,
+significantly enhancing the quality of controllable hypotheses.
+•To mitigate hypothesis oversensitivity, we refine the semantic reward function by incorporating
+Dice and Overlap coefficients to accommodate minor discrepancies between hypotheses and
+targets, while introducing a condition-adherence reward to ensure better compliance with control
+constraints, leading to more stable and accurate learning.
+•Extensive experiments on three datasets demonstrate that our model not only adheres more effec-
+tively to control signals but also achieves superior semantic similarity performance compared to
+the baseline across multiple evaluation metrics.
+2 Related Work
+Knowledge Graph Reasoning . Deductive reasoning focuses on answering complex logical queries
+by improving query and answer embeddings [ 13,14,15,16,17,18]. Inductive reasoning, often
+framed as rule mining, ranges from efficient symbolic methods like AMIE [ 19] to embedding-
+based approaches such as RuLES [20] and RLogic [21], though traditional search-based techniques
+face scalability challenges. Abductive reasoning was introduced by AbductiveKGR [ 12] using
+Transformer-based hypothesis generation, with follow-up work [ 22] highlighting its future potential.
+3Figure 3: An overview of our controllable abductive reasoning framework. The process consists of
+three main steps: (1) Hypothesis-Observation pair construction through sub-logic decomposition
+to expand the hypothesis space, (2) Supervised training of the generative model using augmented
+hypotheses, and (3) Reinforcement tuning with dual rewards for semantic alignment and condition
+adherence to balance hypothesis accuracy with control signal compliance.
+Abductive Reasoning . In natural language inference, α-NLI [ 23] introduced abductive reasoning to
+commonsense reasoning, where plausible explanations are inferred from observations. Subsequent
+works proposed various techniques to enhance this capability [ 24,25,26], including extensions
+to uncommon scenarios focusing on rare but logical explanations [ 27]. Unlike real-world data in
+commonsense reasoning, benchmarks like ProofWriter [ 28] evaluate formal abductive reasoning
+within semi-structured texts with explicit logical relationships. Recent studies have explored LLMs
+in more challenging open-world reasoning contexts [ 29,30,31] and abstract reasoning tasks [ 32,33].
+Meanwhile, in the neuro-symbolic domain, Abductive Learning (ABL) [ 34] attempts to integrate
+machine learning and logical reasoning in a balanced and mutually supportive manner. Recent
+research in this area, exemplified by systems such as ARLC [ 35] and ABL-Refl [ 36], focuses on
+enhancing this integration by introducing novel techniques to improve context-awareness, error
+correction, generalization, and overall reasoning accuracy and efficiency.
+3 Method
+In this section, we elaborate the proposed CtrlHGen, a controllable hypothesis generation method for
+abductive reasoning in knowledge graphs. The framework of CtrlHGen is shown in Fig. 3.
+3.1 Problem Definition
+We define a knowledge graph as G= (V, R), where Vis the set of entities and Ris the set of binary
+relations. A triple (u, r, v )exists in Gifr(u, v) =true. Following the open-world assumption [ 37],
+only the observed graph Gis available during training, with missing triples treated as unknown rather
+than false. The full graph ¯Gremains hidden, and G⊆¯G.
+The core concepts of abductive reasoning consist of observation and hypothesis. Here, an observation
+Oin knowledge graph Gis defined as a set of entities O={o1, o2, . . . , o n}, where oi∈V,∀i∈
+{1, . . . , n }. A logical hypothesis His defined as a query in the form of first-order logic on a
+knowledge graph G, including existential quantifiers( And(∧), Or(∨), Not (¬)). The hypothesis can
+also be written in disjunctive normal form:
+H(V?) =∃V1, . . . , V k:e1∨ ··· ∨ en,
+ei=ri1∧ ··· ∧ rimi,(1)
+4where {V1, . . . , V k}denotes the subset of V. Each rijis defined as either rij=r(u, v)orrij=
+¬r(u, v), where uandvare either fixed entities from the set {V1, . . . , V k}, or variable vertices V?,
+which could be any entity on the graph G.
+The conclusion of the hypothesis [H]Gon a graph Gis the set of the variable entities V?for which H
+holds true on G. Specifically, it can be formulated as:
+[H]G={V?∈G|H(V?) = true }. (2)
+Definition 3.1 (Controllable Abductive Reasoning in Knowledge Graph) .Given a knowledge graph
+G, an observation O, and a control condition C, the goal of controllable abductive reasoning is to
+find a hypothesis Hsatisfying:
+1.The hypothesis His the most plausible explanation for the observation O. In other words, the
+conclusion [H]Gclosely matches the observation O.
+2.Hsatisfies the constraints specified by the control condition C.
+3.2 Observation-Hypothesis Pairs Construction
+Sampling . We randomly sample observation-hypothesis pairs from the knowledge graph by con-
+structing hypotheses based on predefined logical patterns. Each logical pattern is assigned an equal
+number of hypotheses to ensure diversity, and the query results(conclusion) of hypotheses on the
+graph are taken as the corresponding observations. Finally, both hypotheses and observations are
+converted into input sequences suitable for the generative model.
+Augmentation by sub-logic decomposition . To address the challenge of hypothesis space col-
+lapse in complex logical patterns, we propose a dataset augmentation method based on sub-logic
+decomposition. Specifically, given a hypothesis–observation pair (H, O)under a complex logical
+pattern P, we recursively decompose the hypothesis into sub-hypotheses Hsubaccording to identifi-
+able sub-logical patterns Psub. Corresponding sub-observations Osubare then derived by executing
+these sub-hypotheses on the knowledge graph G. This process effectively generates additional
+hypothesis–observation pairs and can be formally described as:
+{(Hi
+sub, Oi
+sub)}n
+i=1=
+(f(Pi
+sub, H),[f(Pi
+sub, H)]G)Pi
+sub⊆P	
+, (3)
+where f(Pi
+sub, H)denotes the sub-hypothesis generated based on the sub-pattern Pi
+suband the origin
+hypothesis H, and [f(Pi
+sub, H)]Gcomputes the corresponding sub-observation by querying the
+knowledge graph to get the conclusion of the sub-hypothesis.
+Because each sub-hypothesis is a subset of the original, they are closely related both structurally
+and semantically. This strong alignment enables the model to progressively learn complex logical
+patterns by building on simpler, related sub-patterns. We have reported more details and examples for
+the observation-hypothesis pairs construction process in Appendix A.
+3.3 Supervised Training of Controllable Hypothesis Generation
+To enable controllable generation of logical hypotheses, we train a conditional generative model to
+generate hypothesis sequences guided by a given observation and control condition. Specifically,
+given an observation sequence O={o1, . . . , o m}, a target hypothesis sequence H={h1, . . . , h n},
+and a control condition C, the generative model is optimized using an autoregressive loss:
+LAR=−logpθ(H|O, C) =−Xn
+i=1logpθ(hi|h1, . . . , h i−1, O, C ), (4)
+where θdenotes the generative model, which we implement using a standard Transformer-based
+decoder-only architecture.
+The training process consists of two stages. In the first stage, the model is trained under an uncondi-
+tional setting, where the input only consists of observation tokens. This allows the model to acquire
+a general capability for hypothesis generation. In the second stage, the model is fine-tuned under
+different control conditions respectively. The input is formed by concatenating observation tokens
+with control condition tokens, guiding the model to generate hypotheses that satisfy the constraints.
+The control conditions Care designed from two different perspectives to guide hypothesis generation:
+5•Semantic Focus : We randomly sample a specific entity or relation from the target hypothesis as a
+control condition. This guides the model to generate hypotheses grounded in a specific semantic
+region of the knowledge graph. The control condition is directly represented by the token of the
+selected entity or relation. Formally, C∈ {Te}orC∈ {Tr}.TeandTrrepresents the token set
+of entity and relation respectively.
+•Structural Constraint : We apply constraints based on the logic structure of the hypothesis.
+Specifically, we implement three types of structural control: (1) strictly enforcing a predefined
+logical pattern, where each logical pattern is represented in Lisp-like language with operator
+tokens following previous work in KG reasoning [ 38,12]. (2) constraining the number of entities
+involved, encoded using a special token [ ne] that indicates hypotheses with exactly nentities.
+Formally, C∈ {[ne]}, where nis an Integer. (3) constraining the number of relations used in
+the generated hypothesis, encoded using a token [ nr], where [ nr] denotes hypotheses containing
+exactly nrelations. Formally, C∈ {[nr]}, where nis an Integer.
+3.4 Reinforcement Learning
+To improve the generalization ability on unseen knowledge graphs and better adhere to the specified
+control conditions, we further fine-tune the generative model using reinforcement learning. The
+reward function is constructed from two perspectives: semantic alignment and condition adherence.
+Semantic Alignment : This reward assesses the semantic consistency between the generated hypothe-
+sis conclusion [H]Gand the corresponding observation O. We adopt the Jaccard similarity coefficient
+as the primary reward due to its strict evaluation of set-level agreement. However, the high sensitivity
+of hypotheses can lead to sharp reward fluctuations in response to minor errors. To mitigate this,
+we integrate two supplementary metrics:the Dice similarity coefficient and the Overlap similarity
+coefficient, which provide smoother gradients and greater tolerance to slight mismatches. The final
+semantic reward Rsemis computed as a weighted combination of these metrics, defined as:
+Rsem([H]G, O) =λ1·Jaccard ([H]G, O) +λ2·Dice([H]G, O) +λ3·Overlap ([H]G, O)
+=λ1·|[H]G∩O|
+|[H]G∪O|+λ2·2|[H]G∩O|
+|[H]G|+|O|+λ3·|[H]G∩O|
+min(|[H]G|,|O|),(5)
+where λ1,λ2, and λ3are hyperparameters. Gdenotes the observable knowledge graph during
+training, which serves as a reliable and leakage-free proxy for evaluating abductive reasoning quality.
+Condition Adherence : This reward encourages the model to generate hypotheses that satisfy the
+given control condition C. We formulate it as a binary-valued function: if the generated hypothesis
+Hsatisfies the condition C, the reward is 1; otherwise, it is 0. The final adherence performance is
+evaluated by computing the proportion of generated hypotheses that meet the condition. Formally,
+the reward function is defined as:
+Rcond(H, C) =1,ifHsatisfies C,
+0,otherwise .(6)
+Jointly capturing condition adherence and semantic alignment, the overall reward function ˆRis
+formulated as:
+ˆR(H, O, C, G ) =α·Rsem([H]G, O) + (1 −α)·Rcond(H, C), (7)
+where α∈[0,1]is a hyperparameter that balances the contributions of semantic alignment and
+condition adherence.
+Since abductive reasoning often involves generating multiple plausible hypotheses rather than a single
+answer, it is important to ensure overall hypothesis quality. To achieve this, we use Group Relative
+Policy Optimization (GRPO) [39], which promotes consistent improvement across a set of sampled
+hypotheses per observation, instead of optimizing individual outputs. Specifically, GRPO updates the
+model πθby maximizing the expected reward over a group of hypotheses ˆH=H1, . . . , H ksampled
+from the same observation Oand control condition C. The objective is:
+J(θ) =EO,{Hi}∼πθold(H|O,C )[1
+kkX
+i=11
+|Hi||Hi|X
+t=1πθ(hi,t|O, C, h i,<t)
+πθold(hi,t|O, C, h i,<t)ˆR′
+i−βDKL[πθ||πref]
+],
+(8)
+6where kis the number of sampled hypotheses per observation. The normalized reward ˆR′
+iis obtained
+by applying intra-group normalization over {ˆR1, . . . , ˆRk}. A KL term constrains the policy πθfrom
+drifting too far from the reference model πref, with βcontrolling its strength. Gradient clipping is
+also used to stabilize training.
+4 Experiment
+4.1 Experiment Settings
+Dataset . We conduct experiments on three widely used knowledge graph datasets: DBpedia50 [ 40],
+WN18RR [ 41], and FB15k-237 [ 42]. Following [ 12], each dataset is split into training, validation,
+and test sets with an 8:1:1 ratio. Under the open-world assumption, we incrementally build Gtrain,
+Gvalid, andGtest, where each graph includes all previous edges. Additional dataset details are provided
+in Appendix B.
+Observation-Hypothesis Pair . Following prior KG reasoning work [ 12], we adopt the 13 predefined
+logical patterns in Fig. 4 for hypothesis sampling. Each observation contains no more than 32 entities.
+To evaluate generalization, the validation and test sets include entities not seen during training, with
+the test set covering more unseen entities. For data augmentation, we decompose five complex logical
+patterns (up, 3in, pni, pin, inp). Detailed sampling statistics are provided in Appendix B.
+Figure 4: Thirteen predefined logical types.Evaluation Metrics . The quality of generated
+hypotheses is evaluated in terms of semantic
+similarity and condition adherence. For seman-
+tic similarity, we use Jaccard, Dice and Overlap
+index, with Gtestused to compute [H]Gtestduring
+testing. For condition adherence, we regard it as
+a binary classification problem and calculate Ac-
+curacy. In addition, Smatch score is also used to
+quantify the structural similarity corresponding
+to the generated hypothesis Hand the reference
+hypothesis Href. It can measure how similar the
+nodes, edges and their labels are by representing
+the hypothesis as a graph. It should be noted
+that Smatch is only a reference metric, as the generated hypotheses do not need to be the same as the
+reference hypotheses. More information about Smatch is reported in Appendix B.
+Implementation Details . We adopt a GPT-2 [ 43] architecture for the hypothesis generation model
+and use the AdamW optimizer. All experiments are conducted on 4 Nvidia A6000 48GB GPUs.
+Additional hyperparameter settings and a discussion on why LLMs are not employed are provided in
+Appendix B1.
+4.2 Experiment Results and Analysis
+We evaluated the quality and controllability of generated hypotheses on three datasets under five condi-
+tions: pattern ,relation-number ,entity-number ,specific-entity , and specific-relation (see Section 3.3).
+We also report results without any control condition. Detailed results are shown in Table 1.
+Compared to the unconditional setting, the model shows notable improvements in semantic quality
+under conditional constraints, likely due to the additional guidance that conditions provide. Across
+all condition types, the model consistently achieves high condition-adherence accuracy, with most
+values exceeding 80%. Structural constraints generally result in better semantic similarity than
+semantic-focused conditions, possibly because they help eliminate more irrelevant hypotheses.
+Among structural conditions, using a fixed format yields the best performance in both semantic and
+adherence metrics, as it simultaneously constrains entity count, relation count, and logical pattern.
+While both specific-entity and specific-relation significantly enhance semantic similarity to a similar
+extent, the model shows a clear preference in condition adherence toward specific-relation.
+1The code is available at https://github.com/HKUST-KnowComp/CtrlHGen .
+7Table 1: The results of controllable abductive reasoning under different conditions. (Result: average
+score±standard deviation. Bold : best; Underline : runner-up. —: cannot be evaluated.)
+Dataset ConditionSemantic Similarity Condition Adherence
+Jaccard Dice Overlap Accuracy Smatch
+FB15k-237uncondition 61.4±0.3369.3±0.3182.3±0.33 — 61.4 ±0.21
+pattern 65.5±0.3373.0±0.3083.9±0.27 98.9±0.10 82.3±0.10
+relation-number 65.1±0.3372.7±0.3183.5±0.29 99.4±0.14 82.4±0.20
+entity-number 63.1±0.3371.5±0.3082.7±0.28 86.3±0.02 65.7±0.10
+specific-entity 64.3±0.3571.1±0.3382.4±0.31 98.9±0.10 71.2±0.21
+specific-relation 63.3±0.3471.4±0.3282.6±0.30 99.5±0.06 64.8±0.21
+WN18RRuncondition 72.6±0.3574.2±0.3385.2±0.31 — 56.4 ±0.20
+pattern 77.0±0.3480.8±0.3186.8±0.28 93.5±0.24 83.3±0.15
+relation-number 74.0±0.3477.4±0.3186.3±0.28 95.3±0.25 78.9±0.20
+entity-number 73.2±0.3777.9±0.3587.2±0.33 85.2±0.28 65.1±0.18
+specific-entity 73.6±0.3875.6±0.3786.2±0.36 89.0±0.31 65.2±0.21
+specific-relation 73.0±0.3575.2±0.3385.7±0.30 96.1±0.19 60.8±0.21
+DBpedia50uncondition 64.3±0.3566.2±0.3379.5±0.30 — 51.0 ±0.24
+pattern 73.8±0.3776.6±0.3686.8±0.26 88.4±0.36 79.2±0.20
+relation-number 72.1±0.3276.1±0.3087.5±0.22 80.6±0.43 79.1±0.22
+entity-number 75.2±0.3780.3±0.3592.4±0.29 84.0±0.26 63.3±0.22
+specific-entity 73.7±0.3378.7±0.3188.4±0.35 79.6±0.40 62.9±0.22
+specific-relation 75.2±0.3180.6±0.2993.7±0.20 84.2±0.36 60.3±0.20
+4.3 Ablation Study
+We further analyzed the influence of two proposed components of CtrlHGen, dataset augmentation
+based on sub-logical decomposition and the reward function.
+Sub-logical Decomposition . We evaluate 13 logical patterns on DBpedia-50 using predefined patterns
+as conditions. The evaluation is conducted under two settings: one with the data augmentation strategy
+and one without it. As shown in Fig. 5, sub-logical decomposition significantly improves the Jaccard
+Index, especially for complex patterns involving disjunctions and negations, while maintaining
+similar Accuracy between two settings. This indicates that the improvement in long logic is due to
+the enhanced understanding of the internal logical structure rather than relying on external prompts.
+Notably, improvements also appear on simple patterns (e.g., 1p), indicating the model benefits from
+decomposing logic into simpler sub-components.
+Reward Function . We investigate different reward functions on WN18RR with the "pattern"
+condition. The results has been shown in Table 2. Reinforcement learning notably improves
+generalization and reduces accuracy variance compared to supervised learning. Removing Dice and
+Overlap rewards weakens performance, indicating that Jaccard alone is too strict and may hinder
+convergence. Excluding the condition-adherence reward slightly improves semantic similarity but
+harms condition adherence, confirming our reward design effectively balances both objectives.
+Table 2: Results of ablation studies for the reward function.
+ModelSemantic Similarity Condition AdherenceAverage
+Jaccard Dice Overlap Accuracy Smatch
+CtrlHG(w/o RL) 71.5 ±0.37 75.8±0.35 83.7±0.33 81.5±0.38 79.0±0.18 78.3
+CtrlHG(w/o Dice and Overlap) 74.8 ±0.34 78.2±0.33 85.1±0.30 90.3±0.25 82.0±0.15 82.1
+CtrlHG(w/o Condition Adherence) 77.5±0.33 81.6±0.31 87.8±0.29 68.3±0.46 75.0±0.22 78.0
+CtrlHG 77.0 ±0.34 80.8±0.31 86.8±0.28 93.5±0.24 83.3±0.15 84.3
+8(a) Jaccard Score
+ (b) Condition Adherence Accuracy
+Figure 5: Results of ablation studies for the sub-logical decomposition
+4.4 Visualization
+To evaluate controllability, we sampled 100 hypothesis-observation pairs from the FB15k-237 test
+set for each category defined by the number of relations (1, 2, or 3) in the reference hypothesis.
+We compared the number of predicate relations in generated hypotheses under two settings: with
+and without relation-number constraints. As shown in Fig. 6, without conditional constraints, the
+model tends to generate hypotheses with a larger number of predicate relations, making it difficult
+to generate hypotheses with only one relation. However, when conditional constraints are applied,
+the majority of generated hypotheses align with the expected number of predicates. This experiment
+further demonstrates the strong controllability of our model.
+(a) Without condition constraint
+ (b) With relation-number condition
+Figure 6: Visualization of Relation-number Distribution in Generated Hypotheses
+4.5 Case study
+To further illustrate controllable hypothesis generation, we present two representative cases from
+FB15k-237. In the first, the model generates fine-grained hypotheses that cover more relevant artists
+by controlling the logical structure. In the second, it focuses on specific entities, uncovering both
+subtle and strong associations between observation and target entities. Even for seemingly unrelated
+ones (e.g., BAFTA Award), the model uses logical disjunctions to preserve semantic relevance and
+constraint compliance. The corresponding figure and detailed analysis appear in Appendix C.
+95 Conclusion
+In summary, this paper introduces a new task of controllable abductive reasoning in knowledge
+graphs to address the limitation of controllability in the existing method. To tackle the challenges
+when control generating long and complex logical hypotheses, we propose a data augmentation
+strategy based on sub-logic decomposition, along with smoother semantic and constraint-adherence
+reward functions. Experimental results demonstrate that our approach significantly improves the
+controllability and overall quality of the generated hypotheses.
+10References
+[1] Douven, I. Abduction. 2011.
+[2]Paul, G. Approaches to abductive reasoning: an overview. Artificial intelligence review ,
+7(2):109–152, 1993.
+[3]Pukancová, J., M. Homola. Abductive reasoning with description logics: Use case in medical
+diagnosis. In Description Logics , vol. 1350 of CEUR Workshop Proceedings . CEUR-WS.org,
+2015.
+[4]Martini, C. Abductive reasoning in clinical diagnostics. In Handbook of abductive cognition ,
+pages 467–479. Springer, 2023.
+[5]Ramkumar, K., W. Cai, J. C. McCarthy, et al. Diagnosing unknown attacks in smart homes
+using abductive reasoning. CoRR , abs/2412.10738, 2024.
+[6]Ganesan, A., P. Parameshwarappa, A. Peshave, et al. Extending signature-based intrusion
+detection systems withbayesian abductive reasoning. arXiv preprint arXiv:1903.12101 , 2019.
+[7]Engelschalt, P., M. Röske, J. Penzlin, et al. Abductive reasoning in modeling biological
+phenomena as complex systems. In Frontiers in Education , vol. 8, page 1170967. Frontiers
+Media SA, 2023.
+[8]Wackerly, J. W. Abductive reasoning in organic chemistry. Journal of Chemical Education ,
+98(9):2746–2750, 2021.
+[9] Duede, E., J. Evans. The social abduction of science. arXiv preprint arXiv:2111.13251 , 2021.
+[10] Upmeier zu Belzen, A., P. Engelschalt, D. Krüger. Modeling as scientific reasoning—the role
+of abductive reasoning for modeling competence. Education Sciences , 11(9):495, 2021.
+[11] Smart, W. John couch adams and the discovery of neptune. Nature , 158(4019):648–652, 1946.
+[12] Bai, J., Y . Wang, T. Zheng, et al. Advancing abductive reasoning in knowledge graphs through
+complex logical hypothesis generation. In ACL (1) , pages 1312–1329. Association for Compu-
+tational Linguistics, 2024.
+[13] Zhang, Z., J. Wang, J. Chen, et al. Cone: Cone embeddings for multi-hop reasoning over
+knowledge graphs. In NeurIPS , pages 19172–19183. 2021.
+[14] Ren, H., W. Hu, J. Leskovec. Query2box: Reasoning over knowledge graphs in vector space
+using box embeddings. In ICLR . OpenReview.net, 2020.
+[15] Bai, J., Z. Wang, H. Zhang, et al. Query2particles: Knowledge graph reasoning with particle
+embeddings. In NAACL-HLT (Findings) , pages 2703–2714. Association for Computational
+Linguistics, 2022.
+[16] Bai, J., X. Liu, W. Wang, et al. Complex query answering on eventuality knowledge graph with
+implicit logical constraints. Advances in Neural Information Processing Systems , 36:30534–
+30553, 2023.
+[17] Bai, J., C. Luo, Z. Li, et al. Knowledge graph reasoning over entities and numerical values. In
+Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining ,
+pages 57–68. 2023.
+[18] —. Understanding inter-session intentions via complex logical reasoning. In Proceedings of the
+30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining , pages 71–82. 2024.
+[19] Galárraga, L. A., C. Teflioudi, K. Hose, et al. Amie: association rule mining under incomplete
+evidence in ontological knowledge bases. In Proceedings of the 22nd international conference
+on World Wide Web , pages 413–422. 2013.
+[20] Ho, V . T., D. Stepanova, M. H. Gad-Elrab, et al. Rule learning from knowledge graphs guided
+by embedding models. In ISWC (1) , vol. 11136 of Lecture Notes in Computer Science , pages
+72–90. Springer, 2018.
+[21] Cheng, K., J. Liu, W. Wang, et al. Rlogic: Recursive logical rule learning from knowledge
+graphs. In KDD , pages 179–189. ACM, 2022.
+[22] Bai, J., Z. Wang, Y . Zhou, et al. Top ten challenges towards agentic neural graph databases.
+arXiv preprint arXiv:2501.14224 , 2025.
+[23] Bhagavatula, C., R. L. Bras, C. Malaviya, et al. Abductive commonsense reasoning, 2020.
+11[24] Qin, L., V . Shwartz, P. West, et al. Back to the future: Unsupervised backprop-based decoding
+for counterfactual and abductive commonsense reasoning, 2021.
+[25] Kadi k,is, E., V . Srivastav, R. Klinger. Embarrassingly simple performance prediction for
+abductive natural language inference, 2022.
+[26] Chan, C., X. Liu, T. H. Chan, et al. Self-consistent narrative prompts on abductive natural
+language inference, 2023.
+[27] Zhao, W., J. T. Chiu, J. D. Hwang, et al. Uncommonsense reasoning: Abductive reasoning
+about uncommon situations, 2024.
+[28] Tafjord, O., B. D. Mishra, P. Clark. Proofwriter: Generating implications, proofs, and abductive
+statements over natural language, 2021.
+[29] Zhong, T., Y . Wei, L. Yang, et al. Chatabl: Abductive learning via natural language interaction
+with chatgpt, 2023.
+[30] Del, M., M. Fishel. True detective: A deep abductive reasoning benchmark undoable for gpt-3
+and challenging for gpt-4, 2023.
+[31] Thagard, P. Can chatgpt make explanatory inferences? benchmarks for abductive reasoning,
+2024.
+[32] Liu, E., G. Neubig, J. Andreas. An incomplete loop: Instruction inference, instruction following,
+and in-context learning in language models, 2024.
+[33] Zheng, T., J. Cheng, C. Li, et al. Logidynamics: Unraveling the dynamics of logical inference
+in large language model reasoning, 2025.
+[34] Zhou, Z. Abductive learning: towards bridging machine learning and logical reasoning. Sci.
+China Inf. Sci. , 62(7):76101:1–76101:3, 2019.
+[35] Camposampiero, G., M. Hersche, A. Terzic, et al. Towards learning abductive reasoning using
+VSA distributed representations. In NeSy (1) , vol. 14979 of Lecture Notes in Computer Science ,
+pages 370–385. Springer, 2024.
+[36] Hu, W.-C., W.-Z. Dai, Y . Jiang, et al. Efficient rectification of neuro-symbolic reasoning
+inconsistencies by abductive reflection. In Proceedings of the AAAI Conference on Artificial
+Intelligence , vol. 39, pages 17333–17341. 2025.
+[37] Drummond, N., R. Shearer. The open world assumption. In eSI workshop: the closed world of
+databases meets the open world of the semantic web , vol. 15, page 1. 2006.
+[38] Bai, J., T. Zheng, Y . Song. Sequential query encoding for complex query answering on
+knowledge graphs. Transactions on Machine Learning Research .
+[39] Shao, Z., P. Wang, Q. Zhu, et al. Deepseekmath: Pushing the limits of mathematical reasoning
+in open language models. CoRR , abs/2402.03300, 2024.
+[40] Auer, S., C. Bizer, G. Kobilarov, et al. Dbpedia: A nucleus for a web of open data. In
+international semantic web conference , pages 722–735. Springer, 2007.
+[41] Bordes, A., N. Usunier, A. Garcia-Duran, et al. Translating embeddings for modeling multi-
+relational data. Advances in neural information processing systems , 26, 2013.
+[42] Toutanova, K., D. Chen. Observed versus latent features for knowledge base and text inference.
+In A. Allauzen, E. Grefenstette, K. M. Hermann, H. Larochelle, S. W.-t. Yih, eds., Proceedings
+of the 3rd Workshop on Continuous Vector Space Models and their Compositionality , pages
+57–66. Association for Computational Linguistics, Beijing, China, 2015.
+[43] Radford, A., J. Wu, R. Child, et al. Language models are unsupervised multitask learners.
+OpenAI blog , 1(8):9, 2019.
+12A Details for Observation-Hypothesis Sample
+Given a knowledge graph Gand a predefined logical pattern P, the algorithm begins by sampling a
+random node vand recursively constructs a hypothesis such that vis one of its conclusions and the
+hypothesis conforms to the logical type specified by P. During the recursive process, the algorithm
+examines the current operation in the hypothesis structure. If the operation is projection, the algorithm
+randomly selects an incoming edge (u, r, v )of node v, then recursively generates a sub-hypothesis
+rooted at node uaccording to the corresponding subtype of P. If the operation is intersection, the
+algorithm recursively constructs sub-hypotheses using the same node vfor each subtype, since all
+sub-hypotheses must conclude with v. If the operation is union, it applies the recursion to one subtype
+using node v, and to the remaining subtypes using randomly selected nodes. This is because, under
+union, only one of the sub-hypotheses needs to have vas its conclusion.
+For the sub-logic decomposition, we decompose a hypothesis into its sub-logical hypothesis Hsub
+based on the type of reference hypothesis H. For example, a logical pattern "inp" can be decomposed
+into two sublogical patterns "2p". Then we calculate the corresponding conclusions of these two "2p"
+logical hypotheses respectively as sub-observations, thereby constructing the sub-logic observation-
+hypothesis set.
+B More experiment Details
+For all experiments, we set the learning rate to 1e-5 and use a batch size of 256 during supervised
+training. The supervised training process consists of two stages. In the first stage, the model is trained
+for 400 epochs, including a 50-epoch warm-up phase. In the second stage, which involves conditional
+supervised training, we train for 50 epochs with a 5-epoch warm-up. For reinforcement learning, a
+smaller batch size of 32 is used, and each group samples 4 candidate answers. The hyperparameters
+λ1,λ2, and λ3are set to 1.0, 0.5, and 0.5, respectively. And then we set α= 0.5.
+In this work, we constrain both observations and hypotheses to be composed solely of entities,
+relations from the knowledge graph, and logical connectives. To prevent semantic leakage from
+pre-trained language models, we represent entities and relations using their corresponding IDs in
+the knowledge graph. As a result, the task is essentially a sequence generation or graph generation
+problem, rather than a traditional natural language processing task. Accordingly, we adopt the
+autoregressive GPT-2 architecture as our model, and do not employ more advanced GPT variants,
+even though they are permissible.
+C More results
+C.1 Case study
+To further illustrate controllable hypothesis generation, we present two representative cases from
+FB15k-237. In the first case shown in Fig. 7, the observation is four different types of music { Blues,
+Jazz, Rhythm_and_blues, Bebop}. By incorporating more complex logical patterns as conditions,
+the model is able to generate increasingly fine-grained answers. For example, under the simplest
+"1p" logical pattern, the model can identify their common parent music genre. As the complexity
+of the logical pattern increases, the model becomes capable of answering more detailed queries,
+such as identifying artists associated with those music genres. In the second case shown in Fig. 8, it
+focuses on specific entities. For strongly related entities such as Yahoo, the model is able to identify
+clear connections with the observation set. Even for entities with weaker relationships, such as two
+movies, the model can still capture hidden associations between them. Surpringsingly, for seemingly
+unrelated entities like BAFTA_Award_for_Best_Sound, the model is able to generate high-quality
+hypotheses by leveraging a logical structure involving the "or" operator, while still adhering to the
+given constraints.
+D Limitation
+Our method requires retraining on each individual knowledge graph. As a result, a separate model
+must be trained for each specific domain, leading to relatively high transfer costs. Additionally, we
+13Observation: Blues, Jazz, Rhythm_and_blues, Bebop
+Condition1: Logical Pattern 1p
+Hypothesis 1: H=V?:Parent _genre (Hard _bop, V ?)
+Interpretations 1: The music genre that originates from the Hard_bop genre.
+Conclusion 1: Blues, Jazz, Rhythm_and_blues, Bebop.
+Jaccard Score: 1.0
+Condition2: Logical Pattern 2p
+Hypothesis 2: H=V?:Parent _genre (P?, V?)∧genre (McCoy _Tyner, P ?)
+Interpretations 2: The musical genre that originates from the genre which is associated
+with the artist McCoy_Tyner.
+Conclusion 2: Blues, Jazz, Rhythm_and_blues, Bebop.
+Jaccard Score: 1.0
+Condition3: Logical Pattern ip
+Hypothesis 3: H=V?:Parent _genre (Hard _bop, V ?)∧genre (Roy_Haynes, P ?)∧
+genre (McCoy _Tyner, P ?)
+Interpretations 3: The musical genre that originates from the Hard_bop genre and is
+associated with the artist Roy_Haynes and McCoy_Tyner.
+Conclusion 3: Blues, Jazz, Rhythm_and_blues, Bebop.
+Jaccard Score: 1.0
+Figure 7: Case study of Logic Control.
+only explore the model’s performance under single-condition control and do not conduct experiments
+with composite conditions. However, we believe that our framework is theoretically capable of
+solving such tasks.
+E Broader Impact
+This paper aims to promote the development of abductive reasoning in knowledge graphs. Our work
+has contributed to the field of deep learning and has brought about many potential social consequences.
+It may play an important role in fields such as clinical diagnosis or scientific discovery. However, we
+believe there are no negative impacts that need clarification.
+14Observation: Avid_Technology, Intel_Corporation, IBM, Microsoft_Corporation, Seat-
+tle_Mariners, Walmart, Cisco_Systems, Inc., Golden_State_Warriors, Seattle_Supersonics,
+Los_Angeles_Kings, San_Jose_Sharks, Pixar, Amazon.com, eBay
+Condition 1: Entity contains Smokin_Aces
+Hypothesis 1: H=V?:Employ (V?, P?)∧Film _crew _role(Smokin _Aces, P ?)
+Interpretations 1: The organization/company that employs people who have served as a
+crew member in the film Smokin_Aces.
+Conclusion 1: Blues, Jazz, Rhythm_and_blues, Bebop.
+Jaccard Score: 1.0
+Condition 2: Entity contains The_Phantom
+Hypothesis 2: H=V?:Employ (V?, P?)∧Film _crew _role(The_Phantom, P ?)
+Interpretations 2: The organization/company that employs people who have served as a
+crew member in the film The_Phantom.
+Conclusion 2: Blues, Jazz, Rhythm_and_blues, Bebop.
+Jaccard Score: 1.0
+Condition 3: Entity contains Yahoo
+Hypothesis 3: H =V?:Employ (V?, P?)∧ ¬Employed (P?, Y ahoo )∧
+Employed (P?, Avid _Technology )
+Interpretations 3: The organization/company that employs people who have never been
+employed by Yahoo, but have been employed by Avid_Technology.
+Conclusion 3: Blues, Jazz, Rhythm_and_blues, Bebop.
+Jaccard Score: 1.0
+Condition 4: Entity contains BAFTA_Award_for_Best_Sound
+Hypothesis 4: H = V? : Employ (V?, P?)∧
+Nominated for(P?, BAFTA _Award _for_Best _Sound ) ∨
+Employed (P?, Los _Angeles _Kings )
+Interpretations 4: The organization/company that employs people who have been for
+BAFTA_Award_for_Best_Sound or have been employed by Los_Angeles_Kings.
+Conclusion 4: Blues, Jazz, Rhythm_and_blues, Bebop.
+Jaccard Score: 1.0
+Figure 8: Case Study of Entity Semantic Control.
+15

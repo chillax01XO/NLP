@@ -1,0 +1,1066 @@
+FCKT: Fine-Grained Cross-Task Knowledge Transfer with Semantic Contrastive
+Learning for Targeted Sentiment Analysis
+Wei Chen1,Zhao Zhang2,Meng Yuan1,Kepeng Xu3andFuzhen Zhuang1,4†
+1School of Artificial Intelligence, Beihang University, China
+2School of Computer Science and Engineering, Beihang University, China
+3Xidian University, China
+4Zhongguancun Laboratory, China
+{chenwei23, zhuangfuzhen }@buaa.edu.cn
+Abstract
+In this paper, we address the task of targeted senti-
+ment analysis (TSA), which involves two sub-tasks,
+i.e., identifying specific aspects from reviews and
+determining their corresponding sentiments. As-
+pect extraction forms the foundation for sentiment
+prediction, highlighting the critical dependency
+between these two tasks for effective cross-task
+knowledge transfer. While most existing studies
+adopt a multi-task learning paradigm to align task-
+specific features in the latent space, they predom-
+inantly rely on coarse-grained knowledge trans-
+fer. Such approaches lack fine-grained control over
+aspect-sentiment relationships, often assuming uni-
+form sentiment polarity within related aspects. This
+oversimplification neglects contextual cues that dif-
+ferentiate sentiments, leading to negative transfer.
+To overcome these limitations, we propose FCKT,
+a fine-grained cross-task knowledge transfer frame-
+work tailored for TSA. By explicitly incorporat-
+ing aspect-level information into sentiment predic-
+tion, FCKT achieves fine-grained knowledge trans-
+fer, effectively mitigating negative transfer and en-
+hancing task performance. Experiments on three
+datasets, including comparisons with various base-
+lines and large language models (LLMs), demon-
+strate the effectiveness of FCKT. The source code
+is available on https://github.com/cwei01/FCKT.
+1 Introduction
+Unlike traditional sentiment analysis tasks [Liu, 2012 ],
+aspect-based sentiment analysis (ABSA) [Wang et al. , 2016;
+Tang et al. , 2020 ]requires a deeper contextual understanding
+and the extraction of more fine-grained information. ABSA
+has been widely applied in tasks such as customer feedback
+analysis and academic paper review evaluation [Nath and
+Dwivedi, 2024 ]. ABSA typically involves identifying (1)
+aspects (entities or attributes discussed), (2) opinions (sen-
+timent expressions), and (3) sentiment polarity. However, re-
+search indicates that over 30% of sentiment expressions are
+†Corresponding author.
+The lens and autofocus are impressive, except low-light capability.lens autofocuslow-lightEmbedding SpaceAspectsAspectSentimentOutput ResultsCoarse-grained TransferFine-grained TransferA:( lens, autofocus,low-light capability)S:(pos,pos,neg)✓A:( lens, autofocus,low-light capability)S:(pos,pos,pos)Pull①②③①②③capabilitycamera-related✗Figure 1: Illustration comparing coarse-grained and fine-grained
+transfer methods. Coarse-grained transfer assumes uniform senti-
+ment polarity for related aspects, while fine-grained transfer cap-
+tures nuanced aspect-sentiment relationships for precise alignment.
+implicit [Caiet al. , 2021; Chen et al. , 2024a ], meaning the
+ABSA must infer aspects and sentiments from the context
+without predefined opinions. In this paper, we address these
+challenges by developing targeted sentiment analysis (TSA).
+It involves two sub-tasks, i.e., identifying relevant aspects
+from reviews and explicitly associating them to their corre-
+sponding sentiments [Chen et al. , 2022b; Zhou et al. , 2024 ].
+When TSA was first proposed, a two-stage pipeline method
+was developed [Huet al. , 2019; Kalbhor and Goyal, 2023 ].
+However, this approach often lead to error propagation be-
+tween sub-tasks. Moreover, aspects are intrinsically linked
+with sentiment, and this staged pipeline approach disrupts
+this crucial interaction [Xuet al. , 2021 ]. To address these is-
+sues, many end-to-end approaches have been proposed [Chen
+et al. , 2022b; Chen et al. , 2022a; Li et al. , 2023; Zhu et
+al., 2024 ], aiming to jointly extract aspect terms and clas-
+sify their sentiments by modeling the interactions between as-
+pects and sentiments. A widely studied technique in this field
+is the task-specific feature alignment approach [Chen et al. ,
+2024a ]. This method involves two key steps: first, encoding
+task-specific features for both aspects and sentiments; second,
+aligning these features in the latent space, even when some
+aspects differ in sentiments, to enhance cross-task knowledge
+interaction.
+Despite recent advancements, these methods still rely on
+coarse-grained knowledge transfer, which fails to provide ex-arXiv:2505.21040v1  [cs.CL]  27 May 2025plicit and fine-grained control over aspect-sentiment relation-
+ships. This limitation often leads to negative transfer, as
+coarse-grained approaches assume uniform sentiment polar-
+ity across related aspects, ignoring key contextual differences.
+For instance, as illustrated in Figure 1, coarse-grained meth-
+ods treat all camera-related aspects (“lens”, “autofocus”, and
+“low-light capability”) share the same sentiment representa-
+tion. Consequently, these methods incorrectly classify “low-
+light capability” as positive, overlooking the negative sen-
+timent implied by the contrastive cue “except”. This mis-
+alignment, stemming from the lack of explicit control over
+knowledge transfer, is particularly problematic when aspect-
+sentiment relationships are subtle or context-dependent.
+Along this research line, explicit fine-grained knowledge
+transfer has emerged as a promising solution to enhance the
+interaction between aspects and sentiments. It disentangles
+aspect-sentiment relationships and enables dynamic align-
+ment tailored to each aspect. By isolating sentiment repre-
+sentations for each aspect, it accurately associates “lens” and
+“autofocus” with positive sentiment and “low-light capabil-
+ity” with negative sentiment, leveraging contextual cues like
+the contrast implied by “except”. This ensures more precise
+and context-aware sentiment classification. However, despite
+its potential, explicit fine-grained cross-task knowledge trans-
+fer faces the more severe challenge of error accumulation that
+must be addressed: (1) In fine-grained knowledge transfer,
+the performance of tasks such as aspect extraction and sen-
+timent classification is highly interdependent, as information
+flows directly between tasks. While leveraging aspect extrac-
+tion to assist sentiment classification fosters cross-task col-
+laboration, it also introduces the risk of error propagation.
+Errors or ambiguities in aspect extraction, such as incorrectly
+identified or missing aspects, are directly transferred to the
+sentiment classification phase, compounding inaccuracies in
+the final predictions. To address this, a more effective ap-
+proach is required to constrain aspect extraction, ensuring
+more accurate identification and minimizing the influence of
+ambiguity. (2) Moreover, even with perfect aspect extraction,
+fine-grained knowledge transfer may still struggle due to in-
+sufficient supervisory signals for sentiment classification. As
+the sentiment classifier relies heavily on aspect extraction, its
+training can become overly dependent on these features, po-
+tentially overlooking other crucial contextual cues that are not
+explicitly tied to aspect information. This lack of comprehen-
+sive supervision can hinder the classifier’s ability to general-
+ize effectively. This underscores the need for balanced, holis-
+tic supervision to optimize fine-grained knowledge transfer.
+To address these challenges, we propose FCKT, a fine-
+grained cross-task knowledge transfer framework tailored for
+the TSA task. Specifically, we design a token-level seman-
+tic contrastive learning mechanism. In this approach, the
+start and end tokens of the same aspect are treated as positive
+pairs, while tokens from unrelated aspects serve as negative
+pairs. This refines the model’s understanding of aspects and
+enhances its ability to capture subtle contextual dependen-
+cies. To mitigate the lack of supervisory signals in the sen-
+timent classifier, we introduce an alternating learning strat-
+egy. This approach trains a fixed proportion of samples using
+real labels, while the remaining samples are updated basedon predictions from the previous model. This enables FCKT
+to leverage both real labeled information and predicted trans-
+fer knowledge, synergistically improving the effectiveness of
+TSA. Furthermore, while Large Language Models (LLMs)
+like GPT-3.5 and GPT-4 excel in many general-purpose sce-
+narios, they often struggle to adapt to task-specific challenges
+in fine-grained TSA tasks. Our proposed framework sur-
+passes these models in both few-shot learning and chain-
+of-thought reasoning scenarios by leveraging task-specific
+knowledge transfer mechanisms and tailored training strate-
+gies. These results highlight the capability of FCKT to ad-
+dress the unique complexities of TSA tasks, providing valu-
+able insights for advancing task-specific methods in the LLM
+era. Our key contributions are summarized as follows:
+• We propose a token-level semantic contrastive learning
+mechanism that enhances the model’s understanding of as-
+pects by treating start and end tokens as positive pairs and
+unrelated tokens as negative pairs, enabling it to effectively
+capture subtle contextual dependencies.
+• To address insufficient supervisory signals in sentiment
+classification, we introduce an alternating learning strategy
+integrates real labeled data with predicted transfer knowl-
+edge, significantly improving task-specific performance.
+• We conduct extensive experiments on three real-world
+datasets, demonstrating the superiority of FCKT over ex-
+isting approaches. We also demonstrate the effectiveness
+of our approach across various LLM models, showcasing
+its superior performance in the era of LLMs.
+2 Related Work
+Targeted Sentiment Analysis. Targeted sentiment analy-
+sis (TSA) involves extracting aspect terms and their asso-
+ciated sentiment polarities, a key focus in recent research.
+Early work approached aspect extraction and sentiment anal-
+ysis as separate tasks, employing methods such as Long
+Short-Term Memory (LSTM) networks [Luo et al. , 2019 ]
+and Bidirectional Encoder Representations from Transform-
+ers (BERT) [Yang et al. , 2020 ]. Recent studies have shifted
+toward end-to-end solutions using multi-task learning frame-
+works [Luo et al. , 2019; Lin and Yang, 2020; Chen et al. ,
+2022b ], highlighting the interdependence between aspects
+and sentiments. Techniques such as shared-private feature in-
+teraction [Lin and Yang, 2020 ]and task-regularization inter-
+action [Chen et al. , 2022b ]have been introduced to improve
+performance by leveraging cross-task knowledge transfer.
+However, current approaches mainly rely on coarse-grained
+alignment approches , which lacks fine-grained control over
+aspect-sentiment relationships. This often leads to negative
+transfer, as coarse-grained approaches assume uniform senti-
+ment polarity within related aspects, overlooking contextual
+cues that differentiate sentiments. More recently, large lan-
+guage models (LLMs) like GPT have demonstrated strong
+generalization capabilities, outperforming fine-tuned BERT
+in some low-resource ABSA scenarios [Wang et al. , 2023;
+Zhou et al. , 2024 ]. Nevertheless, they continue to under-
+perform compared to state-of-the-art task-specific models,
+underscoring the need for further adaptation to address the
+unique challenges of resource-constrained TSA tasks.𝒙𝟎𝒙𝟐𝒙𝟏𝒙𝟓𝒙𝟑𝒙𝟒𝒉𝟎𝒉𝟑𝒉𝟐𝒉𝟏𝒉𝟒𝒉𝟓𝒉𝟐𝒉𝟏ExtractorMLP	𝓕𝒉𝟎𝒉𝟏
+0.20.40.10.10.10.10.20.10.40.10.10.1...POSNEUNEGClassifer𝒉𝟐𝒉𝟏𝒉𝟐𝒉𝟑𝒉𝟒
+Thescreensizeissatisfactory.𝒉𝟎𝒉𝟐𝒉𝟐𝒉𝟑𝒉𝟒PushPushPull
+0.1………0.20.2………0.1PullToken-Level	Contrastive	LearningEnd	PositionStart	PositionStart			scoresEnd				scores
+𝜁⨂Ε𝑝̂!𝑝̂"𝑯𝑯⨂Fine-Grained	Knowledge	ModelingAESP
+ratio1−𝜁+Figure 2: A depiction of the peopose FCKT framework.
+Contrastive Learning. Contrastive learning has recently
+achieved significant success in various domains [Jaiswal et
+al., 2020; Zhang et al. , 2022; Luo et al. , 2024; Zhong et al. ,
+2024b; Zhong et al. , 2024a; Zhong et al. , 2025; Yuan et al. ,
+2025a; Yuan et al. , 2025b; Yuan et al. , 2023 ]. In ABSA,
+several studies have explored its integration into model train-
+ing to improve performance. For example, Liang [Liang et
+al., 2021 ]leveraged contrastive learning to distinguish be-
+tween aspect-invariant and aspect-dependent features, lead-
+ing to better sentiment classification. Similarly, Xiong [Xiong
+et al. , 2022 ]proposed a triplet contrastive learning network
+that combines syntactic and semantic information via an
+aspect-oriented sub-tree and sentence-level contrastive learn-
+ing. Chen [Chen et al. , 2024a ]further utilized contrastive
+learning to model adaptive task-relatedness between aspect
+and sentiment co-extraction. Different from these works, we
+leverage contrastive learning specifically for aspect extraction
+to enhance knowledge transfer in TSA.
+3 Methodology
+In this section, we will introduce proposed FCKT framework
+in detail, which is depicted in Figure 2. The comprehensive
+task consists of two base components: first, extracting opin-
+ion aspects (AE), and second, predicting the sentiment polar-
+ity (i.e., positive, neutral, or negative) of each aspect (SP).
+3.1 Problem Description
+Formally, given a sentence x={x0, x1, . . . , x n−1}, where
+xirepresents the ithtoken in xandndenotes the sentence
+length, the main objective of FCKT is to extract all possible
+aspects and predict their corresponding sentiments in x.
+To enhance the representation of contextual semantics, we
+leverage the widely recognized BERT model [Devlin et al. ,
+2019 ], an effective multi-layer bidirectional Transformer de-
+signed to construct rich contextual embeddings by simultane-
+ously capturing both left and right word dependencies. BERT
+comprises a series of TTransformer layers. The working
+The screen size is satisfactory but the phone battery capacity is limited.(screen size , pos)OriginalTraining SampleOriginalLabel(1).The screen size is satisfactory but the phone battery capacity is limited.Aspect-wise sentence splittingNew Training SamplesNewLabel(2).The screen size is satisfactory but the phone battery capacity is limited.(screen size , pos)(phone battery capacity , neg)(phone battery capacity , neg)①
+①②
+①Figure 3: An example of the sentence splitting process.
+principle of BERT is summarized as follows:
+H0=WiE+P,Ht=T 
+Ht−1
+, t∈[1, T], (1)
+where Wiis the one-hot representation of the sub-word in
+the input sentence, Edenotes the sub-word embedding ma-
+trix,Prepresents the positional embedding, Tis the Trans-
+former block, and Htis the output of the tthTransformer
+layer. For the given sentence x={x0, x1, . . . , x n−1}, we as-
+sume the output of the final Transformer layer is H=HT=
+{h0,h1, . . . ,hn−1} ∈Rn×d, where dis the embedding size.
+Remark. In our modeling process, sentences containing
+multiple aspect terms are split into separate sentences dur-
+ing training, with each focusing on a single aspect, as illus-
+trated in Figure 3. This preprocessing step allows the model
+to effectively learn aspect-specific representations by isolat-
+ing each aspect, avoiding interference from others in the same
+sentence. It is important to note that this splitting strategy is
+only applied during training to facilitate the learning process.
+During testing, the original sentence structure is preserved,
+ensuring consistency in evaluation and practical application.
+Our approach, FCKT, leverages this strategy without alter-
+ing the original optimization objectives or knowledge trans-
+fer mechanisms. Further details are provided in the Ap-
+pendix A , where we demonstrate that this strategy maintains
+optimization consistency while enabling fine-grained model-
+ing of aspect-specific interactions.
+3.2 Semantic Contrastive Learning for AE
+In this article, aspects are detected by predicting their start
+and end boundaries through a linear transformation opera-
+tion [Lin and Yang, 2020 ]. Specifically, the start and end
+boundary distributions are predicted as follows:
+ˆps=Fϕ1(H),ˆpe=Fϕ2(H), (2)
+where Fϕ1andFϕ2are MLP layers used for extracting as-
+pects. The length of ˆpsmatches that of the sentence, and
+each element in ˆpsrepresents the probability of a word being
+the start of an aspect. It is important to note that this step only
+predicts the boundary distributions of aspects. To determine
+the final aspects, a heuristic extraction algorithm [Huet al. ,
+2019 ]is subsequently employed. During optimization, the
+learning objective for boundary distributions is formulated as:
+Lae=−nX
+i=1{pT
+i,slog (ˆpi,s) +pT
+i,elog (ˆpi,e)}, (3)where pT
+i,s∈RnandpT
+i,e∈Rnare the boundary ground
+truths (i.e., 0-1 vectors), ˆpi,sandˆpi,eare the predicted bound-
+ary distributions, nis the length of sentence.
+Compared to conventional coarse-grained transfer meth-
+ods[Chen et al. , 2024a; Sun et al. , 2024 ], fine-grained knowl-
+edge transfer imposes stricter requirements on the precision
+of aspect extraction. Any incorrectly identified or missing as-
+pects are directly transferred to the sentiment classification
+phase, accumulating prediction inaccuracies. To mitigate this
+issue, we introduce a token-level semantic contrastive learn-
+ing framework to improve aspect representation quality.
+Intuitively, tokens within an aspect inherently exhibit
+strong semantic compatibility, as they frequently co-occur in
+similar contexts. For instance, as illustrated in Figure 2, the
+end boundary distribution suggests that both the 2nd and 3rd
+words have comparable probabilities of being the end of an
+aspect. However, from a semantic perspective, the word “is”
+is unrelated to the preceding words and is therefore less likely
+to be part of the aspect boundary. Semantic information can
+serve as a complementary signal to boundary distributions by
+verifying whether different tokens form a “semantically rea-
+sonable” aspect. To leverage this property, we treat the start
+and end tokens of the same aspect as positive pairs, encourag-
+ing their representations to be closely aligned. For negative
+pairs, we construct two types: (1) the start token of the as-
+pect paired with end tokens from other, unrelated aspects, and
+(2) the end token of the aspect paired with start tokens from
+unrelated aspects. The InfoNCE loss [Chen et al. , 2024b;
+Chen et al. , 2024c ]is then employed to optimize these token-
+level embeddings. Formally, the contrastive loss is defined
+as:
+Lcl=−X
+(s,e)∈Elogexp(s(hs,he)/τ)Pexp(s(hs,hi)/τ)+exp( s(he,hj)/τ),
+(4)
+where (hs,he)are positive pair embeddings, while (hs,hi)
+and(he,hj)are negative pairs. τis the temperature parame-
+ter,s(·,·)denotes the cosine similarity function, and Erepre-
+sents the set of all positive pairs in each sentence.
+3.3 Fine-Grained Knowledge Transfer for SP
+In sentiment prediction task, the sentiment polarity for a given
+aspect is determined based on the words within its bound-
+aries. Let the start and end boundaries be denoted as sande,
+respectively. The sentiment is then predicted as:
+ˆy(ψ) =Cθ(Hs→e), (5)
+where ˆy(ψ)represents the predicted class probability distri-
+bution, Cθis a nonlinear classifier that maps input features to
+the range [0,1], effectively modeling the likelihood of each
+sentiment class. Hs→edenotes the aspect representation, ag-
+gregated from the start boundary sto the end boundary e.
+As previously mentioned in Section 1 , these two sub-tasks
+exhibit a logical sequential dependence, implying that aspects
+can provide valuable signals for sentiment prediction. How-
+ever, sentiment prediction in previous coarse-grained trans-
+fer methods relies on ground truth boundaries, which essen-
+tially disconnects the sequential connections between thesetwo sub-tasks. Therefore, we employ aspect features to su-
+pervise the sentiment prediction process. In this way, aspect
+extraction can provide sequentially useful supervised signals
+for sentiment prediction, while sentiment information can in-
+fluence aspect detection through backpropagation.
+To achieve this, we refrain from using the ground truth
+boundaries as input. Instead, we derive an expectation of
+word embedding based on the boundary distributions. Con-
+sequently, Eq. (5) can be redefined as:
+ˆy(ℓ) =Cθ 
+E(i∼ˆps,j∼ˆpe)Hi→j
+, (6)
+where Edenotes the expectation operator over the indices i
+andj, which are sampled from the predicted start boundary
+distribution ˆpsand the end boundary distribution ˆpe, respec-
+tively. Furthermore, since ˆpsandˆpeare both discrete distri-
+butions, we have the following derivation:
+ˆy(ℓ) =Cθ 
+Ei∼ˆps"
+Ej∼ˆpe"jX
+k=iHk##!
+=Cθ
+Ei∼ˆps
+nX
+j=1ˆpe,jjX
+k=iHk
+
+
+=Cθ
+nX
+i=1nX
+j=1ˆps,i·ˆpe,jjX
+k=iHk
+,(7)
+where we assume nis the sentence’s length. In this way, these
+two sub-tasks enable genuine end-to-end learning.
+In practice, to compute Eq. (7) , one needs to traverse the
+whole sentence, and the computational complexity is O(n2),
+which is very difficult to calculate. Fortunately, this complex-
+ity can be reduced based on two facts: (i) The end point is not
+smaller than the start point. (ii) The length of an aspect term
+is usually not large. We then revise ˆy(ψ)toˆy(ℓ), as follows:
+ˆy(ℓ) =Cθ
+nX
+i=1i+hX
+j=iˆpi,s·ˆpe,jjX
+k=iHk
+, (8)
+where his the maximum length of aspect. Thus, the compu-
+tation complexity is reduced to O(nh)(i.e.,h≪n).
+Actually, in the testing phase, the sentiment is inferred
+based on the predicted aspects, which is more aligned with
+our fine-grained transfer modeling. By inputting the distri-
+butional boundaries, the sentiment information can be back
+propagated to supervise the aspect detection process, and en-
+hance its accuracy. However, if we only base on the distribu-
+tional input, we may still face challenges due to insufficient
+supervisory signals for sentiment classifier. In such a sce-
+nario, providing some ground truth data can reduce the error
+propagation path, and thus alleviate this problem. Specifi-
+cally, during training, we use an alternate training strategy: a
+fixed ratio ( ξ) of samples are trained based on Eq. (5), while
+the remaining samples ( 1−ξ) are optimized using Eq. (8).
+The model parameters are optimized through the following
+cross-entropy loss formulation [Chen et al. , 2024a ]:
+Lsp=−NX
+i=1KX
+j=1yi,jlog (ξ·ˆy(ψ)i,j+ (1−ξ)·ˆy(ℓ)i,j),
+(9)Algorithm 1: Training Framework
+Input: Training dataset D, learning rate α, sampling
+ratioξ, model parameters Θ ={ϕ1,ϕ2,θ}
+while the convergence criterion is not met do
+foreach batch Bin Dataloader( D)do
+Compute ˆpsandˆpeusing Eq. (2);
+Evaluate aspect extraction loss Laevia Eq. (3);
+Evaluate contrastive loss Lclvia Eq. (4);
+Sample a random value p∼Uniform (0,1);
+ifp > ξ then
+Construct predicted E(i∼ˆps,j∼ˆpe)Hi→j;
+Compute the predicted ˆy(ℓ)via Eq. (8);
+else
+Select real aspect embedding Hs→e;
+Compute the real ˆy(ψ)via Eq. (5);
+Evaluate sentiment loss Lspvia Eq. (9);
+Aggregate total loss L=Lae+Lsp+λLcl;
+Update parameter Θ = Θ −α∇ΘL.
+where Nrepresents the number of samples, Kindicates the
+number of sentiment types, ˆy(ψ)andˆy(ℓ)are predicted sen-
+timent distributions, and yis the ground truth. This strategy
+effectively combines real labels with transferred knowledge,
+leveraging their synergistic integration to enhance FCKT.
+3.4 Model Optimization
+Overall Training. To enhance the performance of FCKT
+framework, we jointly optimize the aspect extraction loss
+Lae, sentiment prediction loss Lsp, and contrastive loss Lcl.
+The combined objective function is defined as:
+L=Lae+Lsp+λLcl, (10)
+where λis a trade-off parameter for contrastive loss. The
+entire optimization process is illustrated in Algorithm 1, with
+all parameters trained in an end-to-end manner.
+Complexity Analysis. We further analyze the time and space
+complexities of FCKT. The time complexity is composed
+of three main components: (1) the aspect extraction mod-
+ule, with a complexity of O(n+n2)per training epoch; (2)
+the sentiment prediction module, with a complexity of O(h);
+and (3) the expectation input module, with a complexity of
+O(nh). Consequently, the overall time complexity of FCKT
+isO(n2+nh). In terms of space complexity, the model
+incurs costs primarily from word embeddings and the con-
+trastive learning process, resulting in a total space complexity
+ofO(nd+n2), where drepresents the embedding size.
+4 Experiments
+In this section, we conduct experiments to answer the follow-
+ing five research questions: RQ1: How does the proposed
+FCKT perform overall compared to baseline approaches?
+RQ2: How effectively does FCKT perform across different
+sub-tasks? RQ3: How do the various components of FCKT
+contribute to the final results? RQ4: How do different pa-
+rameter configurations in the proposed method impact its per-
+formance? RQ5: Does fine-grained knowledge transfer help
+address the aforementioned challenges effectively?Dataset #Sentences #Aspects #+ #- #0
+Laptop 1869 2936 1326 900 620
+Restaurant 3900 6603 4134 1538 931
+Tweets 2350 3243 703 274 2266
+Table 1: Statistics of three datasets. “+/-/0” denote the positive,
+negative, and neutral sentiment polarities, respectively.
+4.1 Experimental Setup
+Datasets . To fairly assess our proposed FCKT, we conducted
+our experiments using three public datasets, Laptop, Restau-
+rant, and Tweets. The data statistics are presented in Table 1.
+More dataset details are shown in Appendix B.
+Baselines . We compare three categories of models: Pipeline-
+based models ,End-to-End models ,LLM-based models .
+More baseline details are listed in Appendix C.
+Evaluation . We adopt three widely used metrics, precision,
+recall, and F1 score , to evaluate the FCKT. Please refer to
+Appendix D for more metric details.
+Implementation Details . All the parameter details are com-
+prehensively provided in Appendix E for further reference.
+4.2 Main Experimental Results (RQ1)
+We conduct experiments on three public datasets and the
+comparison results between FCKT and the baselines are pre-
+sented in Table 2. This table shows the following:
+Among the baselines, we find that our proposed FCKT
+consistently achieves the best results in all cases on F1 score.
+More precisely, when compared to the state-of-the-art ap-
+proach AIFI, FCKT demonstrates notable enhancements in
+F1 score performance across three distinct datasets, with an
+average improvement of approximately 1.38%1. These find-
+ings strongly suggest that the meticulously crafted FCKT
+exhibits a potential for superior performance. This can be
+attributed to two primary factors: first, the inclusion of a
+fine-grained knowledge transfer framework that effectively
+captures mutual information between sub-tasks, and second,
+the introduction of a token-level contrastive learning mech-
+anism that facilitates the extraction of more fitting aspects.
+However, the recall of FCKT is lower than several baseline
+models. One possible reason is that our heuristic extraction
+method filters out semantically irrational aspects based on the
+cumulative start/end scores, which may inadvertently exclude
+some false negatives, leading to a lower recall score.
+FCKT demonstrates notable advantages in both perfor-
+mance and computational efficiency compared to advanced
+LLMs. As illustrated in Tables 2, even the state-of-the-art
+LLM, GPT-4, with its vast number of parameters, fails to
+deliver satisfactory results for TSA, despite leveraging Few-
+Shot learning and Chain-of-Thought (CoT) [Weiet al. , 2022 ]
+enhancement. Moreover, the use of LLMs incurs substantial
+computational overhead, further underscoring the efficiency
+of our approach. This suggests that improving performance
+in these low-resource domains with LLMs remains a chal-
+lenging task. Despite advancements in LLMs, some tradi-
+1Noted TSA remains a challenging task with minimal progress
+in recent research, making a 1.38% improvement significant.ModelLaptop Restaurant Tweets
+Prec. Rec. F1 Prec. Rec. F1 Prec. Rec. F1
+PipelineCRF-Pipeline†[Mitchell et al. , 2013 ] 0.5969 0.4754 0.5293 0.5228 0.5101 0.5164 0.4297 0.2521 0.3173
+NN-CRF-Pipeline†[Zhang et al. , 2015 ]0.5772 0.4932 0.5319 0.6009 0.6193 0.6100 0.4371 0.3712 0.4006
+TAG-Pipeline†[Huet al. , 2019 ] 0.6584 0.6719 0.6651 0.7166 0.7645 0.7398 0.5424 0.5437 0.5426
+SPAN-Pipeline†[Huet al. , 2019 ] 0.6946 0.6672 0.6806 0.7614 0.7334 0.7492 0.6072 0.5502 0.5769
+End-to-EndSPJM†[Zhou et al. , 2019 ] 0.6140 0.5820 0.5976 0.7620 0.6820 0.7198 0.5484 0.4844 0.5144
+SPAN-Joint†[Huet al. , 2019 ] 0.6741 0.6199 0.6459 0.7232 0.7261 0.7247 0.5703 0.5269 0.5455
+S-AESC†[Lvet al. , 2021 ] 0.6687 0.6492 0.6588 0.7826 0.7050 0.7418 0.5586 0.5374 0.5473
+HI-ASA‡[Chen et al. , 2022b ] 0.6796 0.6625 0.6709 0.7915 0.7621 0.7765 0.5732 0.5622 0.5676
+DCS‡[Liet al. , 2023 ] 0.6812 0.6640 0.6725 0.7835 0.7751 0.7793 0.5862 0.5835 0.5848
+MiniConGTS‡[Sunet al. , 2024 ] 0.7206 0.6725 0.6957 0.7926 0.7952 0.7939 0.6164 0.5728 0.5938
+PDGN‡[Zhuet al. , 2024 ] 0.7025 0.6812 0.6921 0.8036 0.7985 0.8010 0.6235 0.5924 0.6076
+AIFI‡[Chen et al. , 2024a ] 0.7105 0.6915 0.7009 0.7925 0.8034 0.7979 0.6342 0.5911 0.6119
+LLM-basedGPT-3.5-turbo Zero-Shot‡0.3462 0.4065 0.3739 0.6221 0.6605 0.6407 0.3750 0.2868 0.3250
+GPT-3.5-turbo Few-Shot‡0.3389 0.4452 0.3855 0.5847 0.6605 0.6203 0.3812 0.2841 0.3256
+GPT-3.5-turbo CoT‡0.3430 0.4581 0.3923 0.6624 0.6420 0.6520 0.4233 0.2752 0.3335
+GPT-3.5-turbo CoT + Few-Shot‡0.3532 0.4581 0.3989 0.6215 0.6790 0.6490 0.3752 0.3012 0.3342
+GPT-4o Zero-Shot‡0.3214 0.4065 0.3590 0.6242 0.5741 0.5981 0.2326 0.3704 0.2857
+GPT-4o Few-Shot‡0.3299 0.4194 0.3693 0.6571 0.5679 0.6093 0.2532 0.3631 0.2984
+GPT-4o CoT‡0.3371 0.3806 0.3576 0.6643 0.5741 0.6159 0.2823 0.3891 0.3272
+GPT-4o CoT + Few-Shot‡0.3622 0.4323 0.3941 0.6842 0.6420 0.6624 0.4022 0.3842 0.3930
+Ours FCKT 0.7599 0.6740 0.7144∗0.8449 0.7877 0.8153∗0.6512 0.5962 0.6225∗
+Table 2: The overall performance comparison is conducted on three real-world datasets. The “ †” denotes results directly taken from the
+original papers, while “ ‡” indicates results reproduced following the methods described in the original papers. Bold values highlight the best
+performance, and ∗indicates statistical significance with a p-value ≤0.05compared to the best-performing baseline.
+Task Method Laptop Restaurant Tweets
+AEHI-ASA(COLING22) 0.8424 0.8511 0.7546
+DCS(EMNLP23) 0.8455 0.8462 0.7543
+MiniConGTS(EMNLP24) 0.8374 0.8432 0.7514
+PDGN(ACL24) 0.8485 0.8546 0.7593
+GPT-4o CoT + Few-Shot 0.5120 0.6010 0.4724
+AIFI(AAAI24) 0.8511 0.8631 0.7634
+FCKT 0.8534 0.8685 0.7754
+SPHI-ASA(COLING22) 0.8531 0.9257 0.8451
+DCS(EMNLP23) 0.8467 0.9212 0.8429
+MiniConGTS(EMNLP24) 0.8541 0.9194 0.8349
+PDGN(ACL24) 0.8519 0.9224 0.8496
+GPT-4o CoT + Few-Shot 0.7045 0.7538 0.6323
+AIFI(AAAI24) 0.8594 0.9305 0.8496
+FCKT 0.8612 0.9310 0.8524
+Table 3: The performance comparisons with different methods on
+aspect extraction (F1 score) and sentiment prediction (accuracy).
+tional methods for TSA are still valuable, offering insights
+that complement the limitations of current techniques.
+4.3 Analysis on Both Sub-Tasks (RQ2)
+To verify model’s performance in individual tasks, we con-
+duct a comparative analysis tailored for both sub-tasks in Ta-
+ble 3. In AE, our proposed FCKT is able to achieve the best
+overall performances in terms of F1 score. Compared with
+the other two datasets, the improvement of model on Tweets
+is more obvious (+2%). Since the context length of Tweets
+is usually shorter, our proposed fine-grained transfer methods
+are more adequate between two sub-tasks, leading to more
+significant improvements compared to other two datasets.Task AKT TCL Laptop Restaurant Tweets Avg. Drop
+AE✓ ✓ 0.8534 0.8685 0.7754 -
+✓ ✗ 0.8420 0.8612 0.7713 ▼0.91%
+✗ ✓ 0.8451 0.8603 0.7714 ▼0.82%
+✗ ✗ 0.8412 0.8568 0.7630 ▼1.45%
+SP✓ ✓ 0.8612 0.9310 0.8524 -
+✓ ✗ 0.8502 0.9214 0.8413 ▼1.20%
+✗ ✓ 0.8492 0.9213 0.8381 ▼1.36%
+✗ ✗ 0.8334 0.9189 0.8293 ▼2.38%
+TSA✓ ✓ 0.7144 0.8153 0.6225 -
+✓ ✗ 0.6942 0.8064 0.6153 ▼1.67%
+✗ ✓ 0.6775 0.7842 0.6072 ▼3.86%
+✗ ✗ 0.6724 0.7792 0.5942 ▼4.93%
+Table 4: The results of different modules on each task. Note that
+“✓/✗AKT” indicates whether the aspect knowledge transfer strat-
+egy is used, while “ ✓/✗TCL” denotes the inclusion or exclusion of
+the token-level contrastive learning mechanism.
+For SP, FCKT consistently outperforms other approaches
+across the three datasets. However, its improvement on the
+Restaurant dataset is less pronounced compared to the other
+datasets. We hypothesize that this discrepancy may stem from
+the relatively high sample diversity in the Restaurant dataset,
+where the limited interaction information might be insuffi-
+cient to substantially enhance sentiment prediction.
+4.4 Ablation Study (RQ3)
+To examine the contributions of various components, we
+delve further into FCKT and carry out ablation studies. The
+results are shown in Table 4. It is evident that the removal of0.1 0.4 0.7 1.0
+ratio 
+0.770.800.83F1-Score
+FCKT
+FCKT w/o RAI
+0.1 0.4 0.7 1.0
+ratio 
+0.550.670.80F1-Score
+FCKT
+FCKT w/o RAIFigure 4: The results of FCKT w.r.t different parameter ξon two
+datasets. “FCKT w/o RAI” refers to removing real aspect inputs.
+1 2 3 4
+ Aspect Lengh h0.670.700.73
+F1-Score
+Laptop
+0.760.780.80
+Restaurant
+0.1 0.3 0.5 0.7
+Contrastive Weight 
+0.660.710.76
+F1-Score
+Laptop
+0.740.780.82
+Restaurant
+Figure 5: The F1 score of FCKT w.r.t varying parameter handλ.
+specific modules leads to a decrease in model performance,
+highlighting the indispensable nature of each module. This
+underscores the critical role that various model components
+play in achieving optimal performance. If we delve deeper
+into the comparisons in TSA task, we can find the “AKT”
+module holds greater significance, indicated by its lower F1
+score compared to the other module. This is not surprising, as
+cross-task knowledge transfer is the core focus of our work,
+emphasizing the importance of effectively leveraging mutual
+information between tasks to enhance performance in TSA.
+4.5 Parameter Analysis (RQ4)
+Effect of parameter ξ. In FCKT, a critical parameter is the
+ratioξ, which controls the connection between different tasks.
+This parameter determines how much of the predicted aspect
+knowledge is transferred to the second task. We tune ξwithin
+the range of 0 to 1, and the results, based on the TSA task,
+are presented in Figure 4. Across these datasets, we observe
+that the F1 score initially increases rapidly, then stabilizes,
+and finally declines as ξincreases from 0.8 or 0.9 to 1. The
+reason lies in that when ξis small, the model lacks sufficient
+supervision from the ground truth, leading to suboptimal per-
+formance. And when ξis very large, the model fails to lever-
+age the valuable interactions between the two sub-tasks, also
+resulting in unsatisfactory performance. We observe that the
+best performances are usually achieved when ξis moderate
+on two datasets, which implies that neither the ground truth
+boundary nor distributional boundary is dominantly superior,
+and a mixture of them can be more favorable.
+Effect of parameter h. In this study, we investigate the influ-
+ence of the parameter has it regulates the length of the aspect
+in Eq. (8). Theoretically, when htakes on a large value,
+the model ends up with an enormous number of computing
+memory, making it challenging to achieve convergence. Con-
+versely, when his excessively small, accurately extracting
+aspects becomes non-trivial. Considering that aspect term
+lengths are typically not extensive, we conduct experiments
+Input Reviews(1) All the money went into the interior decoration, none of it went to the chefs.AIFI ModelFCKT(Ours)
+(3) I must say I am surprised by the bad reviews of the restaurant , though the menu's font is small.(2) You will obtain a gift if you buy the separateram memory.[interior decoration, pos][chefs, pos]✗✓[interior decoration, pos] [chefs, neg][separate ram memory, pos][ram memory, pos][restaurant, neg]✗[menu’s font, neg]✓✓✓✓✗[restaurant, neg][menu’s font, neg]✓✗Figure 6: Some examples of different models. The positive aspects
+are marked in green, and negative aspects are marked in orange. ✓
+and✗denote correct and incorrect predictions.
+by varying hwithin the range of {1,2,3,4}. In our experi-
+mental results, presented in Figure 5, we showcase F1 scores
+for both the Restaurant and Laptop domains. As hincreases,
+we observe a gradual rise in performance up to a peak, fol-
+lowed by a decline. This suggests that maintaining a moder-
+atehvalue (such as 2 or 3) can not only reduce the parameter
+count but also ensure accurate aspect extraction.
+Effect of parameter λ. We also analyze the effect of the
+contrastive weight λon F1-score across two datasets: Restau-
+rant and Laptop. The results indicate that the optimal perfor-
+mance is achieved when λ= 0.1. Asλincreases beyond this
+point, the F1-score decreases steadily for both datasets, with
+a sharper decline in the Restaurant domain. This suggests
+that a smaller λeffectively balances the contrastive and task-
+specific objectives, while higher values overly emphasize the
+contrastive loss, negatively impacting overall performance.
+4.6 Case Study and Error Analysis (RQ5)
+Case Study . To offer a deeper understanding of FCKT’s ex-
+ceptional performance, we present several case studies in a
+qualitative manner in Figure 6. In 1st case, the aspect de-
+tection and sentiment prediction in AIFI may be compro-
+mised due to weak sequential associations. For instance, it
+successfully identifies the aspect “chefs” but falters in accu-
+rately predicting the sentiment associated with “chefs” in the
+1st case. Conversely, FCKT allows for the backpropagation
+of sentiment information into the boundary detection process,
+thereby bolstering correlations and leading to accurate predic-
+tions. By modeling semantic compatibility for aspect extrac-
+tion via token-level contrastive learning, FCKT can extract
+more precise aspects. For example, in the 2nd case, word
+“separate” should not be included in the aspect of “ram mem-
+ory”, a distinction that FCKT successfully identifies.
+Error Analysis . While the FCKT model has shown fa-
+vorable performance, it still encounters challenges when han-
+dling complex sentences. For example, in the 3th sentence,
+due to the ambiguously expressed sentiment associated with
+“restaurant”, the model struggles to make precise predictions.
+5 Conclusion
+In this paper, we addressed the problem of targeted sentiment
+analysis (TSA) by proposing a fine-grained cross-task knowl-
+edge transfer (FCKT) framework. By explicitly integrating
+aspect-level information into sentiment prediction, FCKT en-
+ables fine-grained knowledge transfer, effectively mitigatingnegative transfer and improving task performance. Exten-
+sive experiments conducted on three real-world benchmark
+datasets, including comparisons with diverse baselines and
+state-of-the-art LLMs validate the effectiveness of FCKT.
+Acknowledgments
+We sincerely thank all the anonymous reviewers for their
+valuable comments to improve this paper. This work was
+supported by the National Key Research and Development
+Program of China under Grant Nos. 2024YFF0729003, the
+National Natural Science Foundation of China under Grant
+Nos. 62176014, 62276015, 62206266, the Fundamental Re-
+search Funds for the Central Universities.
+Appendix
+A. Spliting Strategy
+In our modeling process, sentences containing multiple as-
+pect terms are split into separate sentences during training,
+with each focusing on a single aspect, as illustrated in Fig-
+ure 3. Here, we demonstrate that this strategy maintains op-
+timization consistency while enabling fine-grained modeling
+of aspect-specific interactions.
+First, when there are multiple aspects within a sentence,
+The original optimization objective Lcan be rewritten as:
+Lmul=Lae+Lcl+Lsp
+=−NX
+i=1mX
+j=1
+pT
+s,i,jlog (ˆps,i,j) +pT
+e,i,jlog (ˆpe,i,j)	
+−NX
+i=1lX
+j=1{s(hs,he) +X
+(x,y)∈Os(hx,hy)}
+−NX
+i=1lX
+j=1tX
+k=1yi,j,klogˆyi,j,k
+=−NX
+i=1mX
+j=1 
+pT
+s,i,jlog (ˆps,i,j) +pT
+e,i,jlog (ˆpe,i,j)	
++{s(hs,he)−X
+(x,y)∈Os(hx,hy)}
++tX
+k=1yi,j,klogˆyi,j,k!
+,
+(11)
+where Nis the number of sentences, mdenotes the sen-
+tence’s length, and lis the number of aspects in each sen-
+tence. s(·,·)represents the cosine similarity function used
+in contrastive learning, defined as s(hx,hy) =hx·hy
+∥hx∥∥hy∥,
+where hxandhyare embeddings of the tokens. Odenotes
+the set of negative pairs for each aspect, containing pairs of
+tokens that are not semantically aligned. trefers to the num-
+ber of sentiment categories (e.g., positive, neutral, and neg-
+ative). Finally, yi,j,k is the ground-truth label for the k-th
+sentiment category of the j-th aspect in the i-th sentence, and
+ˆyi,j,kis the predicted probability distribution for the same.Building on the derivation above, it becomes evident that
+span-based targeted sentiment analysis can be interpreted as
+optimizing for a single aspect at a time. This formulation en-
+sures that the optimization process remains unaffected by the
+number of aspects present in a sentence, allowing for consis-
+tent and efficient learning. Furthermore, under the assump-
+tion that each sentence contains only a single aspect, the op-
+timization objective can be redefined as:
+Lsep=Lae+Lcl+Lsp
+=−MX
+i=1mX
+j=1 
+pT
+s,i,jlog (ˆps,i,j) +pT
+e,i,jlog (ˆpe,i,j)	
++{s(hs,he)−X
+(x,y)∈Os(hx,hy)}
++tX
+k=1yi,j,klogˆyi,j,k!
+,
+(12)
+where Mrepresents the total number of aspects in the original
+training dataset, defined as M=PN
+i=1li, where lidenotes
+the number of aspects in the i-th sentence. The relationship
+between the two optimization objectives LmulandLsepcan
+be expressed as:
+Lmul∝ Lsep. (13)
+This indicates a direct proportionality between the two ob-
+jectives, validating the effectiveness of our partitioning strat-
+egy. By leveraging this relationship, our method simplifies
+the training process while enhancing the model’s capacity to
+manage aspect-specific interactions effectively, demonstrat-
+ing its utility in fine-grained sentiment analysis.
+B. Datasets
+To fairly assess our proposed FCKT, we conducted our exper-
+iments using three public datasets, Laptop, Restaurant, and
+Tweets. (1) The first dataset, referred to as Laptop, con-
+sists of customer reviews in the electronic product domain.
+It was collected from the SemEval Challenge 2014 [Pontiki
+et al. , 2014 ]. (2) The second dataset, named Restaurant,
+comprises reviews from the restaurant domain. It is a com-
+bination of review sets from SemEval2014, SemEval2015,
+and SemEval2016 [Pontiki et al. , 2014; Pontiki et al. , 2015;
+Pontiki et al. , 2016 ]. (3) The third dataset, called Tweets, was
+created by Mitchell et al. [Mitchell et al. , 2013 ]. It comprises
+Twitter posts from various users.
+C. Baselines
+In this study, we compare three categories of models:
+(1)Pipeline-based models , which process tasks in sequential
+steps. These include:
+• CRF-Pipeline [Mitchell et al. , 2013 ]: This paradigm em-
+ploys a CRF as an aspect sequence extractor, succeeded by
+a sentiment classifier to achieve the objective.
+• NN-CRF-Pipeline [Zhang et al. , 2015 ]: Unlike the afore-
+mentioned model, this paradigm incorporates a shallow
+neural network model preceding the CRF.• TAG-Pipeline [Huet al. , 2019 ]: It is a sequence tagging
+approach utilizing a BERT encoder.
+• SPAN-Pipeline [Huet al. , 2019 ]. It utilizes BERT as the
+shared encoder for two tasks and subsequently builds its
+own model for each task.
+(2)End-to-End models , which directly map inputs to out-
+puts without intermediate steps. Representative models are:
+• SPJM [Zhou et al. , 2019 ]: It is a span-based method, which
+directly heuristically searches the boundaries of the aspect
+terms and then classifies the extracted aspect boundaries.
+• SPAN-Joint [Huet al. , 2019 ]: It utilizes BERT as the
+shared encoder for two tasks and subsequently builds its
+own model for each task.
+• S-AESC [Lvet al. , 2021 ]: The aspects and sentiments are
+generated collaboratively using both dual gated recurrent
+units and an interaction layer.
+• HI-ASA [Chen et al. , 2024a ]: A hierarchical interactive
+network is devised with the aim of enhancing the mutual in-
+teractions between aspect and sentiment. This network in-
+corporates input-side interactions as well as output-side in-
+teractions, forming a two-way communication framework.
+• DCS [Liet al. , 2023 ]: It proposes a dual-channel span gen-
+eration method to effectively constrain the search space for
+span candidates for aspect-sentiment triplet extraction.
+• MiniConGTS [Sunet al. , 2024 ]: This work proposes a min-
+imalist tagging scheme and token-level contrastive learning
+strategy to improve pretrained representations for aspect
+sentiment triplet extraction, achieving promissing perfor-
+mance with reduced computational overhead.
+• PDGN [Zhuet al. , 2024 ]: It introduces the grid noise diffu-
+sion pinpoint network , a T5-based generative model with
+three novel modules to address generation instability and
+improve robustness and effectiveness in aspect sentiment
+quad prediction tasks.
+• AIFI [Chen et al. , 2024a ]: The current state-of-the-art
+model for targeted sentiment analysis. AIFI is a variant of
+HI-ASA, introducing an adaptive feature interaction frame-
+work that leverages contrastive learning.
+(3)LLM-based models , which leverage large language mod-
+els with advanced reasoning capabilities. We leverage two
+large language model backbones, GPT-3.5-turbo and GPT-4o,
+employing four distinct techniques:
+• Zero-Shot: The model predicts without any prior task-
+specific examples, relying solely on its pre-trained knowl-
+edge to understand and perform the task.
+• Few-Shot: The model is provided with a small number of
+task-specific examples to guide its predictions, improving
+accuracy over zero-shot scenarios. We utilized 5-shot, 10-
+shot, and 20-shot methods, all randomly sampled from the
+training set. The results indicate that the 5-shot method
+performed the best, while the performances of the 10-shot
+and 20-shot methods showed a decline. The tables presents
+the output results for the 5-shot method.
+• CoT: This approach involves generating intermediate rea-
+soning steps, enabling the model to perform complex tasks
+by breaking them into smaller, logical steps.• CoT + Few-Shot: Combines the strengths of Chain of
+Thought reasoning and few-shot learning by providing
+task-specific examples along with explicit reasoning steps
+to enhance performance further.
+D. Evaluation
+We employ three widely used metrics—precision, recall,
+and F1 score—to evaluate the effectiveness of our proposed
+FCKT. For aspect extraction, we focus on the F1 score as the
+primary evaluation metric, while accuracy is adopted for sen-
+timent prediction. Notably, a predicted target is considered
+correct only if it exactly matches both the gold-standard as-
+pect and its corresponding polarity. To ensure robust and con-
+sistent evaluation while minimizing the impact of random-
+ness, we conducted 10 independent experiments and report
+the average performance across these runs.
+E. Implementation Details
+Following previous works [Lvet al. , 2023; Chen et al. ,
+2024a ], we split the training and test sets for each dataset. For
+the Tweets dataset, which lacks a predefined train-test split,
+we perform ten-fold cross-validation to ensure robust eval-
+uation. In the proposed model, we utilize the BERT-Large
+model as the backbone network. The maximum length h
+of an aspect is selected from the range {1,2,3,4}. The ra-
+tioξof distributional input samples is varied between 0 and
+1. Model optimization is conducted using the Adam opti-
+mizer [Kingma and Ba, 2014 ], with the learning rate searched
+from{2e-5,2e-3,2e-1}. The batch size is set to 16, and
+a dropout probability of 0.1 is applied. Additionally, the
+weight λis tuned over the range {0.1,0.3,0.5,0.7}. All ex-
+periments are implemented using the PyTorch framework and
+conducted on Nvidia GeForce Titan RTX 3090 GPUs, ensur-
+ing efficient training and reliable performance.
+References
+[Caiet al. , 2021 ]Hongjie Cai, Rui Xia, and Jianfei Yu.
+Aspect-category-opinion-sentiment quadruple extraction
+with implicit aspects and opinions. In ACL-IJCNLP , 2021.
+[Chen et al. , 2022a ]Hao Chen, Zepeng Zhai, Fangxiang
+Feng, Ruifan Li, and Xiaojie Wang. Enhanced multi-
+channel graph convolutional network for aspect sentiment
+triplet extraction. In ACL, 2022.
+[Chen et al. , 2022b ]Wei Chen, Jinglong Du, Zhao Zhang,
+Fuzhen Zhuang, and Zhongshi He. A hierarchical inter-
+active network for joint span-based aspect-sentiment anal-
+ysis. In COLING , 2022.
+[Chen et al. , 2024a ]Wei Chen, Yuxuan Liu, Zhao Zhang,
+Fuzhen Zhuang, and Jiang Zhong. Modeling adaptive
+inter-task feature interactions via sentiment-aware con-
+trastive learning for joint aspect-sentiment prediction. In
+AAAI , 2024.
+[Chen et al. , 2024b ]Wei Chen, Yiqing Wu, Zhao Zhang,
+Fuzhen Zhuang, Zhongshi He, Ruobing Xie, and Feng
+Xia. Fairgap: Fairness-aware recommendation via gen-
+erating counterfactual graph. TOIS , 2024.[Chen et al. , 2024c ]Wei Chen, Meng Yuan, Zhao Zhang,
+Ruobing Xie, Fuzhen Zhuang, Deqing Wang, and Rui
+Liu. Fairdgcl: Fairness-aware recommendation with
+dynamic graph contrastive learning. arXiv preprint
+arXiv:2410.17555 , 2024.
+[Devlin et al. , 2019 ]Jacob Devlin, Ming-Wei Chang, Ken-
+ton Lee, and Kristina Toutanova. Bert: Pre-training of
+deep bidirectional transformers for language understand-
+ing. In NAACL , 2019.
+[Huet al. , 2019 ]Minghao Hu, Yuxing Peng, Zhen Huang,
+Dongsheng Li, and Yiwei Lv. Open-domain targeted senti-
+ment analysis via span-based extraction and classification.
+InACL, 2019.
+[Jaiswal et al. , 2020 ]Ashish Jaiswal, Ashwin Ramesh Babu,
+Mohammad Zaki Zadeh, Debapriya Banerjee, and Fillia
+Makedon. A survey on contrastive self-supervised learn-
+ing.Technologies , 2020.
+[Kalbhor and Goyal, 2023 ]Shraddha Kalbhor and Dinesh
+Goyal. Survey on absa based on machine learning, deep
+learning and transfer learning approach. In AIP Confer-
+ence Proceedings , 2023.
+[Kingma and Ba, 2014 ]Diederik P Kingma and Jimmy Ba.
+Adam: A method for stochastic optimization. arXiv
+preprint arXiv:1412.6980 , 2014.
+[Liet al. , 2023 ]Pan Li, Ping Li, and Kai Zhang. Dual-
+channel span for aspect sentiment triplet extraction. In
+EMNLP , 2023.
+[Liang et al. , 2021 ]Bin Liang, Wangda Luo, Xiang Li, Lin
+Gui, Min Yang, Xiaoqi Yu, and Ruifeng Xu. Enhanc-
+ing aspect-based sentiment analysis with supervised con-
+trastive learning. In CIKM , 2021.
+[Lin and Yang, 2020 ]Peiqin Lin and Meng Yang. A shared-
+private representation model with coarse-to-fine extraction
+for target sentiment analysis. In EMNLP: Findings , 2020.
+[Liu, 2012 ]Bing Liu. Sentiment analysis and opinion min-
+ing. In Synthesis Lectures on Human Language Technolo-
+gies., 2012.
+[Luoet al. , 2019 ]Huaishao Luo, Tianrui Li, Bing Liu, and
+Junbo Zhang. Doer: Dual cross-shared rnn for aspect
+term-polarity co-extraction. In ACL, 2019.
+[Luoet al. , 2024 ]Haoran Luo, Haihong E, Yuhao Yang,
+Tianyu Yao, Yikai Guo, Zichen Tang, Wentai Zhang,
+Shiyao Peng, Kaiyang Wan, Meina Song, Wei Lin, Yifan
+Zhu, and Anh Tuan Luu. Text2nkg: Fine-grained n-ary re-
+lation extraction for n-ary relational knowledge graph con-
+struction. In NeurIPS , 2024.
+[Lvet al. , 2021 ]Yanxia Lv, Fangna Wei, Ying Zheng, Cong
+Wang, Cong Wan, and Cuirong Wang. A span-based
+model for aspect terms extraction and aspect sentiment
+classification. Neural Computing and Applications , 2021.
+[Lvet al. , 2023 ]Haoran Lv, Junyi Liu, Henan Wang, Yaom-
+ing Wang, Jixiang Luo, and Yaxiao Liu. Efficient hybrid
+generation framework for aspect-based sentiment analysis.
+InEACL , 2023.[Mitchell et al. , 2013 ]Margaret Mitchell, Jacqui Aguilar,
+Theresa Wilson, and Benjamin Van Durme. Open domain
+targeted sentiment. In EMNLP , 2013.
+[Nath and Dwivedi, 2024 ]Deena Nath and Sanjay K
+Dwivedi. Aspect-based sentiment analysis: approaches,
+applications, challenges and trends. KIS, 2024.
+[Pontiki et al. , 2014 ]Maria Pontiki, Dimitrios Galanis, John
+Pavlopoulos, Harris Papageorgiou, Ion Androutsopoulos,
+and Suresh Manandhar. Semeval-2014 task 4: Aspect
+based sentiment analysis. In SemEval , 2014.
+[Pontiki et al. , 2015 ]Maria Pontiki, Dimitris Galanis, Haris
+Papageorgiou, Suresh Manandhar, and Ion Androutsopou-
+los. Semeval-2015 task 12: Aspect based sentiment anal-
+ysis. In SemEval , 2015.
+[Pontiki et al. , 2016 ]Maria Pontiki, Dimitris Galanis, Haris
+Papageorgiou, Ion Androutsopoulos, Suresh Manandhar,
+AL-Smadi Mohammad, Mahmoud Al-Ayyoub, Yanyan
+Zhao, Bing Qin, Orph ´ee De Clercq, et al. Semeval-2016
+task 5: Aspect based sentiment analysis. In SemEval ,
+2016.
+[Sunet al. , 2024 ]Qiao Sun, Liujia Yang, Minghao Ma,
+Nanyang Ye, and Qinying Gu. MiniConGTS: A near ulti-
+mate minimalist contrastive grid tagging scheme for aspect
+sentiment triplet extraction. In EMNLP , 2024.
+[Tang et al. , 2020 ]Hao Tang, Donghong Ji, Chenliang Li,
+and Qiji Zhou. Dependency graph enhanced dual-
+transformer structure for aspect-based sentiment classifi-
+cation. In ACL, 2020.
+[Wang et al. , 2016 ]Wenya Wang, Sinno Jialin Pan, Daniel
+Dahlmeier, and Xiaokui Xiao. Recursive neural condi-
+tional random fields for aspect-based sentiment analysis.
+EMNLP , 2016.
+[Wang et al. , 2023 ]Zengzhi Wang, Qiming Xie, Zixiang
+Ding, Yi Feng, and Rui Xia. Is chatgpt a good sen-
+timent analyzer? a preliminary study. arXiv preprint
+arXiv:2304.04339 , 2023.
+[Weiet al. , 2022 ]Jason Wei, Xuezhi Wang, Dale Schuur-
+mans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V Le,
+Denny Zhou, et al. Chain-of-thought prompting elicits rea-
+soning in large language models. NeurIPS , 2022.
+[Xiong et al. , 2022 ]Haoliang Xiong, Zehao Yan, Hongya
+Zhao, Zhenhua Huang, and Yun Xue. Triplet contrastive
+learning for aspect level sentiment classification. Mathe-
+matics , 2022.
+[Xuet al. , 2021 ]Lu Xu, Yew Ken Chia, and Lidong Bing.
+Learning span-level interactions for aspect sentiment
+triplet extraction. In ACL, 2021.
+[Yang et al. , 2020 ]Yunyi Yang, Kun Li, Xiaojun Quan,
+Weizhou Shen, and Qinliang Su. Constituency lattice en-
+coding for aspect term extraction. In COLING , 2020.
+[Yuan et al. , 2023 ]Meng Yuan, Fuzhen Zhuang, Zhao
+Zhang, Deqing Wang, and Jin Dong. Knowledge-based
+multiple adaptive spaces fusion for recommendation. In
+RecSys , 2023.[Yuan et al. , 2025a ]Meng Yuan, Yutian Xiao, Wei Chen,
+Chu Zhao, Deqing Wang, and Fuzhen Zhuang. Hyperbolic
+diffusion recommender model. WWW , 2025.
+[Yuan et al. , 2025b ]Meng Yuan, Zhao Zhang, Wei Chen,
+Chu Zhao, Tong Cai, Deqing Wang, Rui Liu, and Fuzhen
+Zhuang. Hek-cl: Hierarchical enhanced knowledge-aware
+contrastive learning for recommendation. TOIS , 2025.
+[Zhang et al. , 2015 ]Meishan Zhang, Yue Zhang, and
+Duy Tin V o. Neural networks for open domain targeted
+sentiment. In EMNLP , 2015.
+[Zhang et al. , 2022 ]Rui Zhang, Yangfeng Ji, Yue Zhang,
+and Rebecca J Passonneau. Contrastive data and learn-
+ing for natural language processing. In NAACL: Human
+Language Technologies: Tutorial Abstracts , 2022.
+[Zhong et al. , 2024a ]Yan Zhong, Xingyu Wu, Li Zhang,
+Chenxi Yang, and Tingting Jiang. Causal-iqa: Towards
+the generalization of image quality assessment based on
+causal inference. In ICML , 2024.
+[Zhong et al. , 2024b ]Yan Zhong, Ruoyu Zhao, Chao Wang,
+Qinghai Guo, Jianguo Zhang, Zhichao Lu, and Luziwei
+Leng. Spike-ssm: A sparse, precise, and efficient spik-
+ing state space model for long sequences learning. arXiv
+preprint arXiv:2410.17268 , 2024.
+[Zhong et al. , 2025 ]Yan Zhong, Xinping Zhao, Guangzhi
+Zhao, Bohua Chen, Fei Hao, Ruoyu Zhao, Jiaqi He, Lei
+Shi, and Li Zhang. Ctd-inpainting: Towards the coherence
+of text-driven inpainting with blended diffusion. Informa-
+tion Fusion , 2025.
+[Zhou et al. , 2019 ]Yan Zhou, Longtao Huang, Tao Guo,
+Jizhong Han, and Songlin Hu. A span-based joint model
+for opinion target extraction and target sentiment classifi-
+cation. In IJCAI , 2019.
+[Zhou et al. , 2024 ]Changzhi Zhou, Dandan Song, Yuhang
+Tian, Zhijing Wu, Hao Wang, Xinyu Zhang, Jun Yang,
+Ziyi Yang, and Shuhao Zhang. A comprehensive evalu-
+ation of large language models on aspect-based sentiment
+analysis. arXiv preprint arXiv:2412.02279 , 2024.
+[Zhuet al. , 2024 ]Linan Zhu, Xiangfan Chen, Xiaolei Guo,
+Chenwei Zhang, Zhechao Zhu, Zehai Zhou, and Xiangjie
+Kong. Pinpointing diffusion grid noise to enhance aspect
+sentiment quad prediction. In ACL: Findings , 2024.

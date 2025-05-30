@@ -1,0 +1,1851 @@
+arXiv:2505.21364v1  [cs.LG]  27 May 2025Towards Interpretability Without Sacrifice: Faithful
+Dense Layer Decomposition with Mixture of Decoders
+James Oldfieldm,q∗Shawn ImmYixuan LimMihalis A. Nicolaouc
+Ioannis PatrasqGrigorios G Chrysosm
+mUniversity of Wisconsin–MadisonqQueen Mary University of LondoncThe Cyprus Institute
+Abstract
+Multilayer perceptrons (MLPs) are an integral part of large language models, yet
+their dense representations render them difficult to understand, edit, and steer.
+Recent methods learn interpretable approximations via neuron-level sparsity, yet
+fail to faithfully reconstruct the original mapping–significantly increasing model’s
+next-token cross-entropy loss. In this paper, we advocate for moving to layer -level
+sparsity to overcome the accuracy trade-off in sparse layer approximation. Under
+this paradigm, we introduce Mixture of Decoders (MxDs). MxDs generalize MLPs
+and Gated Linear Units, expanding pre-trained dense layers into tens of thousands
+of specialized sublayers. Through a flexible form of tensor factorization, each
+sparsely activating MxD sublayer implements a linear transformation with full-
+rank weights–preserving the original decoders’ expressive capacity even under
+heavy sparsity. Experimentally, we show that MxDs significantly outperform
+state-of-the-art methods (e.g., Transcoders) on the sparsity-accuracy frontier in
+language models with up to 3B parameters. Further evaluations on sparse probing
+and feature steering demonstrate that MxDs learn similarly specialized features of
+natural language–opening up a promising new avenue for designing interpretable
+yet faithful decompositions. Our code is included at: https://github.com/
+james-oldfield/MxD/ .
+1 Introduction
+One strategy for addressing concerns about large language models’ (LLMs) [ 1,2,3] behavior is via a
+bottom-up approach to understanding and controlling the network internals–developing models of
+how and where human-interpretable features are represented in LLMs and how they affect the output
+[4,5,6]. Such a mechanistic understanding has proved helpful for a number of issues relating to
+safety and transparency, from controlling refusal of harmful requests [ 7] to detecting generation of
+unsafe code [6] and latent model knowledge [8].
+However, developing models of LLMs’ internals faces challenges due to the dense nature of their
+representations [ 9,10]. Indeed, many studies have found that individual neurons in MLP layers
+encode multiple distinct concepts. Rather than human-interpretable features being neatly aligned with
+individual neurons, they are often distributed across many [ 11,12]. As a result, it is not straightforward
+to cleanly isolate specific concepts of interest in the models’ latent token representations.
+Traditionally, imposing constraints on model form has offered a way to instill more predictable
+properties or structure. Indeed, there is a rich history of success with constraints in machine learning:
+from parts-based representations through non-negativity [ 13,14], to structure through low-rankness
+or assumptions on geometry [ 15,16]. With the particular issues posed by dense representations
+in LLMs, specialization through sparsity has re-emerged as a dominating strategy for learning
+∗Corresponding author: j.a.oldfield@qmul.ac.uk . Work done whilst at UW-Madison.
+Preprint. Under review.Figure 1: Units of specialization for sparse layer variants :Neuron -level sparsity of existing sparse
+MLPs [ 27,26] (center) vs layer -level sparsity (right), which the proposed Mixture of Decoders (MxD)
+layer enables at scale. For GPT2-124M , the dimensions are: O= 768 ,H∗=O·4,N≈O·32.
+more interpretable representations. With prior work showing that sparser models both aid human
+explanation [ 17] and achieve higher scores on LLM-based auto-interpretability metrics [ 18,19],
+sparsity is often used as a proxy for interpretability [ 20,21]. To this end, many recent works–
+such as sparse autoencoders [ 22,23,6]–take inspiration from traditional sparse dictionary learning
+methodologies [ 24,25], re-writing pre-trained LLMs’ activations as sparse, non-negative linear
+combinations of atoms in a learned overcomplete basis. However, as argued in [ 26], such approaches
+do not learn the functional mechanisms of LLMs’ layers, and their inherent post-hoc nature demands
+additional parameters and computation on top of the base models.
+One alternative approach is to directly replace layers with more interpretable equivalents [ 28], such as
+with wide MLPs with sparsity constraints. Transcoders [ 27,29,30,26] (TCs) are a recent example of
+this, training new MLPs to mimic the functional behavior of MLPs with sparse hidden units, which
+have recently been shown to also learn more interpretable features [ 26]. Thus, instead of relying on
+external post-hoc analysis, sparse MLP layers offer a way to distill specialized features directly into
+the model’s forward pass itself.
+Both of the above methods for learning specialized features fall into the same category of what
+one may call ‘neuron-level sparsity’. Dictionary learning methods restrict the number of non-zero
+elements used from a learned dictionary, whilst sparse MLPs [ 27] limit the number of active rows
+used from a learned ‘decoder’ matrix. At its core, whilst this constraint is useful for interpretability, it
+is too restrictive–often heavily trading off accuracy for sparsity, poorly reconstructing the original
+model components [ 31,28]. We argue that preserving the base models’ performance is a crucial
+component of sparse MLP layer approximations for the following two key reasons:
+1.Model faithfulness : sparse layers that poorly approximate the original layers risk missing
+critical intricacies of the base models’ behavior or latent features [ 32]. Conversely, an
+accurate reconstruction (yielding similar downstream next-token loss) is some evidence that
+the combination of newly learned subcomputations faithfully emulates the base model.
+2.Practical adoption : sparse layers that closely preserve base models’ performance are
+capable of replacing the existing MLPs, directly integrating specialized computation into
+the native forward pass. Otherwise, downstream use of the sparse layers’ features must run
+on top of the base models’ computation. This introduces additional inference-time cost to
+every forward pass, and restricts any analysis to post-hoc settings.
+In this paper, we advocate for moving from neuron -level to layer -level sparsity (as illustrated in
+Figure 1) to address this. We propose the Mixture of Decoders (MxD) layer to overcome the
+sparsity-accuracy trade-off through scalable, resource-efficient conditional computation. Rather
+than individual vectors, MxDs learn interpretable sublayers as atomic units of specialization. This
+faithfully mirrors the functional form of dense layer we wish to approximate, and allows MxDs to
+readily generalize to modern MLP variants (i.e., the Gated Linear Unit [33]).
+At a technical level, MxDs are constructed via a flexible tensor factorization [ 34] with the Hadamard
+product [ 35]. Through their parameter efficiency, MxDs scale the number of specialized layers far
+beyond what is feasible with classic sparse mixture of experts (MoEs) [ 36], and recover prior adapter-
+based MoEs [ 37,38] as a special case. Crucially, we prove that the proposed tensor factorization in
+MxDs leads to each ‘expert’ sublayer implementing a linear transformation with full-rank weights–
+allowing faithful reconstruction even under heavy sparsity. Empirically, we demonstrate that MxDs
+significantly outperform alternative sparse MLP layers such as Transcoders [ 27] and Skip Transcoders
+[26] on the sparsity-accuracy frontier. In addition to their faithfulness, MxDs remain competitive
+with the SOTA on interpretability metrics. Our contributions can be summarized as follows:
+2•We propose Mixture of Decoders , an instance of a flexible class of parameter-efficient MoE
+through Hadamard product-factorized weight tensors.
+•We prove that each specialized MxD expert’s weights inherit up to the same rank as the
+original MLP’s decoder, providing faithful approximation even in very sparse models.
+•Across 108sparse layers in 4LLMs (with up to 3B parameters) MxDs (i) pareto-dominate
+existing techniques on the sparsity-accuracy frontier yet (ii) remain competitive on 34sparse
+probing and steering tasks, validating the interpretability of the learned experts.
+2 Methodology
+We first recall the technical details of language models’ MLP layers and existing approaches to sparse
+approximations in Section 2.1. We then introduce the proposed MxD in Section 2.2, outlining the
+attractive rank properties it inherits in Section 2.3 and factorized implementation in Section 2.4. We
+conclude with extensions to modern MLP layers in Section 2.5.
+2.1 Preliminaries
+Letx∈RIbe the pre-MLP latent representation of a specific token at a given layer. Omitting bias
+terms throughout for brevity, the GPT2-style MLP layer produces the output vector y∈ROas:
+MLP( x) =D∗⊤z∗∈RO,withz∗:=ϕ 
+E∗⊤x
+∈RH∗, (1)
+where E∗∈RI×H∗,D∗∈RH∗×Oare the learnable ‘encoder’ and ‘decoder’ parameters respectively,
+andϕ(.)is an activation function, often a GELU [ 39]. We use∗to denote the weights/dimensions of
+the pre-trained base LLM.
+Sparse approximations One approach to learning interpretable features in MLPs is to train new,
+wider MLPs with sparse hidden units to reconstruct the original layer’s outputs [ 27,26,30,29],
+reminiscent of dictionary learning techniques [25]. In general, sparse MLPs share the model form:
+SMLP (x) =D⊤z=HX
+h=1zhdh∈RO,withz:=S 
+E⊤x
+∈RH, (2)
+whereS(.)is a sparsity-inducing function (such as the top- K[23] activation used in this paper). Here,
+the dimensionality of sparse MLPs’ learnable weights E∈RI×H,D∈RH×Oare set as H≫H∗
+such that the hidden layer is significantly larger than that of the original MLP. The original post-MLP
+output vectors are approximated as a K-sparse, non-negative linear combination of the rows dn
+of a newly learned decoder matrix. Whilst this model form has been shown to learn interpretable,
+specialized features zhin language models [ 27,26], their poor reconstruction is of questionable
+faithfulness and limits their use as a layer replacement in practice.
+2.2 Mixture of Decoders
+We now detail the proposed Mixture of Decoders (MxD) layer, which overcomes the sparsity-
+accuracy trade-off by treating sparsely activating linear layers as the atomic unit of specialization.
+We approximate the original MLP with a conditional combination of Nlinear transformations :
+MxD( x) =NX
+n=1an(W⊤
+nz)∈RO, (3)
+where a:=S 
+G⊤x
+∈RNaresparse ‘expert coefficients’ from learnable gating matrix G∈RI×N,
+andz:=ϕ 
+E⊤x
+∈RHis the dense output from an encoder. Here, W∈RN×H×Ois a third-order
+tensor of parameters collating all Nexperts’ decoder weights W(n,:,:) =Wn∈RH×O. In MxDs,
+we use a large Nto scale the feature specialization, and set H:=H∗to match the original MLP’s
+smaller hidden dimension.
+With the gate routing each token to just its top- Kexperts, each Wn∈RH×Oreceives a gradient
+signal from only a specific set of semantically similar tokens. This implicit clustering naturally leads
+3experts to specialize in feature-specific subcomputations, while collectively covering the layer’s full
+functionality. MxDs in Equation (3) also directly inherit the MLP layers’ original functional form,
+avoiding the need to impose sparsity and non-negativity constraints on the hidden units z∈RH.
+However, MxD decoders naively require a prohibitive NHO parameters–preventing Nfrom scaling
+to tens of thousands of specialized components. To achieve parameter-efficiency whilst retaining
+layer capacity for faithful layer approximation, we parameterize MxDs’ third-order weight tensor
+W∈RN×H×Ospecifically to yield full-rank expert weights, defined elementwise as:
+W(n, h,:) =cn∗dh∈RO,∀n∈ {1, . . . , N }, h∈ {1, . . . , H }, (4)
+where ∗is the Hadamard product [34,35], and cn,dh∈ROare the rows of learnable weights
+C∈RN×O,D∈RH×O. Intuitively, Dimplements a base transformation modulated by the N
+specialized units in C. Additional technical motivation for this parameterization with tensor methods
+can be found in Appendix A.3. This brings MxDs’ parameter count down significantly to O·(N+H)
+fromNHO in Equation (3) with Nfull decoders. One can then vary Nto parameter-match sparse
+MLP layers. We next detail how this design (i) retains expressivity in each unit for faithful layer
+approximation under sparsity in Section 2.3 and (ii) yields a simple forward pass in Section 2.4.
+2.3 MxDs are rank-preserving
+In the original LLM, the linear transformation from the hidden units to the output is constrained by
+the rank of the original MLP’s decoder matrix D∗∈RH∗×O. Under only mild technical conditions,
+every expert’s weight matrix in MxDs inherits the rank of D∈RH×O, thus allowing it to match that
+of the original MLP’s decoder, despite its parameter-efficiency:
+Lemma 1 (Decoder rank preservation) .We can materialize linear expert n’s weight matrix as
+W(n,:,:) =Wn=Ddiag (cn)∈RH×O. Assuming diag (cn)∈RO×Ois a diagonal matrix with
+no zeros along its diagonal (and thus invertible), we then have
+rank(Wn) = rank( Ddiag(cn)) = rank( D).
+The proof is found in Appendix A.1, which first derives the matrix-valued expression for each expert
+from Equation (4) and then applies a standard rank equality. At a sparsity level of K, each MxD
+output vector is a weighted sum of K-many linear transformations (each with potentially full-rank
+weights) of the dense hidden units z. As a result, MxDs retain layer capacity even under high
+sparsity. Sparse MLPs’ hidden units have only Knon-zero elements in contrast–each output in
+Equation (2) is therefore confined to a K-dimensional subspace of RO, potentially limiting the
+capacity of sparse MLPs to faithfully approximate the original mapping in the small Kregime
+desirable for interpretability (mirroring speculations by [ 26]). Further, whilst alternative soft linear
+MoEs achieve scalability through low-rankness [ 40], Lemma 1 states that no such rank constraints
+are present in MxDs. For approximating existing MLP layers where low-rank assumptions may not
+hold, MxDs are consequently a more suitable class of conditional layer.
+2.4 Factorized forward pass
+Figure 2: Mixture of Decoders
+extends the base MLP/GLU layers
+with a conditional ‘expert’ branch,
+modulating the MLP’s outputs.MxDs compute a linear combination of Nlinear transfor-
+mations of the dense vector. With the proposed Hadamard-
+factorized weights, this yields a simple implementation.
+Lemma 2 (Hadamard-factorized MoE forward pass) .Letz∈
+RHanda∈RNdenote the MLP hidden units and expert
+coefficients respectively. Further, denote the decoder matrices
+asC∈RN×O,D∈RH×Oparameterizing W∈RN×H×O.
+MxD’s forward pass can be re-written as:
+MxD( x) =NX
+n=1an 
+W⊤
+nz
+= 
+C⊤a
+∗ 
+D⊤z
+.(5)
+The proof is found in Appendix A.2. We include a notebook at https://github.com/
+james-oldfield/MxD/blob/main/form-equivalence.ipynb showing the equivalence in Py-
+Torch. Further, please see Appendix A.5 for a discussion of how the Hadamard factorization relates
+to prior parameter-efficient MoEs with element-wise scaling [37].
+4Table 1: Model formulations of related work :x∈RI,y∈ROare the pre- and post-MLP
+representations respectively, zare the hidden units, and ais the vector of the ‘expert coefficients’ for
+MxD. Model-specific encoders/decoders E,Dmap between the hidden units and output.
+MLPs SAEs Transcoders Skip Transcoders MxDs
+[3] [22] [27] [26] (Ours)
+Model form y=D∗⊤z∗y≈D⊤z y ≈D⊤z y ≈D⊤z+S⊤x y ≈P
+nan 
+W⊤
+nz
+Sparse component None z=S 
+E⊤y
+∈RHz=S 
+E⊤x
+∈RHz=S 
+E⊤x
+∈RHa=S 
+G⊤x
+∈RN
+2.5 Extending MxDs to GLUs
+In contrast to methods imposing neuron-level sparsity [ 22,27,26], MxDs do not make assumptions
+about the base layer’s encoder architecture or activation function. As a result, MxDs readily generalize
+to alternative architectures such as the Gated Linear Units (GLUs) [ 33] used in recent LLMs [ 1,2].
+Recall that GLUs’ hidden units are computed as zGLU=ψ(E⊤
+GLUx)∗ 
+E⊤x
+∈RH,with additional
+GLU parameters EGLU∈RI×Hand GLU activation function ψ(e.g.,Swish [1]). By substituting in
+the GLU hidden representations, MxDs straightforwardly extend the GLU model form too:
+MxD GLU(x) =NX
+n=1anW⊤
+n
+ψ(E⊤
+GLUx)∗ 
+E⊤x
+| {z }
+GLU hidden units
+= 
+C⊤a
+∗D⊤ 
+ψ(E⊤
+GLUx)∗ 
+E⊤x
+where a:=S 
+G⊤x
+∈RNare the expert units, and Wn=Ddiag(cn)∈RH×Oas before. For
+a technical discussion of GLUs and their relationship to MxDs, we refer readers to Appendix A.4–
+through the theoretical results developed in this paper, we show that GLU encoders themselves can
+be viewed as a mixture of rank- 1linear experts (in contrast to the rank-preserving MxDs).
+3 Experiments
+The experimental section in the main paper is split into two parts. Section 3.1 first demonstrates
+how MxDs perform significantly better on the accuracy-sparsity frontier as sparse MLP layer ap-
+proximations on 4 LLMs. We then demonstrate in Section 3.2 that MxD’s features retain the same
+levels of specialization through sparse probing and steering evaluations. Thorough ablation studies,
+experiments with matrix rank, and comparisons to low rank MoEs are presented in Appendix B.
+3.1 Sparse approximations of MLPs in LLMs
+In this section, we perform experiments approximating LLMs’ existing feed-forward layers with
+sparse MLPs, establishing that MxDs better navigate the sparsity-accuracy frontier, more faithfully
+approximating the base models’ MLPs than the SOTA baseline methods.
+Implementation details We train on 4base models: GPT2-124M [3],Pythia-410m ,
+Pythia-1.4b [41], andLlama-3.2-3B [1] with up to 80k experts/features. We train all sparse
+layers on a total of 480M tokens of OpenWebText [ 42], with learning rate 1e−4and a context length
+of128, initializing the output bias as the empirical mean of the training tokens, and Din MxDs
+as the zero-matrix (following [ 26]). We vary Nin MxD layers to parameter-match Transcoders in
+all experiments, with parameter counts and dimensions shown in Table 2. For Llama3.2-3B , we
+use theSwish-GLU variant of MxD and GELU-MLP MxDs for the other three models, matching the
+architectures of their base encoders. Through ablation studies in Appendix B.6 we show that MxDs
+using the GELU/GLU variants are much more accurate layer approximators than the ReLU variants.
+Full experimental details are included in Appendix D. Whilst we do not have the computational
+resources to show similarly thorough experiments on even larger LLMs, we expect MxDs to scale
+just as well to models with tens of billions of parameters or more.
+Objective function Given the frozen weights of the MLP, we train sparse layers to minimize the
+normalized reconstruction loss between its output and that of the original MLP layer with objectives
+of the form L=Exh
+||MLP( x)−f(x)||2
+2
+||MLP( x)||2i
+, where f(.)denotes the various learnable sparse MLP layers.
+5Table 2: Sparse layer parameters/dimensions: Hdenotes the size of the layers’ hidden units and Nis
+the expert count. MxDs perform almost as many linear transformations as the baselines have features.
+GPT2-124M Pythia-410M Pythia-1.4B Llama-3.2-3B
+Model Params H N Params H N Params H N Params H N
+Transcoders [27] 37.7M 24,576 — 67.1M 32,768 — 268.5M65,536 — 604M 98,304 —
+Skip Transcoders [26] 38.4M 24,576 — 68.2M 32,768 — 272.7M65,536 — 614M 98,304 —
+MxDs 37.7M 3072 21 ,490 67 .1M 4096 28 ,658 268 .4M 8192 57 ,330 604 M 8202 86 ,015
+16 32 64 128 2563.6003.6053.6103.6153.6203.6253.6303.635 Mean cross-entropy loss
+GPT2-124M 
+  (Layer 8)
+Original LLM
+TC (38M params)
+STC (38M params)
+MxDs (38M params)
+16 32 64 128 2563.3253.3303.3353.3403.345
+Pythia-410M 
+  (Layer 15)
+Original LLM
+TC (67M params)
+STC (68M params)
+MxDs (67M params)
+16 32 64 128 256
+ Sparsity level K
+3.1003.1053.1103.1153.120 Mean cross-entropy loss
+Pythia-1.4B 
+  (Layer 12)
+Original LLM
+TC (269M params)
+STC (273M params)
+MxDs (268M params)
+16 32 64 128 256
+ Sparsity level K
+3.02003.02253.02503.02753.03003.03253.03503.03753.0400
+Llama3.2-3B 
+  (Layer 12)
+Original LLM
+TC (604M params)
+STC (614M params)
+MxDs (604M params)
+Figure 3: Model cross-entropy loss preserved when replacing MLPs with Transcoders [ 27], Skip
+Transcoders [ 26], and MxDs, as a function of the number of active units K(hidden neurons/experts).
+We highlight that MxDs have consistently lower loss at all levels of sparsity.
+To compare with recent work [ 26], we adopt the TopK activation function [ 23] for sparsity-inducing
+function S(.), removing the need for an additional sparsity penalty.
+3.1.1 Results: sparsity vs faithfulness
+We train an exhaustive set of 60sparse MLP approximations across 4diverse LLMs with up to 3B
+parameters. We show in Figure 3 the resulting downstream base model cross-entropy loss when
+using the trained sparse layers in place of the original MLPs. As can be seen, not only do the
+proposed MxD layers outperform Transcoders [ 27] notably, but model performance is similarly
+preserved at all sparsity levels in MxD layers . With prior work finding sparse solutions to be more
+interpretable [ 17,19], the performance gap of MxDs at small Kis a significant advantage. Please
+also see Figure 10 for results with normalized MSE, where MxDs’ reconstruction errors are up to an
+order of magnitude smaller. Full results on additional layers are included in Appendix B.3 for 48
+6World Sports Business T ech
+News type0.00.20.40.60.81.0T est F1 scoreag_news
+gpt2
+MxD
+TC
+Skip-TC
+T opK-SAE
+World Sports Business T ech
+News type0.00.20.40.60.81.0T est F1 scoreag_news
+pythia-410m
+MxD
+TC
+Skip-TC
+T opK-SAEFigure 4: Highest F1 score probing for ‘news category’ [ 48] on individual features/experts. As
+expected, the MxDs remain competitive with the Transcoder baselines, outperforming TopK-SAEs.
+more trained sparse layers. Please also see Appendix B.1 for qualitative and quantitative results for
+how faithfully the sparse layers propagate to the LLMs’ output space of natural language.
+The recent ‘Skip Transcoders’ (STCs) [ 26], introduce an additional IOparameters with a skip
+connection S∈RI×Omapping the input directly to the output with y≈D⊤z+S⊤x. STC layers
+thus have considerably more parameters (e.g., STCs on llama3.2-3B have 10M more parameters
+than MxDs). Despite the smaller parameter counts, we find MxDs consistently outperform STCs on
+the sparsity-accuracy frontier, attesting to the benefits of MxDs’ model form.
+3.2 Feature evaluations
+The accurate reconstruction of MxD models in Section 3.1 provides some evidence that MxDs are
+faithfully emulating the original MLP layers’ functional mapping. However, for interpretability,
+we care equally about the extent to which the learned features correspond to specialized, human-
+interpretable concepts. We confirm that MxD’s features compete with the baselines quantitatively in
+two ways: through probing for known concepts in Section 3.2.1 and by steering the model using the
+learned features Section 3.2.2. For all experiments in this section, we use the K= 32 models.
+Shared experts and specialization Interestingly, we find MxDs naturally learn a ‘shared’ expert
+performing a common base transformation–the remaining K−1active experts are thus free to
+dedicate their capacity to modelling features unique to individual tokens. This emergent shared/private
+processing complements recent trends to use shared experts by design in MoEs [ 43,44,45,46,47]
+with [ 43] arguing this facilitates greater specialization. Furthermore, one may view the skip connection
+in STCs [ 26] as performing an analogous role to the shared expert. With MxDs, however, allunits
+have the same high capacity to accurately learn separate subcomputation regardless of the frequency
+or rarity of features.
+We also observe that our trained MxDs exhibit very few ‘dead’ experts, as shown in Appendix C.1,
+with many experts contributing actively. Furthermore, initial ablations in Appendix C.2 show that one
+can train MxDs without shared experts if desired, at small performance cost. Please see qualitative
+results of activated tokens for particular experts in Appendix E.
+3.2.1 Sparse probing with individual features/experts
+One challenge is that the sparse layers learn features in an unsupervised manner. As pointed out in
+[23], we therefore do not know which high-level features we ought to expect the model to learn (or
+even whether they exist in the OpenWebText training data). Nonetheless, we can reasonably expect a
+useful unsupervised model to learn at least a handful of commonly occurring concepts and linguistic
+themes. We accordingly focus our evaluation on the relative abilities of the sparse models to learn
+features well-predicting a variety of binary features used in the literature.
+Concretely, to quantify the extent to which sparse layer features reliably fire in response to common
+high-level, interpretable concepts of natural language, we adopt the experimental settings of [ 49,
+23,19], training binary probes on the individual units of specialization (sparse hidden units znfor
+TCs/SAEs and expert units anfor MxDs–all pre-activation). For probing of sample-level concepts,
+we mean-pool activations across all non-padding tokens [ 19]. We train separate probes on 100
+features with the largest mean difference between positive and negative activations, as per [49].
+7Figure 5: Mean score along dimensions of ‘textual coherence’ and ‘steerability’ of text generated by
+steering with the first 100 features of the sparse layers. Each sample is scored by 2 LLM judges.
+We perform experiments on all 24binary probing tasks in the SAEBench suite [ 19]. Four of which
+are shown in Figure 4, plotting the best F1 score (on a held-out set) for news topic classification in a
+1-vs-all setting [ 48]. As can be seen, there exist individual MxD expert units that are predictive of
+various categories of news articles, competitive with the baselines. We refer readers to Appendix B.5
+for additional experiments on 20more sample-level probing tasks, 10token-level probing tasks, and
+experimental details.
+3.2.2 Feature steering
+Specific features might reliably fire in response to interpretable patterns of the input, yet not contribute
+to the generation process. Here, we aim to test this functional role of features by steering the LLMs.
+We note that these experiments do not aim to establish TCs/MxDs as competitive with the SOTA
+for controllable LLM generation. Rather, we aim to validate that the learned features contribute
+mechanistically to the LLM’s forward pass in a predictable way.
+Mechanisms for steering Letλ∈Rbe a hyperparameter controlling the desired ‘strength’ of
+the model edit. For TCs, we hook the forward pass at the relevant layer to increase the presence of
+target feature nwith ˆy=y+λdn. In contrast, MxDs can be steered with ˆy=y+λ·(W⊤
+nz).
+Intuitively, increasing the weight of an expert’s contribution in the forward pass modulates the token
+representation in the direction of the learned specialization.
+Results We perform steering with the first 100neurons/experts individually, using λ:= 100 for all
+experiments. We generate a collection of 10synthetic outputs for each neuron, each string consisting
+of32generated tokens to the prompt “Let’s talk about ” . We then ask two LLMs2to rate the
+collection of text along two dimensions separately: (1) the extent to which a shared concept, theme,
+or linguistic pattern is present throughout the generated collection of text, and (2) the grammatical
+fluency of the text (please see Appendix D.1 for the full prompt). As can be seen from the mean
+scores over the 100neurons shown in Figure 5, MxDs are competitive with the baselines, exhibiting
+a similar trade-off between textual coherence and presence of concept as we expect.
+4 Related work
+Sparse decompositions Learning sparse [ 50,25], non-negative [ 51] features of a data signal
+has found many applications in computer vision [ 15,52,53,54] and natural language processing
+[55,56,57], motivated by the pursuit of interpretable, parts-based representations [ 13,14]. In
+transformer-based language models [ 3], similar variants have been proposed for post-hoc analysis;
+2We use gemini-2.0-flash andllama-4-scout-17b-16e-instruct as two independent LLM judges.
+8sparse autoencoders (SAEs) are a popular method that rewrites latent features as non-negative
+combinations of atoms in a learned overcomplete dictionary, imposing either soft sparsity penalties
+[6,22,31] or thresholding activations directly [ 23,58,59]. Recent work aims to sparsify the existing
+layers of pretrained LLMs, learning new MLPs with sparse hidden units [ 29] for circuit analysis [ 27]
+or more interpretable yet faithful computation [26, 60]. Despite the surge of interest in SAEs, many
+works are emerging drawing attention to their limitations–underperforming baselines for probing
+[61], unlearning [62], and steering [63], in addition to other pathologies [64, 32, 65, 66].
+Conditional computation One natural alternative to static fully connected layers is conditional
+computation [ 67,68]. Tracing back to the early work of [ 69,70], single dense layers are replaced
+with specialized subunits–conditional on the input–as a form of layer-level sparsity. The Mixture of
+Experts (MoE) architecture [ 36,71,72] is a prominent example of conditional computation, breaking
+the link between parameter count and FLOPs. Consequently, MoEs have seen rapid adoption in
+SOTA models in recent years–scaling to very large parameter counts [ 73,74,75,76,77]. For
+parameter-efficient instruction tuning [ 37] introduces conditional (IA)3adapters [ 38], modulating
+the MLP hidden dimension with the Hadamard product. Our proposed formulation with factorized
+weight tensors yields ‘MoVs’ [ 37] as a less scalable special case (see Appendix A.5). In contrast,
+MxDs model the decoder output space directly for reconstruction, and also provide significantly more
+specialized units than [37], making MxDs more suitable for our goal of interpretability.
+Whilst the primary focus of MoEs has been on their impressive capabilities, the literature has observed
+that individual experts often specialize in particular semantic patterns of the input data, despite not
+being trained to do so [ 78,79,43,80,81]. For example, many works find that data that are in some
+sense similar are routed to the same experts–specializing to object shapes [ 82], texture [ 83], image
+category [ 84], or semantic patterns in natural language [ 36]. In the context of large language models,
+this emergent property of specialization in MoEs has been a primary focus of recent work: from
+encouraging monosemantic experts [ 85] or sparsity amongst experts’ weights [ 86] to efficiently
+scaling the expert count for fine-grained specialization [ 40]. In contrast to these works exploring
+pre-training, we explore an efficient design of MoE to replace existing LLMs’ dense layers.
+5 Conclusion
+In this paper, we showed the benefits of decomposing dense layers’ computations as a mixture
+of interpretable sublayers. We proposed the Mixture of Decoders (MxD) layer to achieve this at
+scale, proving that MxDs’ linear experts preserve the matrix rank properties of the original decoders.
+Experimentally, we showed MxDs significantly outperform on the sparsity-accuracy frontier when
+trained to replace dense MLP layers. Quantitative results on sparse probing and feature steering
+demonstrated MxDs nonetheless learn specialized latent features similarly to existing interpretability
+techniques. Crucially, MxDs reexamine the dominating neuron-level sparsity paradigm of popular
+techniques, providing evidence that specialization doesn’t have to come with such a high cost to
+model performance. We believe MxDs (and specialization at the layer-level more generally) are an
+important step towards sparsity without sacrifice. We hope future work continues to build interpretable
+mechanisms that better preserve model capabilities.
+Limitations Our experiments show MxDs outperform on the sparsity-accuracy frontier on 4 diverse
+LLMs. Whilst we fully anticipate this trend to continue in even larger models, our experiments only
+provide direct evidence for LLMs with up to 3B parameters, given our limited resources. Furthermore,
+whilst the TopK activation can greatly reduce the decoders’ FLOPs, the large encoders in sparse
+MLPs and the gating function in MxDs remain an additional inference-time cost. Future work could
+explore hierarchical structures [ 85,36] and/or efficient retrieval [ 87] for further reductions in FLOPs.
+Secondly, MoEs are prone to issues of expert imbalance [ 71], or collapse [ 88]. Just as a low learning
+rate helps prevent dead SAE features [ 89], we too find a low learning rate avoids dead experts (see
+Appendix C.1 exploring expert balance and Section 3.2.2 for functional diversity). Thus, similar care
+needs to be taken with MxDs’ learning rate to ensure accurate yet non-degenerate reconstructions.
+9Acknowledgments
+JO is grateful to Demian Till for reviewing the draft and providing valuable feedback and suggestions.
+JO would also like to thank Markos Georgopoulos, Benjamin Hayum, and Wisconsin AI Safety
+Initiative’s Safety Scholars for insightful discussions throughout the project. We are also grateful to
+the open-source Zulip platform for facilitating research discussion.
+References
+[1]Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle,
+Aiesha Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al. The llama 3 herd
+of models. arXiv preprint arXiv:2407.21783 , 2024.
+[2]Morgane Riviere, Shreya Pathak, Pier Giuseppe Sessa, Cassidy Hardin, Surya Bhupatiraju,
+Léonard Hussenot, Thomas Mesnard, Bobak Shahriari, Alexandre Ramé, et al. Gemma 2:
+Improving open language models at a practical size. arXiv preprint arXiv:2408.00118 , 2024.
+[3]Alec Radford, Jeff Wu, Rewon Child, David Luan, Dario Amodei, and Ilya Sutskever. Language
+models are unsupervised multitask learners. 2019.
+[4]Zhengxuan Wu, Atticus Geiger, Thomas Icard, Christopher Potts, and Noah Goodman. In-
+terpretability at scale: Identifying causal mechanisms in alpaca. In A. Oh, T. Naumann,
+A. Globerson, K. Saenko, M. Hardt, and S. Levine, editors, Adv. Neural Inform. Process. Syst.
+(NeurIPS) , volume 36, pages 78205–78226. Curran Associates, Inc., 2023.
+[5]Atticus Geiger, Zhengxuan Wu, Christopher Potts, Thomas Icard, and Noah Goodman. Finding
+alignments between interpretable causal variables and distributed neural representations. In
+Francesco Locatello and Vanessa Didelez, editors, Proceedings of the Third Conference on
+Causal Learning and Reasoning , volume 236 of Proceedings of Machine Learning Research ,
+pages 160–187. PMLR, 01–03 Apr 2024.
+[6]Adly Templeton. Scaling monosemanticity: Extracting interpretable features from claude 3
+sonnet . Anthropic, 2024.
+[7]Andy Arditi, Oscar Obeso, Aaquib Syed, Daniel Paleka, Nina Panickssery, Wes Gurnee, and
+Neel Nanda. Refusal in language models is mediated by a single direction. arXiv preprint
+arXiv:2406.11717 , 2024.
+[8]Collin Burns, Haotian Ye, Dan Klein, and Jacob Steinhardt. Discovering latent knowledge in
+language models without supervision. In Int. Conf. Learn. Represent. (ICLR) , 2023.
+[9]David E. Rumelhart and James L. McClelland. A General Framework for Parallel Distributed
+Processing , pages 45–76. 1987.
+[10] Geoffrey E Hinton. Distributed representations. 1984.
+[11] Chris Olah, Nick Cammarata, Ludwig Schubert, Gabriel Goh, Michael Petrov, and Shan
+Carter. Zoom in: An introduction to circuits. Distill , 2020. doi: 10.23915/distill.00024.001.
+https://distill.pub/2020/circuits/zoom-in.
+[12] Nelson Elhage, Tristan Hume, Catherine Olsson, Nicholas Schiefer, Tom Henighan, Shauna
+Kravec, Zac Hatfield-Dodds, Robert Lasenby, Dawn Drain, Carol Chen, Roger Grosse, Sam
+McCandlish, Jared Kaplan, Dario Amodei, Martin Wattenberg, and Christopher Olah. Toy
+models of superposition, 2022.
+[13] Daniel D Lee and H Sebastian Seung. Learning the parts of objects by non-negative matrix
+factorization. nature , 401(6755):788–791, 1999.
+[14] Bruno A Olshausen and David J Field. Emergence of simple-cell receptive field properties by
+learning a sparse code for natural images. Nature , 381(6583):607–609, 1996.
+[15] Emmanuel J Candès, Xiaodong Li, Yi Ma, and John Wright. Robust principal component
+analysis? Journal of the ACM (JACM) , 58(3):1–37, 2011.
+[16] Jiankang Deng, Jia Guo, Niannan Xue, and Stefanos Zafeiriou. Arcface: Additive angular
+margin loss for deep face recognition. In IEEE Conf. Comput. Vis. Pattern Recog. (CVPR) ,
+pages 4690–4699, 2019.
+10[17] Vikram V . Ramaswamy, Sunnie S. Y . Kim, Ruth C. Fong, and Olga Russakovsky. Over-
+looked factors in concept-based explanations: Dataset choice, concept learnability, and human
+capability. IEEE Conf. Comput. Vis. Pattern Recog. (CVPR) , pages 10932–10941, 2022.
+[18] Caden Juang, Gonçalo Paulo, Jacob Drori, and Nora Belrose. Open source automated in-
+terpretability for sparse autoencoder features. https://blog.eleuther.ai/autointerp/ ,
+July 2024. EleutherAI Blog.
+[19] Adam Karvonen, Can Rager, Johnny Lin, Curt Tigges, Joseph Bloom, David Chanin, Callum
+McDougall, Yeu-Tong Lau, Eoin Farrell, Arthur Conmy, Kola Ayonrinde, Demian Till, Matthew
+Wearden, Samuel Marks, and Neel Nanda. SAEBench: A comprehensive benchmark for sparse
+autoencoders in language model interpretability. In Int. Conf. Mach. Learn. (ICML) , 2025.
+[20] Zachary Chase Lipton. The mythos of model interpretability. Communications of the ACM , 61:
+36 – 43, 2016.
+[21] Forough Poursabzi-Sangdeh, Daniel G. Goldstein, Jake M. Hofman, Jennifer Wortman Vaughan,
+and Hanna M. Wallach. Manipulating and measuring model interpretability. Proceedings of the
+2021 CHI Conference on Human Factors in Computing Systems , 2018.
+[22] Robert Huben, Hoagy Cunningham, Logan Riggs Smith, Aidan Ewart, and Lee Sharkey.
+Sparse autoencoders find highly interpretable features in language models. In Int. Conf. Learn.
+Represent. (ICLR) , 2023.
+[23] Leo Gao, Tom Dupre la Tour, Henk Tillman, Gabriel Goh, Rajan Troll, Alec Radford, Ilya
+Sutskever, Jan Leike, and Jeffrey Wu. Scaling and evaluating sparse autoencoders. In Int. Conf.
+Learn. Represent. (ICLR) , 2025.
+[24] Bruno A Olshausen and David J Field. Sparse coding with an overcomplete basis set: A strategy
+employed by v1? Vision research , 37(23):3311–3325, 1997.
+[25] M. Aharon, M. Elad, and A. Bruckstein. K-svd: An algorithm for designing overcomplete
+dictionaries for sparse representation. IEEE Transactions on Signal Processing , 54(11):4311–
+4322, 2006. doi: 10.1109/TSP.2006.881199.
+[26] Gonçalo Paulo, Stepan Shabalin, and Nora Belrose. Transcoders beat sparse autoencoders for
+interpretability. arXiv preprint arXiv:2501.18823 , 2025.
+[27] Jacob Dunefsky, Philippe Chlenski, and Neel Nanda. Transcoders find interpretable LLM
+feature circuits. In Adv. Neural Inform. Process. Syst. (NeurIPS) , 2024.
+[28] Lee Sharkey, Bilal Chughtai, Joshua Batson, Jack Lindsey, Jeff Wu, Lucius Bushnaq, Nicholas
+Goldowsky-Dill, Stefan Heimersheim, Alejandro Ortega, Joseph Bloom, et al. Open problems
+in mechanistic interpretability. arXiv preprint arXiv:2501.16496 , 2025.
+[29] Trenton Bricken, Adly Templeton, Joshua Batson, Brian Chen, Adam Jermyn, Tom Con-
+erly, Nick Turner, Cem Anil, Carson Denison, Amanda Askell, Robert Lasenby, Yifan Wu,
+Shauna Kravec, Nicholas Schiefer, Tim Maxwell, Nicholas Joseph, Zac Hatfield-Dodds, Alex
+Tamkin, Karina Nguyen, Brayden McLean, Josiah E Burke, Tristan Hume, Shan Carter,
+Tom Henighan, and Christopher Olah. Towards monosemanticity: Decomposing language
+models with dictionary learning. Transformer Circuits Thread , 2023. https://transformer-
+circuits.pub/2023/monosemantic-features/index.html.
+[30] Samuel Marks, Adam Karvonen, and Aaron Mueller. dictionary_learning. https://github.
+com/saprmarks/dictionary_learning , 2024.
+[31] Senthooran Rajamanoharan, Tom Lieberum, Nicolas Sonnerat, Arthur Conmy, Vikrant Varma,
+János Kramár, and Neel Nanda. Jumping ahead: Improving reconstruction fidelity with jumprelu
+sparse autoencoders. arXiv preprint arXiv:2407.14435 , 2024.
+[32] Joshua Engels, Logan Riggs, and Max Tegmark. Decomposing the dark matter of sparse
+autoencoders. arXiv preprint arXiv:2410.14670 , 2024.
+[33] Noam Shazeer. Glu variants improve transformer. arXiv preprint arXiv:2002.05202 , 2020.
+[34] Tamara G Kolda and Brett W Bader. Tensor decompositions and applications. SIAM review , 51
+(3):455–500, 2009.
+[35] Grigorios G Chrysos, Yongtao Wu, Razvan Pascanu, Philip Torr, and V olkan Cevher. Hadamard
+product in deep learning: Introduction, advances and challenges. IEEE Transactions on Pattern
+Analysis and Machine Intelligence , pages 1–20, 2025. doi: 10.1109/TPAMI.2025.3560423.
+11[36] Noam Shazeer, *Azalia Mirhoseini, *Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey
+Hinton, and Jeff Dean. Outrageously large neural networks: The sparsely-gated mixture-of-
+experts layer. In Int. Conf. Learn. Represent. (ICLR) , 2017.
+[37] Ted Zadouri, Ahmet Üstün, Arash Ahmadian, Beyza Ermis, Acyr Locatelli, and Sara Hooker.
+Pushing mixture of experts to the limit: Extremely parameter efficient moe for instruction
+tuning. In Int. Conf. Learn. Represent. (ICLR) , 2024.
+[38] Haokun Liu, Derek Tam, Muqeeth Mohammed, Jay Mohta, Tenghao Huang, Mohit Bansal, and
+Colin Raffel. Few-shot parameter-efficient fine-tuning is better and cheaper than in-context
+learning. In Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho, editors, Adv.
+Neural Inform. Process. Syst. (NeurIPS) , 2022.
+[39] Dan Hendrycks and Kevin Gimpel. Gaussian error linear units (gelus). arXiv preprint
+arXiv:1606.08415 , 2016.
+[40] James Oldfield, Markos Georgopoulos, Grigorios Chrysos, Christos Tzelepis, Yannis Panagakis,
+Mihalis Nicolaou, Jiankang Deng, and Ioannis Patras. Multilinear mixture of experts: Scalable
+expert specialization through factorization. In Adv. Neural Inform. Process. Syst. (NeurIPS) ,
+2024.
+[41] Stella Biderman, Hailey Schoelkopf, Quentin Gregory Anthony, Herbie Bradley, Kyle O’Brien,
+Eric Hallahan, Mohammad Aflah Khan, Shivanshu Purohit, USVSN Sai Prashanth, Edward
+Raff, et al. Pythia: A suite for analyzing large language models across training and scaling. In
+Int. Conf. Mach. Learn. (ICML) , pages 2397–2430. PMLR, 2023.
+[42] Aaron Gokaslan, Vanya Cohen, Ellie Pavlick, and Stefanie Tellex. Openwebtext corpus.
+http://Skylion007.github.io/OpenWebTextCorpus , 2019.
+[43] Damai Dai, Chengqi Deng, Chenggang Zhao, R. X. Xu, Huazuo Gao, Deli Chen, Jiashi Li,
+Wangding Zeng, Xingkai Yu, Y . Wu, Zhenda Xie, Y . K. Li, Panpan Huang, Fuli Luo, Chong
+Ruan, Zhifang Sui, and Wenfeng Liang. Deepseekmoe: Towards ultimate expert specialization
+in mixture-of-experts language models, 2024.
+[44] Meta AI. The llama 4 herd: The beginning of a new era of natively multimodal ai innova-
+tion, 2025. URL https://ai.meta.com/blog/llama-4-multimodal-intelligence/ .
+Accessed: 2025-04-06.
+[45] Qwen Team. Qwen1.5-moe: Matching 7b model performance with 1/3 activated parameters",
+February 2024. URL https://qwenlm.github.io/blog/qwen-moe/ .
+[46] An Yang, Baosong Yang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Zhou, Chengpeng Li,
+Chengyuan Li, Dayiheng Liu, Fei Huang, Guanting Dong, Haoran Wei, Huan Lin, Jialong Tang,
+Jialin Wang, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Ma, Jianxin Yang, Jin Xu, Jingren
+Zhou, Jinze Bai, Jinzheng He, Junyang Lin, Kai Dang, Keming Lu, Keqin Chen, Kexin Yang,
+Mei Li, Mingfeng Xue, Na Ni, Pei Zhang, Peng Wang, Ru Peng, Rui Men, Ruize Gao, Runji
+Lin, Shijie Wang, Shuai Bai, Sinan Tan, Tianhang Zhu, Tianhao Li, Tianyu Liu, Wenbin Ge,
+Xiaodong Deng, Xiaohuan Zhou, Xingzhang Ren, Xinyu Zhang, Xipin Wei, Xuancheng Ren,
+Xuejing Liu, Yang Fan, Yang Yao, Yichang Zhang, Yu Wan, Yunfei Chu, Yuqiong Liu, Zeyu
+Cui, Zhenru Zhang, Zhifang Guo, and Zhihao Fan. Qwen2 technical report, 2024.
+[47] An Yang, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoyan Huang, Jiandong Jiang,
+Jianhong Tu, Jianwei Zhang, Jingren Zhou, Junyang Lin, Kai Dang, Kexin Yang, Le Yu, Mei
+Li, Minmin Sun, Qin Zhu, Rui Men, Tao He, Weijia Xu, Wenbiao Yin, Wenyuan Yu, Xiafei
+Qiu, Xingzhang Ren, Xinlong Yang, Yong Li, Zhiying Xu, and Zipeng Zhang. Qwen2.5-1m
+technical report, 2025.
+[48] Antonio Gulli. Ag corpus of news articles. http://groups.di.unipi.it/~gulli/AG_
+corpus_of_news_articles.html , 2005.
+[49] Wes Gurnee, Neel Nanda, Matthew Pauly, Katherine Harvey, Dmitrii Troitskii, and Dimitris
+Bertsimas. Finding neurons in a haystack: Case studies with sparse probing. Transactions on
+Machine Learning Research , 2023. ISSN 2835-8856.
+[50] Rodolphe Jenatton, Guillaume Obozinski, and Francis Bach. Structured sparse principal
+component analysis. In Yee Whye Teh and Mike Titterington, editors, Proceedings of the
+Thirteenth International Conference on Artificial Intelligence and Statistics , volume 9 of
+Proceedings of Machine Learning Research , pages 366–373, Chia Laguna Resort, Sardinia,
+Italy, 13–15 May 2010. PMLR.
+12[51] Patrik O Hoyer. Non-negative matrix factorization with sparseness constraints. Journal of
+machine learning research , 5(Nov):1457–1469, 2004.
+[52] Edo Collins, Radhakrishna Achanta, and Sabine Süsstrunk. Deep Feature Factorization for Con-
+cept Discovery , page 352–368. Springer International Publishing, 2018. ISBN 9783030012649.
+doi: 10.1007/978-3-030-01264-9_21.
+[53] James Oldfield, Christos Tzelepis, Yannis Panagakis, Mihalis Nicolaou, and Ioannis Patras.
+Panda: Unsupervised learning of parts and appearances in the feature maps of GANs. In Int.
+Conf. Learn. Represent. (ICLR) , 2023.
+[54] Yue Song, Thomas Anderson Keller, Yisong Yue, Pietro Perona, and Max Welling. Unsupervised
+representation learning from sparse transformation analysis, 2024.
+[55] Wei Xu, Xin Liu, and Yihong Gong. Document clustering based on non-negative matrix
+factorization. In Proceedings of the 26th Annual International ACM SIGIR Conference on
+Research and Development in Informaion Retrieval , SIGIR ’03, page 267–273, New York, NY ,
+USA, 2003. Association for Computing Machinery. ISBN 1581136463. doi: 10.1145/860435.
+860485.
+[56] Da Kuang, Jaegul Choo, and Haesun Park. Nonnegative matrix factorization for interactive
+topic modeling and document clustering. Partitional clustering algorithms , pages 215–243,
+2015.
+[57] Sanjeev Arora, Yuanzhi Li, Yingyu Liang, Tengyu Ma, and Andrej Risteski. Linear algebraic
+structure of word senses, with applications to polysemy. Transactions of the Association for
+Computational Linguistics , 6:483–495, 2018. doi: 10.1162/tacl_a_00034.
+[58] Alireza Makhzani and Brendan Frey. K-sparse autoencoders. arXiv preprint arXiv:1312.5663 ,
+2013.
+[59] Bart Bussmann, Patrick Leask, and Neel Nanda. Batchtopk sparse autoencoders. In NeurIPS
+2024 Workshop on Scientific Methods for Understanding Deep Learning , 2024.
+[60] Lucy Farnik, Tim Lawson, Conor Houghton, and Laurence Aitchison. Jacobian sparse autoen-
+coders: Sparsify computations, not just activations, 2025.
+[61] Subhash Kantamneni, Joshua Engels, Senthooran Rajamanoharan, Max Tegmark, and Neel
+Nanda. Are sparse autoencoders useful? a case study in sparse probing, 2025.
+[62] Eoin Farrell, Yeu-Tong Lau, and Arthur Conmy. Applying sparse autoencoders to unlearn
+knowledge in language models, 2024.
+[63] Zhengxuan Wu, Aryaman Arora, Atticus Geiger, Zheng Wang, Jing Huang, Dan Jurafsky,
+Christopher D. Manning, and Christopher Potts. AxBench: Steering LLMs? even simple
+baselines outperform sparse autoencoders. In Int. Conf. Mach. Learn. (ICML) , 2025.
+[64] David Chanin, James Wilken-Smith, Tomáš Dulka, Hardik Bhatnagar, and Joseph Bloom. A is
+for absorption: Studying feature splitting and absorption in sparse autoencoders, 2024.
+[65] Patrick Leask, Bart Bussmann, Michael Pearce, Joseph Bloom, Curt Tigges, Noura Al
+Moubayed, Lee Sharkey, and Neel Nanda. Sparse autoencoders do not find canonical units of
+analysis, 2025.
+[66] Gonçalo Paulo and Nora Belrose. Sparse autoencoders trained on the same data learn different
+features, 2025.
+[67] Yizeng Han, Gao Huang, Shiji Song, Le Yang, Honghui Wang, and Yulin Wang. Dynamic neural
+networks: A survey. IEEE Trans. Pattern Anal. Mach. Intell. (TPAMI) , 44(11):7436–7456,
+2021.
+[68] Emmanuel Bengio, Pierre-Luc Bacon, Joelle Pineau, and Doina Precup. Conditional com-
+putation in neural networks for faster models. In Int. Conf. Mach. Learn. Worksh. (ICMLW) ,
+2015.
+[69] Robert A Jacobs, Michael I Jordan, and Andrew G Barto. Task decomposition through com-
+petition in a modular connectionist architecture: The what and where vision tasks. Cognitive
+science , 15(2):219–250, 1991.
+[70] Robert A Jacobs, Michael I Jordan, Steven J Nowlan, and Geoffrey E Hinton. Adaptive mixtures
+of local experts. Neural computation , 3(1):79–87, 1991.
+13[71] William Fedus, Barret Zoph, and Noam Shazeer. Switch transformers: Scaling to trillion
+parameter models with simple and efficient sparsity. Journal of Machine Learning Research , 23
+(120):1–39, 2022.
+[72] Barret Zoph, Irwan Bello, Sameer Kumar, Nan Du, Yanping Huang, Jeff Dean, Noam Shazeer,
+and William Fedus. St-moe: Designing stable and transferable sparse expert models. arXiv
+preprint arXiv:2202.08906 , 2022.
+[73] Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping Huang,
+Maxim Krikun, Noam Shazeer, and Zhifeng Chen. GShard: Scaling giant models with condi-
+tional computation and automatic sharding. In Int. Conf. Learn. Represent. (ICLR) , 2021.
+[74] Nan Du, Yanping Huang, Andrew M Dai, Simon Tong, Dmitry Lepikhin, Yuanzhong Xu,
+Maxim Krikun, Yanqi Zhou, Adams Wei Yu, Orhan Firat, et al. Glam: Efficient scaling of
+language models with mixture-of-experts. In Int. Conf. Mach. Learn. (ICML) , pages 5547–5569.
+PMLR, 2022.
+[75] Albert Q. Jiang, Alexandre Sablayrolles, Antoine Roux, Arthur Mensch, Blanche Savary, Chris
+Bamford, Devendra Singh Chaplot, Diego de las Casas, Emma Bou Hanna, Florian Bressand,
+Gianna Lengyel, Guillaume Bour, Guillaume Lample, Lélio Renard Lavaud, Lucile Saulnier,
+Marie-Anne Lachaux, Pierre Stock, Sandeep Subramanian, Sophia Yang, Szymon Antoniak,
+Teven Le Scao, Théophile Gervet, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and
+William El Sayed. Mixtral of experts, 2024.
+[76] DeepSeek-AI, Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang, Bochao Wu, Chengda Lu,
+Chenggang Zhao, Chengqi Deng, Chenyu Zhang, Chong Ruan, Damai Dai, Daya Guo, Dejian
+Yang, Deli Chen, Dongjie Ji, Erhang Li, Fangyun Lin, Fucong Dai, Fuli Luo, Guangbo Hao,
+Guanting Chen, Guowei Li, H. Zhang, Han Bao, Hanwei Xu, Haocheng Wang, Haowei Zhang,
+Honghui Ding, Huajian Xin, Huazuo Gao, Hui Li, Hui Qu, J. L. Cai, Jian Liang, Jianzhong Guo,
+Jiaqi Ni, Jiashi Li, Jiawei Wang, Jin Chen, Jingchang Chen, Jingyang Yuan, Junjie Qiu, Junlong
+Li, Junxiao Song, Kai Dong, Kai Hu, Kaige Gao, Kang Guan, Kexin Huang, Kuai Yu, Lean
+Wang, Lecong Zhang, Lei Xu, Leyi Xia, Liang Zhao, Litong Wang, Liyue Zhang, Meng Li,
+Miaojun Wang, Mingchuan Zhang, Minghua Zhang, Minghui Tang, Mingming Li, Ning Tian,
+Panpan Huang, Peiyi Wang, Peng Zhang, Qiancheng Wang, Qihao Zhu, Qinyu Chen, Qiushi Du,
+R. J. Chen, R. L. Jin, Ruiqi Ge, Ruisong Zhang, Ruizhe Pan, Runji Wang, Runxin Xu, Ruoyu
+Zhang, Ruyi Chen, S. S. Li, Shanghao Lu, Shangyan Zhou, Shanhuang Chen, Shaoqing Wu,
+Shengfeng Ye, Shengfeng Ye, Shirong Ma, Shiyu Wang, Shuang Zhou, Shuiping Yu, Shunfeng
+Zhou, Shuting Pan, T. Wang, Tao Yun, Tian Pei, Tianyu Sun, W. L. Xiao, Wangding Zeng,
+Wanjia Zhao, Wei An, Wen Liu, Wenfeng Liang, Wenjun Gao, Wenqin Yu, Wentao Zhang,
+X. Q. Li, Xiangyue Jin, Xianzu Wang, Xiao Bi, Xiaodong Liu, Xiaohan Wang, Xiaojin Shen,
+Xiaokang Chen, Xiaokang Zhang, Xiaosha Chen, Xiaotao Nie, Xiaowen Sun, Xiaoxiang Wang,
+Xin Cheng, Xin Liu, Xin Xie, Xingchao Liu, Xingkai Yu, Xinnan Song, Xinxia Shan, Xinyi
+Zhou, Xinyu Yang, Xinyuan Li, Xuecheng Su, Xuheng Lin, Y . K. Li, Y . Q. Wang, Y . X. Wei,
+Y . X. Zhu, Yang Zhang, Yanhong Xu, Yanhong Xu, Yanping Huang, Yao Li, Yao Zhao, Yaofeng
+Sun, Yaohui Li, Yaohui Wang, Yi Yu, Yi Zheng, Yichao Zhang, Yifan Shi, Yiliang Xiong, Ying
+He, Ying Tang, Yishi Piao, Yisong Wang, Yixuan Tan, Yiyang Ma, Yiyuan Liu, Yongqiang Guo,
+Yu Wu, Yuan Ou, Yuchen Zhu, Yuduan Wang, Yue Gong, Yuheng Zou, Yujia He, Yukun Zha,
+Yunfan Xiong, Yunxian Ma, Yuting Yan, Yuxiang Luo, Yuxiang You, Yuxuan Liu, Yuyang Zhou,
+Z. F. Wu, Z. Z. Ren, Zehui Ren, Zhangli Sha, Zhe Fu, Zhean Xu, Zhen Huang, Zhen Zhang,
+Zhenda Xie, Zhengyan Zhang, Zhewen Hao, Zhibin Gou, Zhicheng Ma, Zhigang Yan, Zhihong
+Shao, Zhipeng Xu, Zhiyu Wu, Zhongyu Zhang, Zhuoshu Li, Zihui Gu, Zijia Zhu, Zijun Liu,
+Zilin Li, Ziwei Xie, Ziyang Song, Ziyi Gao, and Zizheng Pan. Deepseek-v3 technical report,
+2025.
+[77] Joan Puigcerver, Carlos Riquelme, Basil Mustafa, and Neil Houlsby. From sparse to soft
+mixtures of experts. In Int. Conf. Learn. Represent. (ICLR) , 2024.
+[78] Aya Abdelsalam Ismail, Sercan O Arik, Jinsung Yoon, Ankur Taly, Soheil Feizi, and Tomas
+Pfister. Interpretable mixture of experts. Transactions on Machine Learning Research , 2023.
+ISSN 2835-8856.
+[79] Marmik Chaudhari, Idhant Gulati, Nishkal Hundia, Pranav Karra, and Shivam Raval. Moe lens
+- an expert is all you need. In Sparsity in LLMs (SLLM): Deep Dive into Mixture of Experts,
+Quantization, Hardware, and Inference , 2025.
+14[80] Huy Nguyen, Xing Han, Carl Harris, Suchi Saria, and Nhat Ho. On expert estimation in
+hierarchical mixture of experts: Beyond softmax gating functions, 2025.
+[81] Stefan Nielsen, Rachel Teo, Laziz Abdullaev, and Tan Minh Nguyen. Tight clusters make
+specialized experts. In Int. Conf. Learn. Represent. (ICLR) , 2025.
+[82] Brandon Yang, Gabriel Bender, Quoc V Le, and Jiquan Ngiam. Condconv: Conditionally
+parameterized convolutions for efficient inference. Adv. Neural Inform. Process. Syst. (NeurIPS) ,
+32, 2019.
+[83] Basil Mustafa, Carlos Riquelme Ruiz, Joan Puigcerver, Rodolphe Jenatton, and Neil Houlsby.
+Multimodal contrastive learning with LIMoe: the language-image mixture of experts. In
+Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho, editors, Adv. Neural
+Inform. Process. Syst. (NeurIPS) , 2022.
+[84] Carlos Riquelme, Joan Puigcerver, Basil Mustafa, Maxim Neumann, Rodolphe Jenatton, André
+Susano Pinto, Daniel Keysers, and Neil Houlsby. Scaling vision with sparse mixture of experts.
+Adv. Neural Inform. Process. Syst. (NeurIPS) , 34:8583–8595, 2021.
+[85] Jungwoo Park, Ahn Young Jin, Kee-Eung Kim, and Jaewoo Kang. Monet: Mixture of monose-
+mantic experts for transformers. In Int. Conf. Learn. Represent. (ICLR) , 2025.
+[86] Xingyi Yang, Constantin Venhoff, Ashkan Khakzar, Christian Schroeder de Witt, Puneet K.
+Dokania, Adel Bibi, and Philip Torr. Mixture of experts made intrinsically interpretable, 2025.
+[87] Xu Owen He. Mixture of a million experts, 2024.
+[88] Zewen Chi, Li Dong, Shaohan Huang, Damai Dai, Shuming Ma, Barun Patra, Saksham Singhal,
+Payal Bajaj, Xia Song, Xian-Ling Mao, Heyan Huang, and Furu Wei. On the representation
+collapse of sparse mixture of experts. In Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and
+Kyunghyun Cho, editors, Adv. Neural Inform. Process. Syst. (NeurIPS) , 2022.
+[89] Arthur Conmy. My best guess at the important tricks for training
+1l saes. https://www.lesswrong.com/posts/fifPCos6ddsmJYahD/
+my-best-guess-at-the-important-tricks-for-training-1l-saes , December
+2023. LessWrong.
+[90] James E. Gentle. Matrix Algebra: Theory, Computations, and Applications in Statistics .
+Springer, New York, 2nd edition, 2007.
+[91] Nicholas D Sidiropoulos and Rasmus Bro. On the uniqueness of multilinear decomposition
+of n-way arrays. Journal of Chemometrics: A Journal of the Chemometrics Society , 14(3):
+229–239, 2000.
+[92] Donghyun Lee, Jaeyong Lee, Genghan Zhang, Mo Tiwari, and Azalia Mirhoseini. CATS:
+Context-aware thresholding for sparsity in large language models. In First Conference on
+Language Modeling , 2024.
+[93] Frank Lauren Hitchcock. The expression of a tensor or a polyadic as a sum of products. Journal
+of Mathematics and Physics , 6:164–189, 1927.
+[94] J. Douglas Carroll and Jih Jie Chang. Analysis of individual differences in multidimensional
+scaling via an n-way generalization of “eckart-young” decomposition. Psychometrika , 35:
+283–319, 1970.
+[95] CodeParrot. Github code dataset. https://huggingface.co/datasets/codeparrot/
+github-code , 2022.
+[96] Yupeng Hou, Jiacheng Li, Zhankui He, An Yan, Xiusi Chen, and Julian McAuley. Bridging
+language and items for retrieval and recommendation. arXiv preprint arXiv:2403.03952 , 2024.
+[97] Philipp Koehn. Europarl: A parallel corpus for statistical machine translation. In Proceedings
+of Machine Translation Summit X: Papers , pages 79–86, Phuket, Thailand, September 13-15
+2005.
+[98] Maria De-Arteaga, Alexey Romanov, Hanna Wallach, Jennifer Chayes, Christian Borgs, Alexan-
+dra Chouldechova, Sahin Geyik, Krishnaram Kenthapadi, and Adam Tauman Kalai. Bias in
+bios: A case study of semantic representation bias in a high-stakes setting. In Proceedings of
+the Conference on Fairness, Accountability, and Transparency , FAT* ’19, page 120–128, New
+York, NY , USA, 2019. Association for Computing Machinery. ISBN 9781450361255. doi:
+10.1145/3287560.3287572. URL https://doi.org/10.1145/3287560.3287572 .
+15[99] Anthony Duong Joseph Bloom, Curt Tigges and David Chanin. Saelens. https://github.
+com/jbloomAus/SAELens , 2024.
+Appendix
+Table of Contents
+A Proofs and additional technical results 16
+A.1 Proof of rank equality . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+A.2 Proof of MxD forward pass equivalence . . . . . . . . . . . . . . . . . . . . . . 17
+A.3 Intuition for weight parameterization through the lens of tensor methods . . . . . 17
+A.4 GLU encoders are a mixture of rank-1 linear experts . . . . . . . . . . . . . . . 18
+A.5 Hadamard-factorized tensors generalize MoVs . . . . . . . . . . . . . . . . . . 19
+B Additional quantitative results and ablations 19
+B.1 Faithfulness in output space . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+B.2 Additional reconstruction metrics . . . . . . . . . . . . . . . . . . . . . . . . . 20
+B.3 Results on additional layers . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+B.4 Expert rank . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+B.5 Sparse probing . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24
+B.6 Ablations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+C Feature balance and shared experts 26
+C.1 Expert/feature balance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+C.2 Shared experts . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+D Detailed experimental setup 31
+D.1 Feature steering details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34
+E Additional qualitative results 34
+A Proofs and additional technical results
+A.1 Proof of rank equality
+Proof of Lemma 1. We first derive the expression for expert n’s weight matrix Wn=Ddiag(cn)∈
+RH×Oand then show the rank equality that follows. First, recall that we have the third-order weight
+tensor defined as
+W(n, h,:) =cn∗dh∈RO,
+for matrices C∈RN×O,D∈RH×O. We can express each element of the tensor W∈RN×H×O
+in terms of elements of the two matrices as
+W(n, h, o ) =cno·dho= (D)ho·cno. (6)
+Equation (6) shows that for a fixed expert n, thenthrowcn∈ROessentially scales the columns of
+matrix D∈RH×O. This is equivalent to right-multiplying matrix Dby a diagonal matrix formed
+fromcn∈RO. Indeed, the (h, o)entry of such matrix product is
+[Ddiag(cn)]ho=OX
+i=1(D)hidiag(cn)io (7)
+= (D)hodiag(cn)oo (8)
+=dho·cno, (9)
+16since all off-diagonal terms (i.e., i̸=o) in Equation (7) vanish and diag(cn)oo=cnoby con-
+struction. Comparing Equation (6) and Equation (9) shows that, for every h∈ {1,2, . . . , H }and
+o∈ {1,2, . . . , O }we have
+W(n, h, o ) = [Ddiag(cn)]ho.
+Hence, indexing into the first mode of the tensor alone gives us the matrix-valued expression for
+expert nas claimed:
+W(n,:,:) =Wn=Ddiag(cn)∈RH×O.
+Finally, a standard result in linear algebra [ 90] has that rank(AB) =rank(A)for any A∈RH×O
+and invertible matrix B∈RO×O. Since matrix diag (cn)∈RO×Ois invertible by assumption in
+Lemma 1, setting A=DandB=diag(cn)yields the rank equality.
+A.2 Proof of MxD forward pass equivalence
+Recall we have input vector z∈RH, expert coefficients a∈RN, and layer weights W∈RN×H×O.
+The weights are defined in Equation (4) element-wise through the Hadamard product ∗as
+W(n, h,:) =cn∗dh∈RO,∀n∈ {1, . . . , N }, h∈ {1, . . . , H },
+for learnable parameters C∈RN×O,D∈RH×O. Lemma 2 states that MxD’s forward pass can be
+equivalently expressed as
+NX
+n=1an 
+W⊤
+nz
+= 
+C⊤a
+∗ 
+D⊤z
+.
+Proof of Lemma 2. The LHS can first be re-written as an explicit sum over the hidden dimension
+ˆy=NX
+n=1an 
+W⊤
+nz
+=NX
+n=1HX
+h=1an 
+wnh:zh
+∈RO. (10)
+Plugging in the definition of wnh:∈ROfrom Equation (4) then yields
+ˆy=NX
+n=1HX
+h=1an 
+wnh:zh
+(11)
+=NX
+n=1HX
+h=1an 
+(cn∗dh)zh
+(12)
+=NX
+n=1ancn
+∗HX
+h=1zhdh
+(13)
+= 
+C⊤a
+∗ 
+D⊤z
+, (14)
+which is exactly the RHS of Equation (5), showing the MxD forward pass is equivalent to the
+Hadamard product of C⊤aandD⊤z.
+A.3 Intuition for weight parameterization through the lens of tensor methods
+A second complementary way of viewing the MxD layer’s parameterization (and its full-rank
+properties) is through the lens of tensor methods [ 34]. A tensor-based motivation for MxD’s weight
+tensor parameterization and forward pass is presented in Appendix A.3.1 and Appendix A.3.2,
+respectively.
+Notation and definitions A brief primer is first included below, based on [ 34] (and can be safely
+skipped for those already familiar):
+17•The mode- nfibers of an Nthorder tensor X∈RI1×I2×···× INare the In-dimensional
+column vectors obtained by fixing every index except that of the nthmode (e.g., x:i2i3∈RI1
+are the mode- 1fibers of a third-order tensor X∈RI1×I2×I3). Stacking all mode- nfibers
+column-wise yields the so-called mode- nunfolding X(n)∈RIn×¯In, with number of
+columns given by the product of remaining dimensions ¯In=QN
+t=1
+t̸=nIt.
+•TheKhatri-Rao product (denoted by ⊙) between two matrices A∈RI×KandB∈RJ×K,
+is the column-wise Kronecker product (denoted by ⊗):
+A⊙B:=
+a:1⊗b:1···a:K⊗b:K
+∈R(I·J)×K.
+•Themode- n(vector) product of a tensor X∈RI1×I2×···× INwith a vector u∈RInis
+denotedX×nuand has entries (X×nu)i1...in−1in+1...iN=PIn
+in=1xi1i2...iNuin.
+A.3.1 MxD weight tensors through the Khatri-Rao product
+MxDs construct the collective weight tensor through the Khatri-Rao product ⊙[34] of the two factor
+matrices C∈RN×O,D∈RH×O. Concretely, the mode- 3unfolding3of the third-order weight
+tensorW∈RN×H×Oin MxDs from Equation (4) is alternatively given by:
+W(3):= (C⊙D)⊤∈RO×(N·H). (15)
+Given that the factor matrices are learned end-to-end without constraints, they are likely of full
+column-rank, i.e. rank(D) =rank(C) =O(asN > O, H = 4·O > O in practice given the MLP
+layers’ larger bottleneck). Consequently, their Khatri-Rao product parameterizing the collective N
+experts’ weights will be of maximum rank Otoo, through Lemma 1 of [ 91]. As a result, parameterized
+this way, the O-dimensional fibers likely span the full output space.
+A.3.2 Tensorized MxD forward pass
+Furthermore, the layer’s forward pass can then be viewed as performing two tensor contractions
+between the third-order weight tensor W∈RN×H×O(collecting all Nexperts’ H×O-dimensional
+matrices) and expert coefficients a∈RNand hidden activations z∈RH. This can be expressed in
+terms of the so-called mode- nproduct (denoted by ×n) [34] as follows:
+ˆy=NX
+n=1an· 
+W⊤
+nz
+=NX
+n=1anHX
+h=1wnhzh=NX
+n=1HX
+h=1anzhwnh
+=W×1a×2z∈RO. (16)
+A.4 GLU encoders are a mixture of rank-1 linear experts
+Both the proposed MxDs and Gated Linear Units (GLUs) [ 33] share a similar functional form, using
+the element-wise product. However, there are crucially important differences between GLUs and
+MxDs that make both their interpretation and model capacity different.
+In short, the technical results here in our paper show that GLUs’ encoder can be viewed as a linear
+mixture of expert layer with rank-1 experts. Furthermore, GLUs can be modified and extended to
+MxDs with two additions to their model form as detailed at the end of this subsection. First, recall
+that the GLU encoder [33] computes:
+yGLU=ψ(E⊤
+GLUx)∗ 
+E⊤x
+∈RH, (17)
+for input vector x∈RI, learnable weights EGLU,E∈RI×H, and activation function ψ(.). To
+transform Equation (17) into the same model form as MxDs, we first pre-multiply the LHS by the
+identity matrix to match the MxD model form of Equation (5), yielding:
+yGLU= 
+I⊤a
+∗ 
+E⊤x
+, (18)
+3which is simply a reshaping of a higher-order tensor into a matrix, arranging all Nexpert matrices’ column
+vectors along the columns of a new matrix.
+18where a=ψ(E⊤
+GLUx)∈RHandI∈RH×His the H-dimensional identity matrix. Next, we can
+write this explicitly in terms of a linear MoE with expert weights Wn∈RI×Has follows:
+yGLU= 
+I⊤a
+∗ 
+E⊤x
+(19)
+=HX
+n=1an 
+W⊤
+nx
+(20)
+=HX
+n=1an(Ediag (( I)n))⊤x
+, (21)
+where (I)n∈RHis the nthrow of the H-dimensional identity matrix (i.e. a one-hot vector with
+its only non-zero element at index n). We draw particular attention to how the nthexpert’s matrix
+Wn=Ediag (( I)n)∈RI×Hessentially picks out the nthcolumn of E, leaving all remaining H−1
+columns as zero vectors. Therefore, GLU encoders compute a MoE with linear expert weights of
+(at most) rank 1 . This relationship between GLUs and conditional computation is consistent with
+prior work interpreting individual GLU column vectors as experts [ 92]. Whilst GLUs’ encoders’
+model form does not put any inherent restrictions on the total number of rank-1 terms that can
+contribute to the output, the sparsity necessary for specialization does.
+We conclude this section by summarizing the two technical changes needed to transform GLUs into
+full-rank linear MoEs based on the Hadamard product:
+1. Replace Iin Equation (18) with learnable, non-diagonal weight matrices for full-rankness.
+2.Choose ψ(.)to produce non-negative, sparse coefficients to encourage specialization through
+sparsity among the experts (for example, a softmax function, or a ReLU activation followed
+byTopK ).
+The first of the steps above provides full-rankness, whilst the second brings the sparsity and non-
+negativity needed for specialization. We include a notebook showing this connection in PyTorch at:
+https://github.com/james-oldfield/MxD/blob/main/glus-to-moes.ipynb .
+A.5 Hadamard-factorized tensors generalize MoVs
+Prior work [ 37] proposes to linearly combine Nmany (IA)3adapters [ 38] for parameter-efficient
+MoEs for instruction fine-tuning. The implementation results in a very similar functional form
+to the factorized forward-pass in MxDs. Interestingly, the Hadamard product parameterization of
+the third-order weight tensor in Equation (4) provides a more general framework through which
+one can also derive MoVs’ model form, shedding light on the relationship to the proposed MxDs
+and their benefits. Concretely, factorizing the weight tensor instead along the second mode as
+W(n,:, o) =cn∗do∈RHin our framework immediately recovers MoV [ 37] as a special case.
+In particular, in contrast to the MxD in Appendix A.3 whose weight tensor can be parametrized
+equivalently through its mode- 3unfolding [ 34], MoV’s implicit weight tensor can be given in terms
+of its mode- 2unfolding in terms of a similar Khatri-Rao product of two factor matrices.
+Instead, MoVs in analogy would yield expert weights by pre-multiplying Das:Wn= diag( cn)D∈
+RH×Ofor much larger C∈RN×H). Due to H≫O,our proposed MxD formulation yields
+around 4×the number of specialized units as MoVs with the same parameter budget (yet MoVs’
+experts are of no higher rank than MxDs’), making MxDs a much more suitable and efficient class
+of layer for our goal of scalable specialization. We therefore see that the proposed lens of tensor
+methods for unification provides valuable insights about how to design more interpretable layers with
+the minimum trade-off to capabilities.
+B Additional quantitative results and ablations
+B.1 Faithfulness in output space
+Our main experiments measure model faithfulness in latent space–how well the sparse layer variants
+reconstruct the intermediate MLPs’ mapping. Here, we provide additional experiments comparing the
+faithfulness of sparse layers as their computation propagates to the model output space. Concretely,
+19we sample 32consecutive tokens with the base model and then measure how similar the same
+generations are when the target MLP layer is replaced with the sparse layers.
+We sample 512text snippets from OpenWebText, and use the first 4 words of each as the initial
+prompts, generating 32future tokens after each prompt. We plot in Figures 6 and 7 the percentage of
+the samples’ continuations that are identical in the original LLM and hooked LLMs up to nfuture
+tokens ahead. We note that this is a rather punishing task–any small deviations quickly compound as
+ngrows. Despite this, we see that the MxDs match the future token generations far better than the
+baselines, exhibiting more faithfulness in model output space (as well as in latent space).
+We also show qualitative examples of the first 8prompts and the subsequent ‘diffs’ (using Python
+3’sdifflib ) of the generated tokens in Figures 8 and 9, where MxDs’ superior preservation can be
+viewed qualitatively.
+0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+n-gram lengthMxD STC TC SAE1 0.99 0.94 0.88 0.84 0.8 0.76 0.71 0.68 0.65 0.62 0.6 0.58 0.55 0.53 0.51
+1 0.99 0.86 0.75 0.65 0.59 0.52 0.48 0.42 0.39 0.35 0.34 0.31 0.28 0.24 0.22
+1 0.99 0.83 0.7 0.61 0.57 0.49 0.45 0.39 0.33 0.31 0.28 0.25 0.22 0.2 0.18
+1 0.95 0.56 0.31 0.18 0.11 0.057 0.031 0.02 0.016 0.012 0.0059 0.0039 0.002 0 0
+0.00.10.20.30.40.50.60.70.80.91.0
+Figure 6: Pythia-410m : The percentage of 512generated samples that contain nwords identical to
+the original model’s output (when replacing the base LLM’s MLP layer with the sparse layers).
+0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+n-gram lengthMxD STC TC SAE1 1 0.94 0.88 0.85 0.81 0.78 0.73 0.7 0.66 0.62 0.58 0.54 0.51 0.5 0.46
+1 0.98 0.85 0.73 0.65 0.57 0.49 0.43 0.37 0.32 0.27 0.22 0.19 0.17 0.15 0.13
+1 0.99 0.83 0.7 0.6 0.52 0.46 0.38 0.33 0.29 0.23 0.2 0.17 0.13 0.12 0.088
+1 0.96 0.73 0.53 0.37 0.28 0.21 0.16 0.12 0.082 0.057 0.043 0.035 0.023 0.014 0.0098
+0.00.10.20.30.40.50.60.70.80.91.0
+Figure 7: GPT2-124m : The percentage of 512generated samples that contain nwords identical to
+the original model’s output (when replacing the base LLM’s MLP layer with the sparse layers).
+B.2 Additional reconstruction metrics
+To highlight the scale of difference in the reconstructions between MxDs and the baselines, we also
+plot in Figure 10 the normalized MSE at the end of training for all models and LLMs. At the smallest
+values of K(which we care about most for interpretability), MxDs’ normalized MSE is up to an
+order of magnitude smaller than Transcoders’ .
+B.3 Results on additional layers
+We also fully train all models and baselines (with 4 different values of K) on different target layers
+for each model. The results are shown in Figure 11 for 48additional trained layers for the same setup
+in the original paper, using different colours to highlight that these are new results. As can be seen,
+the same trend holds: MxDs significantly outperform the baselines at small Kin all LLMs.
+20Figure 8: Pythia-410m : The first few generated tokens from the base model (‘ GT’) and the
+corresponding tokens from the model when the sparse layers replace the target MLP. Red denotes
+tokens that are removed, orange denotes newly inserted tokens, and green denotes matching tokens.
+B.4 Expert rank
+This section concerns the matrix rank of the linear experts in parameter-efficient MoEs. We first
+compare to low-rank MoEs in Appendix B.4.1 to demonstrate the benefits of full-rankness, and then
+follow up in Appendix B.4.2 by confirming that the learned MxD expert ranks are close to maximum
+in the trained models.
+B.4.1 Comparisons to low-rank MoEs
+In this section, we study the impact of expert rank on the ability of efficient MoE layers to reconstruct
+pre-trained MLP layers’ mappings. One compelling alternative to MxDs for efficient conditional
+computation is the µMoE layer [ 40], which imposes low-rankness on expert weights to achieve
+parameter-efficiency. Whilst µMoEs are found to perform competitively in the pre-training setting,
+the impact of low-rankness on approximations of existing layers will determine their suitability in the
+sparse layer approximation setting studied in this work.
+21Figure 9: GPT2-124m : The first few generated tokens from the base model (‘ GT’) and the corre-
+sponding tokens from the model when the sparse layers replace the target MLP. Red denotes tokens
+that are removed, orange denotes newly inserted tokens, and green denotes matching tokens.
+We therefore compare to µMoE layers, which we use to compute a linear MoE in place of the MLP’s
+decoder. In CP µMoEs, Nexperts’ weight matrices are jointly parameterized through low-rank tensor
+structure with the CP decomposition [ 93,94] for chosen rank R∈N+. With the same learnable
+encoder and expert gating matrices producing the expert coefficients a∈RNand hidden units
+z∈RHgenerated the same way as in the main paper, we train µMoE layers to approximate the
+original MLP layer’s output with:
+µMoE(x) =NX
+n=1HX
+h=1RX
+r=1anzhD(r, h)·C(r, n)·W(:, r)∈RO, (22)
+where C∈RR×N,D∈RR×H,W∈RO×Rare the learnable low-rank terms of the implicit
+third-order tensor parameterizing all Ncollective experts’ weights.
+We match the MxD experimental configuration as closely as possible for a fair comparison. For the
+encoders, we mirror MxDs and use the GELU activation function, which we find through ablations
+in Appendix B.6 to perform the best. We initialize the parameters the same as MxDs and Skip
+2216 32 64 128 2560.0010.0020.0030.0040.0050.0060.0070.0080.0090.0100.0110.0120.0130.0140.0150.0160.017 Normalized MSE
+GPT2-124M 
+  (Layer 8)
+TC (38M params)
+STC (38M params)
+MxDs (38M params)
+16 32 64 128 2560.00000.00010.00020.00030.00040.00050.00060.00070.00080.00090.00100.00110.00120.00130.00140.00150.00160.00170.0018
+ Pythia-410M 
+  (Layer 15)
+TC (67M params)
+STC (68M params)
+MxDs (67M params)
+16 32 64 128 256
+ Sparsity level K
+0.00000.00020.00040.00060.00080.00100.00120.00140.00160.00180.00200.00220.0024 Normalized MSE
+Pythia-1.4B 
+  (Layer 12)
+TC (269M params)
+STC (273M params)
+MxDs (268M params)
+16 32 64 128 256
+ Sparsity level K
+0.000000.000050.000100.000150.000200.000250.000300.000350.000400.000450.000500.000550.000600.000650.000700.00075
+ Llama3.2-3B 
+  (Layer 12)
+TC (604M params)
+STC (614M params)
+MxDs (604M params)Figure 10: Normalized MSE at the end of training Sparse MLP layers, as a function of the number
+of active units (i.e., hidden neurons vs experts); with differences as large as an order of magnitude in
+error.
+Transcoders: we use the standard PyTorch linear layer initialization for D,C(and the encoder
+layers), and initialize Was the zero matrix.
+We vary the µMoE layer rank R, training fully 3 sparse approximation layers for K= 32 active
+experts, varying the total number of experts Nto keep the parameter count the same–isolating the
+impact of the choice of rank. As with the main experiments, we record the downstream model loss
+when we splice in the trained layer to replace the MLP layers, shown in Figure 12.
+As can be seen, the µMoE layers perform well when they are close to full-rank (i.e. when the
+normalized rankR
+O→1). Crucially, however, performance drops off notably when the rank
+is reduced. Whilst µMoEs still perform far better than neuron-level sparsity methods (i.e. the
+corresponding CE loss results in Figure 3), we observe that full-rankness is necessary for the most
+faithful layer approximations–which the proposed MxDs provide by design.
+As a motivating example, for why SparseMoEs and SoftMoEs are not practical: SparseMoEs [ 36]
+and SoftMoEs [ 70] require 2.16trillion parameters for a single layer, for the same 86k experts we
+use forLlama-3.2-3B . This is orders of magnitude more parameters than the entire base network
+itself, making it prohibitively costly for SparseMoEs to scale to sufficiently high expert counts.
+B.4.2 MxD empirical expert rank
+Next, we show experimentally that the learned experts’ matrices Wn=Ddiag(cn)∈RH×Oare
+very nearly full-rank in practice, corroborating the properties of expert matrices shown theoretically
+2332 64 128 2563.6003.6053.6103.6153.6203.6253.6303.6353.6403.645 Mean cross-entropy loss
+GPT2-124M 
+  (Layer 10)
+Original LLM
+TC (38M params)
+STC (38M params)
+MxDs (38M params)
+32 64 128 2563.32253.32503.32753.33003.33253.33503.33753.34003.3425
+Pythia-410M 
+  (Layer 12)
+Original LLM
+TC (67M params)
+STC (68M params)
+MxDs (67M params)
+32 64 128 256
+ Sparsity level K
+3.10003.10253.10503.10753.11003.11253.11503.1175 Mean cross-entropy loss
+Pythia-1.4B 
+  (Layer 10)
+Original LLM
+TC (269M params)
+STC (273M params)
+MxDs (268M params)
+32 64 128 256
+ Sparsity level K
+3.0203.0223.0243.0263.0283.0303.0323.0343.0363.038
+Llama3.2-3B 
+  (Layer 10)
+Original LLM
+TC (604M params)
+STC (614M params)
+MxDs (604M params)Figure 11: Additional layer results : model cross entropy loss preserved when replacing MLPs with
+Transcoders [ 27], Skip Transcoders [ 26], and MxDs, as a function of the number of active units
+(hidden neurons/experts). These results complement those in the main paper, but here we train a new
+set of additional models on different layers.
+in Lemma 1. We compute the mean ‘normalized rank’, which we take for MxDs to be the empirical
+matrix rank of the learned expert’s weights, over the maximum possible rank given the dimensions:
+1
+NNX
+n=1rank(Wn)
+min{H, O}. (23)
+We show in Table 3 the normalized rank across all 4 base models: MxD’s learned experts exhibit no
+rank deficiencies, providing further evidence of the large potential capacity of MxD layers despite
+their sparsity constraints on the expert-level.
+Table 3: Mean normalized expert matrix rank of Equation (23) across models for the first 2k experts
+inK= 32 trained MxDs – the learned expert matrices are very close to full column rank.
+GPT2-124M Pythia-410M Pythia-1.4B Llama-3.2-3B
+0.99±0.005 0 .99±0.007 0 .99±0.005 0 .99±0.002
+B.5 Sparse probing
+Sample-level probing Here, we follow the SAEBench [ 19] evaluation protocol. In this ‘sample-
+level’ setting, each text string is labeled with a binary concept at a global level (e.g., the language of
+240.5 0.6 0.7 0.8 0.9 1.0
+Normalized expert rank (mean) 
+3.6043.6053.6063.6073.6083.6093.6103.611 Mean cross-entropy loss
+Rank ablation
+  GPT2-small
+MxD
+MoE
+0.5 0.6 0.7 0.8 0.9 1.0
+Normalized expert rank (mean) 
+3.3263.3283.3303.3323.334 Mean cross-entropy loss
+Rank ablation
+  pythia-410m
+MxD
+MoE
+Figure 12: Comparisons to µMoEs for various choices of (normalized) rank: high rank weights
+best-preserve the models’ downstream cross-entropy loss.
+Table 4: Details of sample-level sparse probing datasets used.
+Dataset # Training examples # Test examples Classification task description Number of classes
+fancyzhx/ag_news [48] 16,000 4,000 News article topic 4
+codeparrot/github-code [95] 20,000 5,000 Programming language 5
+amazon_reviews_mcauley_1and5_sentiment [96] 8,000 2,000 Positive/negative review sentiment 2
+Helsinki-NLP/europarl [97] 20,000 5,000 European language 5
+LabHC/bias_in_bios [98] 32,000 8,000 Profession from bio 8
+the snippet, or its sentiment). This is in contrast to what we refer to as ‘token-level probing’, where
+each token within the text samples is labeled individually (e.g., whether a word is a certain part of
+speech). We perform experiments on a total of 24sample-level sparse probing tasks with the same
+‘maximum mean difference’ feature filtering applied in [ 19]. The details of the datasets used are
+summarized in Table 4.
+Token-level probing We also explore sparse probing for 10features defined at the token-level. For
+this, we follow [ 49], and include experiments training probes on the mean feature activations under
+tokens spanning the surnames of the individuals. We note that this is a significantly harder task, and
+makes even stronger assumptions about the features the dataset includes, but is nonetheless some
+additional weak evidence about the relative feature-learning abilities of the sparse models. Through
+various surnames, we probe for 6occupations of individuals, whether or not individuals are alive,
+and individuals’ labeled gender. We also experimented with probing for compound words as in [ 49],
+but found no predictive features in our trained models. Details of the surname token-level probing
+datasets (and the total training examples the tokenizers could parse) are included in Table 5.
+Table 5: Details of token-level sparse probing datasets used.
+Dataset # Training examples # Test examples Classification task description Number of classes
+Occupation [49] 4784 1195 Occupation of individual 6
+Is alive? [49] 4800 1199 Are they alive 2
+Gender [49] 4800 1200 Labeled gender 2
+Experimental setup For sample-level probing, we truncate the input strings to the first 128tokens
+for all datasets but for the Github dataset, where we take the last 128tokens to avoid license headers
+[19,49]. For token-level probing, we instead take only the last 128tokens, where the final token
+contains the surname of the individual in question in the datasets of [49].
+Binary probes are trained on 80% of the training data (randomly shuffled) with the sklearn library’s
+LogisiticRegression module with parameters:
+• class_weight=‘balanced’
+• penalty=‘l2’
+• solver=‘newton-cholesky’
+25• max_iter=200
+A random seed of 42is used throughout the code to ensure reproducibility.
+B.5.1 Sparse probing results
+We show in Figure 13 results on 20additional (sample-level) sparse probing tasks, where MxDs
+remain competitive with the baselines. We also plot the expert activation (of the single expert with
+the highest F1 test set score) for the positive/negative classes for all tasks split across Figures 14
+and 15. One can observe a certain degree of separability between the two semantic clusters of data
+given by the expert coefficient, thus confirming that individual experts are learning to specialize to
+particular high-level features.
+We also include results on 10token-level probing tasks in Figure 16, with the corresponding activation
+densities displayed in Figure 17. Whilst MxDs appear to perform slightly less well here on average,
+they remain competitive as expected.
+B.6 Ablations
+We turn next to ablation studies to explore the value of the various model components below:
+B.6.1 Choice of sparsity constraint
+We first train a variety of MxDs on GPT2 models with the TopK activation function [ 23] and
+instead train models with a ReLU followed by an explicit λ||.||1sparsity penalty on the specialized
+components in addition to the reconstruction loss [ 22]. We show the results in Figure 18, where,
+similarly to [ 26], we find the TopK activation to dominate on the sparsity-accuracy frontier–we thus
+use the TopK activation for all experiments.
+B.6.2 Choice of MxD encoder
+Secondly, we show in Figure 19 the benefits of MxDs’ flexibility in inheriting the original MLP
+layer’s encoder form/activation function. All models here are trained from scratch for the same
+number of tokens and with the same experimental setup as in Section 3.1, with K= 32 . In the
+first 3 left-most subfigures, we see the Normalized MSE is as low as half when using GELU vs the
+non-native ReLU activation.
+We next ablate the impact of inheriting the same encoder as the Llama-3.2-3B base model. In the
+rightmost subfigure of Figure 19, we train MxDs with ReLU-MLP, GELU-MLP, and Swish-GLU
+encoders. As can be seen, using a GLU with a Swish activation model (matching the base model
+architecture) yields a Normalized MSE almost an order of magnitude smaller than MLPs with
+GELU/ReLU.
+C Feature balance and shared experts
+C.1 Expert/feature balance
+Following the code of [ 27,99], we log how often each unit of specialism/feature is used, over a fixed
+window of ∼1M tokens. We show in Figure 20 the feature frequency at the end of training, where
+we observe that MxDs see a similar healthy balance of experts to the frequency of usage of features
+in the baselines.
+Interestingly, we observe a small peak of experts that fire more frequently in MxDs (e.g., around -2
+on the x-axis)–perhaps specializing in common patterns and primitives in natural language.
+C.2 Shared experts
+We find that, by default, our MxD models naturally learn to use a shared expert, with the remaining
+experts exhibiting strong specialization in a wide range of themes and linguistic patterns. The use of
+a shared expert is becoming an increasingly popular design choice, including in the latest Llama 4
+models [ 44]–we therefore allow this pattern to emerge naturally in our base models, further justified
+26de en es fr nl
+European language0.00.20.40.60.81.0T est F1 scoreeuroparl
+gpt2
+MxD
+TC
+Skip-TC
+T opK-SAE(a) Europarl dataset, on GPT2
+de en es fr nl
+European language0.00.20.40.60.81.0T est F1 scoreeuroparl
+pythia-410m
+MxD
+TC
+Skip-TC
+T opK-SAE (b) Europarl dataset, on Pythia-410m
+C HTML Java PHP Python
+Programming language0.00.20.40.60.81.0T est F1 scoregithub-code
+gpt2
+MxD
+TC
+Skip-TC
+T opK-SAE
+(c) Github code dataset, on GPT2
+C HTML Java PHP Python
+Programming language0.00.20.40.60.81.0T est F1 scoregithub-code
+pythia-410m
+MxD
+TC
+Skip-TC
+T opK-SAE (d) Github code dataset, on Pythia-410m
+Negative Positive
+Amazon review sentiment0.00.20.40.60.81.0T est F1 scoreamazon_reviews_mcauley_1and5_sentiment
+gpt2
+MxD
+TC
+Skip-TC
+T opK-SAE
+(e) Amazon review sentiment dataset, on GPT2
+Negative Positive
+Amazon review sentiment0.00.20.40.60.81.0T est F1 scoreamazon_reviews_mcauley_1and5_sentiment
+pythia-410m
+MxD
+TC
+Skip-TC
+T opK-SAE (f) Amazon review sentiment dataset, on Pythia-410m
+attorneydentist
+journalist
+photographerphysician professor
+psychologistteacher
+Profession0.00.20.40.60.81.0T est F1 scorebias_in_bios
+gpt2
+MxD
+TC
+Skip-TC
+T opK-SAE
+(g) Bias in Bios dataset, on GPT2
+attorneydentist
+journalist
+photographerphysician professor
+psychologistteacher
+Profession0.00.20.40.60.81.0T est F1 scorebias_in_bios
+pythia-410m
+MxD
+TC
+Skip-TC
+T opK-SAE (h) Bias in Bios dataset, on Pythia-410m
+Figure 13: Sample-level sparse probing results on individual experts/features; the best F1 score on a
+held out set is presented.
+273
+ 2
+ 1
+ 0
+Pre-activation value0.00.51.0DensityWorld
+2.5
+ 0.0 2.5 5.0
+Pre-activation value0.00.51.0Sports
+4
+ 2
+ 0
+Pre-activation value0.00.5Business
+4
+ 3
+ 2
+ 1
+Pre-activation value0.00.51.0T ech(a) AG news dataset, on GPT2
+1.0
+ 0.5
+Pre-activation value02DensityWorld
+1.5
+ 1.0
+ 0.5
+Pre-activation value02Sports
+0.5
+ 0.0
+Pre-activation value024Business
+0.50
+ 0.25
+ 0.00 0.25
+Pre-activation value024T ech
+(b) AG news dataset, on Pythia-410m
+4
+ 2
+ 0
+Pre-activation value0.00.51.0Densityde
+10
+ 0 10
+Pre-activation value0.00.10.2en
+5
+ 0
+Pre-activation value0.00.5es
+0 10 20
+Pre-activation value0.00.51.0fr
+2
+ 0 2
+Pre-activation value0.00.5Densitynl
+(c) Europarl dataset, on GPT2
+1.0
+ 0.5
+Pre-activation value0.02.55.0Densityde
+1.5
+ 1.0
+ 0.5
+Pre-activation value024en
+1.0
+ 0.5
+ 0.0
+Pre-activation value024es
+0 1
+Pre-activation value02fr
+0.5
+ 0.0 0.5 1.0
+Pre-activation value024Densitynl
+(d) Europarl dataset, on Pythia-410m
+1
+ 0
+Pre-activation value01DensityC
+2
+ 0
+Pre-activation value0.00.51.0HTML
+4
+ 3
+ 2
+Pre-activation value01Java
+2
+ 0
+Pre-activation value0.00.51.0PHP
+4
+ 3
+ 2
+ 1
+Pre-activation value01DensityPython
+(e) Github code dataset, on GPT2
+0 1 2
+Pre-activation value024DensityC
+0.5
+ 0.0 0.5
+Pre-activation value024HTML
+1.0
+ 0.5
+ 0.0
+Pre-activation value02Java
+0 1
+Pre-activation value012PHP
+0 1 2
+Pre-activation value024DensityPython
+(f) Github code dataset, on Pythia-410m
+2
+ 0
+Pre-activation value01DensityNegative
+1
+ 0 1
+Pre-activation value012Positive
+(g) Amazon review sentiment dataset, on GPT2
+0.8
+ 0.6
+ 0.4
+Pre-activation value0.02.55.0DensityNegative
+0.8
+ 0.6
+ 0.4
+ 0.2
+Pre-activation value0.02.55.0Positive
+(h) Amazon review sentiment dataset, on Pythia-410m
+Figure 14: [1/2] Sample-level sparse probing results on individual experts for MxDs; here we plot
+the values of the expert pre-activation for positive /other classes (in the 1-vs-all setting).
+284
+ 3
+ 2
+ 1
+Pre-activation value0.00.51.01.5Densityattorney
+0 5 10
+Pre-activation value0.00.51.01.5dentist
+2
+ 0 2
+Pre-activation value0.00.51.0journalist
+1
+ 0 1 2 3
+Pre-activation value012photographer
+4
+ 3
+ 2
+ 1
+Pre-activation value0.00.51.0Densityphysician
+0 2
+Pre-activation value012professor
+0 2 4 6
+Pre-activation value012psychologist
+2
+ 1
+Pre-activation value0.00.51.01.5teacher(a) Profession from biography, on GPT2
+1.2
+ 1.0
+ 0.8
+ 0.6
+ 0.4
+ 0.2
+Pre-activation value024Densityattorney
+0.50
+ 0.25
+ 0.00 0.25 0.50
+Pre-activation value024dentist
+0.4
+ 0.2
+ 0.0 0.2 0.4
+Pre-activation value0123journalist
+1.0
+ 0.8
+ 0.6
+ 0.4
+ 0.2
+Pre-activation value024photographer
+0.8
+ 0.6
+ 0.4
+ 0.2
+ 0.0
+Pre-activation value024Densityphysician
+1.00
+ 0.75
+ 0.50
+ 0.25
+ 0.00
+Pre-activation value024professor
+1.25
+ 1.00
+ 0.75
+ 0.50
+ 0.25
+Pre-activation value024psychologist
+1.25
+ 1.00
+ 0.75
+ 0.50
+ 0.25
+Pre-activation value024teacher
+(b) Profession from biography, on Pythia-410m
+Figure 15: [2/2] Sample-level sparse probing results on individual experts for MxDs; here we plot
+the values of the expert pre-activation for positive /other classes (in the 1-vs-all setting).
+Singer Researcher Actor Athlete Politician Journalist
+Occupation0.00.20.40.60.81.0T est F1 scoreoccupation
+gpt2
+MxD
+TC
+Skip-TC
+T opK-SAE
+(a) Occupation surname probing, on GPT2
+Singer Researcher Actor Athlete Politician Journalist
+Occupation0.00.20.40.60.81.0T est F1 scoreoccupation
+pythia-410m
+MxD
+TC
+Skip-TC
+T opK-SAE (b) Occupation surname probing, on Pythia-410m
+Yes No
+Is Alive?0.00.20.40.60.81.0T est F1 scoreisalive
+gpt2
+MxD
+TC
+Skip-TC
+T opK-SAE
+(c) “Is alive?” surname
+probing, on GPT2
+Yes No
+Is Alive?0.00.20.40.60.81.0T est F1 scoreisalive
+pythia-410m
+MxD
+TC
+Skip-TC
+T opK-SAE(d) “Is alive?” surname
+probing, on Pythia-410m
+F M
+Gender0.00.20.40.60.81.0T est F1 scoregender
+gpt2
+MxD
+TC
+Skip-TC
+T opK-SAE(e) Gender surname prob-
+ing, on GPT2
+F M
+Gender0.00.20.40.60.81.0T est F1 scoregender
+pythia-410m
+MxD
+TC
+Skip-TC
+T opK-SAE(f) Gender surname prob-
+ing, on Pythia-410m
+Figure 16: Token-level sparse probing results on individual experts/features; the best F1 score on a
+held out set is presented.
+290 5
+Pre-activation value0.000.250.50DensitySinger
+5
+ 0 5
+Pre-activation value0.00.20.4Researcher
+0 5 10
+Pre-activation value0.000.250.50Actor
+5
+ 0 5
+Pre-activation value0.00.20.4Athlete
+5
+ 0 5
+Pre-activation value0.000.250.50Politician
+5.0
+ 2.5
+ 0.0
+Pre-activation value0.00.5Journalist(a) Occupation surname probing, on GPT2
+1
+ 0 1
+Pre-activation value012DensitySinger
+2
+ 0 2
+Pre-activation value0.00.51.0Researcher
+0.0 2.5
+Pre-activation value0.00.51.0Actor
+2
+ 1
+ 0
+Pre-activation value012Athlete
+0 2
+Pre-activation value012Politician
+1
+ 0
+Pre-activation value012Journalist
+(b) Occupation surname probing, on Pythia-410m
+0 10
+Pre-activation value0.00.2DensityYes
+5
+ 0
+Pre-activation value0.000.250.50No
+(c) Alive/dead surname probing, on GPT2
+1
+ 0
+Pre-activation value012DensityYes
+1
+ 0 1
+Pre-activation value012No
+(d) Alive/dead surname probing, on Pythia-410m
+0 5
+Pre-activation value0.00.5DensityF
+5
+ 0
+Pre-activation value0.000.250.50M
+(e) Gender surname probing, on GPT2
+0 2 4
+Pre-activation value024DensityF
+2
+ 0
+Pre-activation value012M
+(f) Gender surname probing, on Pythia-410m
+Figure 17: Token-level sparse probing results on individual experts for MxDs; here we plot the values
+of the expert pre-activation for positive /other classes (in the 1-vs-all setting).
+3024252627
+ Mean 0
+3.6003.6053.6103.6153.6203.6253.6303.6353.640 Mean cross-entropy loss
+: 5.0e-5
+: 7.0e-5
+: 1.0e-4
+: 1.5e-4
+: 1.0e-4
+: 1.5e-4
+: 2.5e-4
+: 3.0e-4
+: 4.0e-4
+GPT-2 ablation: L1 penalty vs T opK activation 
+Transcoders (L1)
+Transcoders (T opK)
+Ours (L1)
+Ours (T opK)
+Original modelFigure 18: ReLU+TopK activation function [ 23] vs ReLU w/ L1 sparsity penalty [ 22]: both MxDs
+and Transcoders better recover the cross entropy loss with the TopK activation.
+=ReLU (MLP)
+=GELU (MLP)
+MxD encoder activation0.000000.000050.000100.000150.000200.00025 Normalized MSE
+Pythia-410M
+=ReLU (MLP)
+=GELU (MLP)
+MxD encoder activation0.00000.00050.00100.00150.00200.0025GPT2-124M
+=ReLU (MLP)
+=GELU (MLP)
+MxD encoder activation0.000000.000050.000100.000150.000200.000250.00030Pythia-1.4B
+=ReLU (MLP)
+=GELU (MLP)
+=Swish (GLU)
+MxD encoder architecture0.000000.000050.000100.000150.00020Llama-3.2-3B
+Figure 19: Encoder architecture ablation : MSE loss when using ReLU activation vs the GELU
+used by the base models; and MLPs vs GLUs for Llama (rightmost subfigure).
+through the evidence in [ 43] that shared experts can enhance specialization among the remaining
+experts [ 43]. We highlight, however, that a simple trick of sampling ˆK∼Unif{K−K/a, K +K/a}
+for the Top- ˆKactivation at train-time (for e.g. a:= 2 ) is sufficient to remove the dominating
+shared-expert at minimal hit to reconstruction performance, if desired.
+We train two sets of models with a base K= 32 onGPT2-small andpythia-410m , using a:= 2.
+We first show in Figure 21 the indices of the top-activating experts for the 2 model variants on a
+template prompt, after training has finished. On the left-hand side of Figure 21, the models route
+all tokens through the same shared expert at position 1. However, we see on the right-hand side
+that training with the ‘random-K’ strategy breaks the dependence on a shared expert in position 1.
+Furthermore, we include in Figure 22 the corresponding train-time MSE loss for the 4 models here as
+ablations–observing that the random-K strategy also brings comparable performance. Based on these
+experiments, we recommend this simple training strategy if one desires MxD models without shared
+experts.
+D Detailed experimental setup
+We list in Table 6 the resources used for each experiment: the GPU and the indicative run-time for
+a single model. The mlp_expansion_factor column refers to the expansion factor applied to the
+input dimension to generate the MLP width in the sparse layers (i.e. H:=I·mlp_expansion_factor ).
+3110
+ 8
+ 6
+ 4
+ 2
+ 0
+Log10 feature firing frequency050010001500200025003000Number of featuresFeature usage: GPT2-124M - MxD
+10
+ 8
+ 6
+ 4
+ 2
+ 0
+Log10 feature firing frequency0100020003000Number of featuresFeature usage: Pythia-410M - MxD
+10
+ 8
+ 6
+ 4
+ 2
+ 0
+Log10 feature firing frequency01000200030004000Number of featuresFeature usage: GPT2-124M - TC
+10
+ 8
+ 6
+ 4
+ 2
+Log10 feature firing frequency01000200030004000Number of featuresFeature usage: Pythia-410M - TC
+10
+ 8
+ 6
+ 4
+ 2
+Log10 feature firing frequency01000200030004000Number of featuresFeature usage: GPT2-124M - STC
+10
+ 8
+ 6
+ 4
+ 2
+Log10 feature firing frequency010002000300040005000Number of featuresFeature usage: Pythia-410M - STCFigure 20: log10feature sparsity (following [ 27,99]); MxDs’ experts are well-balanced, similar to
+the baselines’ features.
+Table 6: Total training time and resources used to produce the k= 32 experiments (the required
+compute being roughly the same across models trained with different k).
+Model GPU used VRAM Training time d_in mlp_expansion_factor Asset link
+GPT2-124m x1 GeForce RTX 3090 24GB 8h 34m 37s 768 32 https://huggingface.co/docs/transformers/en/model_doc/gpt2
+Pythia-410m x1 GeForce RTX 3090 24GB 8h 35m 17s 1024 32 https://huggingface.co/EleutherAI/pythia-410m
+Pythia-1.4B x1 A100 80GB 23h 25m 23s 2048 32 https://huggingface.co/EleutherAI/pythia-1.4b
+Llama-3.2-3B x1 A100 80GB 2d 3m 50s 3072 32 https://huggingface.co/meta-llama/Llama-3.2-3B
+321st highest
+expert index2nd highest
+expert index3rd highest
+expert index4th highest
+expert index
+ [  526 18499  7257  8244]
+ [16092  3344 17100  7388]
+ [19829 10864  7720  5507]
+ [20001 15277  1905 11387]Token 1
+Token 2
+Token 3
+Token 4 [10160 10962 19772  9610]
+ [19772 15461  2630  8228]
+ [19772 18694  7385  3494]
+ [19772 19466 10619   970]Token 1
+Token 2
+Token 3
+Token 41st highest
+expert index2nd highest
+expert index3rd highest
+expert index4th highest
+expert indexModel trained with ﬁxed K Model trained with random K
+Prompt: "Who is the president of the USA?" GPT2-small
+1st highest
+expert index2nd highest
+expert index3rd highest
+expert index4th highest
+expert index
+ [ 7412 13294  3097 19430]
+ [13439 24209 13723 18099]
+ [ 9587  3857 10715  6198]
+ [ 2809  3378 25799  9435]Token 1
+Token 2
+Token 3
+Token 4 [28104  1694 18149  2013]
+ [28104  1163  5124 11890]
+ [28104  5124 27687  3657]
+ [28104  4126 12814 23628]Token 1
+Token 2
+Token 3
+Token 41st highest
+expert index2nd highest
+expert index3rd highest
+expert index4th highest
+expert index
+Prompt: "Who is the president of the USA?" Pythia-410mModel trained with ﬁxed K Model trained with random KFigure 21: Top-activating experts for template prompt with and without using a randomized value of
+Kat train-time for TopK expert selection: randomization largely prevents a shared expert. Shown are
+the leading 4 tokens and expert indices.
+0 20K 40K 60K 80K 100K 120K
+Training steps0.0050.0100.0150.0200.0250.0300.035Normalized MSEGPT2-small
+TC
+STC
+MxD
+MxD (random K)
+0 20K 40K 60K 80K 100K 120K
+Training steps0.0000.0010.0020.0030.0040.0050.006Normalized MSEPythia-410m
+TC
+STC
+MxD
+MxD (random K)
+Figure 22: MxD performance with random K sampling : Normalized MSE loss as a func-
+tion of training steps using a fixed Top K:= 32 expert selection and when sampling ˆK∼
+Unif
+K−K
+2, K+K
+2	
+.
+33D.1 Feature steering details
+For the steering experiments, we use two LLM judges to grade generations on two axes. The full
+template prompt we feed to gemini-2.0-flash andllama-4-scout-17b-16e-instruct is as
+follows (note that line breaks and emphases are included here only to aid visualization):
+Prompt given to LLM judges
+You are an expert evaluator of synthetic text.
+TASK : Rate a collection of {num_samples} samples along two independent axes.
+AXIS 1 – CONCEPT COHERENCE:
+0.00 no shared concepts/themes/style.
+0.25 faint overlap.
+0.50 some overlap or similar structure.
+0.75 mostly the same concepts or structure; a few partial drifts.
+1.00 all snippets clearly share the same concepts, themes, style, or structure.
+AXIS 2 – GRAMMATICAL FLUENCY:
+0.00 incomprehensible.
+0.25 dense errors; meaning often obscured.
+0.50 frequent errors; meaning still mostly recoverable.
+0.75 minor errors that rarely hinder comprehension.
+1.00 completely grammatical and natural.
+(Do not penalise fluency if a snippet starts or ends abruptly.).
+SCORING: Choose any real value in [0, 1] for each axis.
+OUTPUT FORMAT: Respond with exactly two numbers formatted ‘0.00, 0.00’ in the order
+[coherence, fluency] and no other text or symbols.
+TEXT TO EV ALUATE: {samples}
+E Additional qualitative results
+We show in Figures 23 and 24 tokens activating the first 9 experts as they appear numerically. We
+sample 6 bins of expert coefficient value to show both tokens that highly activate the experts and
+those that do so only mildly. As can be seen, both high- and low-level specializations emerge in both
+GPT and Pythia models.
+Whilst we observe specializations to a range of concepts (such as punctuation, MMO games, words
+in specific contexts), we do not notice any systemic differences between the types of expert special-
+izations that emerge between the two models in MxD layers.
+34Figure 23: Tokens activating the first 9numerical experts on MxDs with K= 32 trained on
+Pythia-410m ; we sample 6 bands of activations to show both tokens that highly activate experts and
+those that activate them only mildly. Magnitude of activation is denoted by the orange highlight.
+Moderate specialism emerges, e.g., to MMO games, abbreviations, and words in specific contexts.
+35Figure 24: Tokens activating the first 9numerical experts on MxDs with K= 32 trained on
+GPT2-124m ; we sample 6 bands of activations to show both tokens that highly activate experts and
+those that activate them only mildly. Magnitude of activation is denoted by the orange highlight.
+Moderate specialism emerges, e.g., to punctuation, names, and months.
+36

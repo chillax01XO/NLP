@@ -1,0 +1,1444 @@
+arXiv:2505.20813v1  [cs.CL]  27 May 2025RSCF: Relation-Semantics Consistent Filter for Entity Embedding of
+Knowledge Graph
+Junsik Kim, Jinwook Park, Kangil Kim∗
+AI Graduate School
+Gwangju Institute of Science and Technology
+junsikkim@gm.gist.ac.kr ,jinwookpark@gm.gist.ac.kr ,
+kangil.kim.01@gmail.com
+Abstract
+In knowledge graph embedding, leveraging
+relation specific entity transformation has
+markedly enhanced performance. However, the
+consistency of embedding differences before
+and after transformation remains unaddressed,
+risking the loss of valuable inductive bias in-
+herent in the embeddings. This inconsistency
+stems from two problems. First, transforma-
+tion representations are specified for relations
+in a disconnected manner, allowing dissimilar
+transformations and corresponding entity em-
+beddings for similar relations. Second, a gener-
+alized plug-in approach as a SFBR (Semantic
+Filter Based on Relations) disrupts this consis-
+tency through excessive concentration of entity
+embeddings under entity-based regularization,
+generating indistinguishable score distributions
+among relations. In this paper, we introduce
+a plug-in KGE method, Relation-Semantics
+Consistent Filter (RSCF). Its entity transfor-
+mation has three features for enhancing seman-
+tic consistency: 1) shared affine transformation
+of relation embeddings across all relations, 2)
+rooted entity transformation that adds an en-
+tity embedding to its change represented by
+the transformed vector, and 3) normalization
+of the change to prevent scale reduction. To
+amplify the advantages of consistency that pre-
+serve semantics on embeddings, RSCF adds
+relation transformation and prediction mod-
+ules for enhancing the semantics. In knowledge
+graph completion tasks with distance-based and
+tensor decomposition models, RSCF signifi-
+cantly outperforms state-of-the-art KGE meth-
+ods, showing robustness across all relations and
+their frequencies.
+1 Introduction
+Knowledge graphs (KGs) play crucial roles in a
+wide area of machine learning and its applica-
+tions (Zhang et al., 2022b; Zhou et al., 2022; Geng
+et al., 2022). However, KGs, even on a large scale,
+∗Corresponding author.still suffer from incompleteness (Dong et al., 2014).
+This problem has been extensively studied as a task
+to predict missing entities, known as knowledge
+graph completion (KGC).
+An effective approach for KGC is knowledge
+graph embedding (KGE) that learns vectors to
+represent entities and relations in a low dimen-
+sional space to measure the validity of triples.
+Two primary approaches to determine the valid-
+ity are distance-based model (DBM) using the
+Minkowski distance and tensor decomposition
+model (TDM) regarding KGC as a tensor com-
+pletion problem (Zhang et al., 2020a).
+A recently tackled issue of the models is to learn
+only single embedding for an entity, which is insuf-
+ficient to express its various attributes in complex
+relation patterns such as 1-N, N-1 and N-N (Chao
+et al., 2021; Ge et al., 2023). A proposed and ef-
+fective approach for this issue is entity transforma-
+tion based model (ETM) that uses relation specific
+transformations to generate different entity embed-
+dings for relations from their original embedding,
+enabling more complex entity and relation learn-
+ing (Ge et al., 2023).
+ETMs, however, have a limit to learning useful
+inductive bias that could be obtained in semanti-
+cally similar relations. For example, SFBR, a re-
+cently proposed method plugged in to various KGE
+models (Liang et al., 2021), assigns mutually dis-
+connected relation specific transformation to each
+relation. Furthermore, under a significantly useful
+regularizer such as DURA (Zhang et al., 2020a),
+especially on TDM, the method critically concen-
+trates entity embeddings, including unobserved en-
+tities and generates indistinguishable score distribu-
+tions across relations. Both issues are interpreted as
+limited learning an important and implicit inductive
+bias that semantically similar relation have simi-
+lar relation specific entity transformation, called
+relation-semantics consistency in this paper.
+To alleviate the issues, we present a simple andeffective method, Relation-Semantically Consis-
+tent Filter (RSCF). Its entity transformation has
+three features for enhancing semantic consistency.
+1) shared affine transformation for consistency map-
+ping of relations to entity transformations, 2) rooted
+entity transformation using the affine transforma-
+tion to generate only the change of an entity em-
+bedding subsequently added by this embedding
+and 3) normalization of the change for preventing
+critical scale reduction breaking consistency. To
+amplify the benefit of the consistency, RSCFs adds
+relation transformation (RT) and relation predic-
+tion (RP) (Chen et al., 2021), for inducing useful
+relation specific semantics on embeddings.
+Our contributions are as follows.
+•We raise and clarify two problems in terms
+ofrelation semantics consistency in learning
+useful inductive bias on embeddings.
+•We propose a novel and significantly outper-
+forming RSCF as a plug-in KGE method,
+which induces the consistency and effectively
+learns useful semantic representations.
+•We provide experimental results on common
+benchmarks of KGC, and in-depth analysis to
+verify the causes and derived effects.
+2 Loss of Useful Inductive Bias
+Because semantically similar relations have similar
+embedding (Zhang et al., 2018), we define that map-
+ping relation embeddings to entity transformations
+(ETs) is relation semantically consistent if and only
+if any relation pairs (r1, r2)and shorter pair (r1, r3)
+for a given r1are mapped to ET pair (T1, T2)and
+shorter pair (T1, T3), respectively. This consistency
+serves as an inductive bias implying that semanti-
+cally similar relations have similar ETs and, there-
+fore, overall similar entity embeddings (EEs). Two
+phenomena of losing this inductive bias and their
+causes are as follows.
+Disconnection of Entity Transformations Dis-
+connected ET loosely use this bias, especially un-
+der lack of triplet data. In existing methods, re-
+lation specific ETs use separate parameters such
+ashr=Wrhandtr=Wrt, where h,t, are head
+and tail entity embedding, and Wris a relation spe-
+cific transformation. Despite the disconnection, the
+methods can still learn similar Wrfor given two
+similar relation embeddings if their desirable entity
+ranks are similar. However, limited observation ofMetric ET-SFBR ET-RSCF EE-SFBR EE-RSCF
+Intra Cluster Distance ( ↓) 1.10 0.47 2.35 0.53
+Inter Cluster Distance ( ↑) 0.27 0.82 0.40 0.85
+Table 1: Intra and Inter Cluster Distance of ET and
+EE. RSCF shows more concentrated yet distinguishable
+clusters compared to SFBR. (Intra Cluster Distance:
+mean distance of elements in a cluster to their centroid,
+Inter Cluster Distance: distance of a centroid with its
+closest centroid. Both measures are averaged across
+clusters.)
+(a) ET-SFBR
+ (b) ET-RSCF
+(c) EE-SFBR
+ (d) EE-RSCFposition
+currency
+film production
+film actor
+people place
+film place
+music role
+organization place
+producer type
+award category
+Figure 1: t-SNE result distribution of head ET ((a) and
+(b)) and EE ((c) and (d)) for semantically similar relation
+groups. Same color represents same semantic group.
+entities due to sparse KG introduces a wide variety
+of possible ETs and their corresponding embedding
+distributions, thereby diluting consistency. In this
+environment, the disconnected representation with-
+out any specific training and initialization process
+aiming to foster the consistency is exposed to the
+loss of useful inductive bias of similar relations.
+Empirical Evidence for Disconnection The
+quantitative empirical evidence of disconnection
+in ET and EE is shown in Table 1. The results rep-
+resent that SFBR applied to TransE produces ET
+and EE that are less distinguishable among clus-
+ters (lower Inter Cluster Distance) and less concen-
+trated in each cluster (higher Intra Cluster Distance)
+compared to RSCF. Additionally, Figure 1 shows a
+qualitative example of the distributions visualized
+by t-SNE. This example also indicates the evidence
+of disconnection of ET and EE in SFBR. More de-
+tails of making groups for ET and EE, Intra Cluster
+Distance, and Inter Cluster Distance are shown in
+Appendix A.
+Entity Embedding Concentration In particular,
+SFBR additionally loses consistency under entity-
+based regularization, DURA (Zhang et al., 2020a).
+In KGE based on TDM, DURA has shown signif-RSCF
+SFBR (N)
+SFBR
+ComplEX-DURA(a) Score Distribution
+0 100 200 300 400
+Epoch0.3400.3450.3500.3550.3600.3650.3700.3750.3800.385MRR
+: 0.05(Original)
+: 0.005
+: 0.0005
+: 0.00005
+0 100 200 300 400
+Epoch0.00.20.40.60.81.01.2Transformation Scale: 0.05(Original)
+: 0.005
+: 0.0005
+: 0.00005
+(b) MRR of validation set (left) and Transformation
+Scale (right)
+Figure 2: Result of entity embedding concentration, and
+performance and scale decrease in training. The results
+are collected from ComplEX with DURA regularization.
+DURA is applied in all epochs and SFBR is applied after
+200 epochs ( λ: regularization weight).
+icant improvement enough to be inevitable. How-
+ever, ComplEX-SFBR with DURA reduces the
+scale of ET, causing a strong concentration of entire
+entity embeddings. Observed entities are relatively
+safe because the score distribution is continuously
+adjusted to predict correct triples, but unobserved
+entities are critically vulnerable to the concentra-
+tion causing indistinguishable score distributions
+for semantically different relations, implying crit-
+ically broken consistency. This cause of this phe-
+nomenon is simply derived in the following equa-
+tions of DURA in the original (above) (Zhang et al.,
+2020a) and DURA in SFBR (below).
+P
+p||hiRj||2
+2+||hi||2
+2+||tk||2
+2+||tkRj⊤||2
+2P
+p||WrjhiRj||2
+2+||Wrjhi||2
+2+||tk||2
+2+||tkRj⊤||2
+2(1)
+where p= (hi, rj, tk)∈Sfor total training data
+S,hiandtkare head and tail embeddings with
+indices and Rjis a matrix representing relation rj.
+In the equation 1, to minimize DURA loss, model
+always decreases the scale of ET (simple proof in
+Appendix B.1) and this causes indistinguishable
+score distribution in all score distributions.
+Empirical Evidence for Concentration Fig-
+ure 2 presents a T-SNE visualization of score distri-butions for selected queries. We selected the rela-
+tionr1, which shows significantly low performance
+in SFBR on FB15k-237, and selected all queries ( h,
+r1, ?) for this relation r1in the validation set. We
+then generate score distribution for each query us-
+ing ComplEX-RSCF, ComplEX-SFBR, ComplEX-
+SFBR with normalization (SFBR (N)), and the
+ComplEX-DURA. The results show that SFBR
+concentrates embeddings into a small cluster, while
+the other methods are diversely dispersed.
+Do We Need to Use DURA regularizer? Gener-
+ating indistinguishable score distributions cannot
+be merely resolved by handling the regularization
+weight. Figure 2 (b) shows the valid MRR (left) of
+SFBR and transformation scale (right) according
+to the regularizer weight λ. In training until 200
+epochs, largely weighted DURA shows significant
+performance, but applying SFBR starts to decrease
+MRR and the transformation scale. The results im-
+ply that integrating SFBR with DURA causes per-
+formance degradation with scale decrease ending
+up in the entity embedding concentration. Also, the
+result of SFBR with a small weighted DURA in-
+dicates that simply excluding DURA on the TDM
+will critically decrease the performance.
+3 Method
+Overview In this section, we propose Relation-
+Semantics Consistent Filter (RSCF) to address the
+consistency issues. In Figure 3, the overall filtering
+process of RSCF, distinguished features compared
+to ETMs, and their intended effects are illustrated.
+RSCF represents the ET as an addition of origi-
+nal embedding ( c⃝) and its relation specific change.
+The change is generated by an affine transformation
+from relation embedding ( a⃝), and then normalized
+(b⃝), described as
+er= (b⃝z}|{
+Np(a⃝z}|{
+rA1)c⃝z}|{
++1)⊗e(2)
+where A1∈Rn×nis shared affine transforma-
+tion across all relations, rande∈Rnare relation
+and entity embedding. Np(rA) =rA
+∥rA∥p, and⊗is
+an elementwise product. Detailed motivation and
+effects are as follows.
+Shared Affine Transformation for Consistency
+A basic property of affine transformation is to main-
+tain the parallelism of two parallel line segments
+after the transformation and preserves the ratio of
+their lengths. This property guarantees consistentHead 
+Embedding Relation 
+EmbeddingTail
+EmbeddingScore Function
+𝑓𝑟(ℎ,𝑡)
+Index
+Selecting: Ours : SFBR : Common
+Inductive Bias Loss by
+Entity Embedding Concentration:Before Entity -Transformation
+Entity EmbeddingShared Affine
+Transformation(1)Shared Affine
+Transformation(1)
+Index
+Selecting
+Entity 
+Transformation
+Entity Embedding: After Entity -TransformationEntity
+TransformationRooted Entity
+Transformation(2)
+Entity
+Transformation
+Relation 
+EmbeddingEntity
+TransformationRelation 
+EmbeddingEntity
+TransformationInductive Bias Loss by
+Disconnection
+Rooted Entity
+Transformation(2)
+(2)
+Rooted Entity
+Transformation
+(a) Overview of RSCF (b) Effective of RSCFRoot Embedding Changes of Embedding(1) Shared Affine Transformation
+𝑊𝑖=𝑟𝑖𝐴Given that 𝑟𝑖has the 𝑖-thindex,
+Index Selecting
+𝑊𝑖=𝐸𝑇𝑖
+Entity Transformation 
+𝑒𝑟=𝑒⋅𝑊𝑖(2) Rooted Entity Transformation
+𝑒𝑟=𝑒+𝑒⋅𝑁𝑝(𝑊𝑖)Lookup Table of ET Matrix Shared Across RelationsFigure 3: Overview of RSCF and its effect. Its process (left) is illustrated on SFBR coloring changed modules. The
+two effects (right) are shown by comparing SFBR and RSCF on ET and entity embeddings.
+mapping of relation embeddings at least on a line to
+generated vectors (part a⃝in Equation 2). Even in
+the case that embeddings are not exactly on a line,
+the consistency is maintained with high probability
+as shown in Table 2. It presents the proportion of
+consistency maintenance rate for each component
+of RSCF based on Monte Carlo simulations. The
+result indicates that our ET can preserve consis-
+tency in the most cases. (Details about this result
+are presented in Appendix B.3).
+After normalization of the generated vectors
+(part b⃝), the consistency still holds in most cases,
+showing a maximum of over 99% in the table 2.
+The addition of one vector to the normalized
+change (part c⃝) does not alter the inequality of
+distances, so the consistency is again maintained.
+Overall, by applying the affine transformation, we
+can maintain the consistency between relation em-
+bedding and its ET. To implement the affine trans-
+formation shared across relations, we simply adopt
+a linear transformation for A.
+Rooted Entity Transformation Sharing an
+affine transformation across all relations inevitably
+reduces the expressiveness of ET compared to en-
+tirely separate relation specific ET such as SFBR.
+To mitigate the negative effects from this reduc-
+tion, we decrease required expressiveness by learn-
+ing only the changes in entity embeddings, ratherMethod On a Line|AC|
+|AB|>1|AC|
+|AB|>1.01|AC|
+|AB|>1.02
+Transformation ( a⃝) 1.000 .728 .808 .875
+Normalization ( b⃝) .965 .869 .958 .994
+Add one ( c⃝) 1.000 1.000 1.000 1.000
+Table 2: Consistency of our ET: The numbers represent
+the success rates of preserving the superiority of dis-
+tances for 10,000 randomly generated samples of three
+relation embeddings, notated as A, B, and C. (Line: the
+rates for samples with elements exactly on a line, the
+others: the rate for samples not on a line with varying
+distance rate conditions.)
+than learning their diverse positions. Moreover, this
+rooted ET representation enables safely bounding
+changes via normalization without altering original
+entity embeddings.1To implement it, we add one
+to the normalized change Np(rA)and multiply it
+to the original entity embedding (part c⃝).
+Relation Prediction for More Consistent Rela-
+tion Embedding to its Semantics The induc-
+tive bias introduced by the RSCF is dependent
+on the semantics of relation embeddings. There-
+fore, directly enhancing these semantics results in
+the improvement of RSCF performance. An effec-
+tive approach is Relation Prediction (RP) (Chen
+et al., 2021) forming a cluster for semantically sim-
+ilar relations and improving discrimination of dis-
+1Refer to Appendix B.2 for details on the bounds of entity
+changes.ModelET FeaturesEntity Transformation Relation Transformation Relation Prediction (Chen et al., 2021)a⃝ b⃝ c⃝
+PairRE ✗ ✗ ✗ er=e⊗re✗ ✗
+SFBR ✗ ✗ ✗ er=Wr·e+b ✗ ✗
+CompoundE ✗ ✗ ✗ er=Tr·Rr(θ)·Sr·e ✗ ✗
+RSCF ✓ ✓ ✓ er=ψ(r)⊗e r ht=ψ′(h)⊗ψ′(t)⊗r ✓
+Table 3: Summary of difference between RSCF and ETMs ( h: head entity, t: tail entity, er: transformed entity
+fromhandt, which contains both transformed head entity hrand transformed tail entity tr,ψ: ET represented in
+Equation (2), ψ′: applied ET to relation transformation shown in and Equation (4), a⃝: shared affine transformation,
+b⃝: bounding change from e,c⃝: rooting ertoe). Computational complexity is presented in Appendix C.5
+similar relations. We add the training objective of
+RP (Chen et al., 2021) to RSCF as follows:
+L=X
+pϕ(hr|rht,tr) +ϕ(tr|hr,rht) +λϕ(r|h,t)(3)
+where ϕis a loss function with a score function
+andλis a hyper-parameter that controls the contri-
+bution of RP.
+Relation Transformation for Relation Embed-
+ding of its Fine-Grained Semantics In KGs,
+some relations have various semantic meanings
+that can be divided into fine-grained sub-relations
+according to their semantics (Zhang et al., 2018).
+Because the semantic meanings of sub-relations are
+determined by their context, which is defined by
+head and tail entities (Jain and Krestel, 2022), we
+propose an entity specific relation transformation
+(RT) to split relations into sub-relations, and apply
+the filter of ET of RSCF for the same purpose. By
+using Equation 2, we present the RT as follows:
+rht= (N p(hA2) + 1) ⊗(Np(tA3) + 1) ⊗r (4)
+where A2∈Rn×nandA3∈Rn×nare shared
+affine transformation across all heads and tails. To
+predict score of given triplet (h, r, t ), transformed
+entities erand relation rhrare used. The difference
+of RSCF and ETMs and are summarized in Table 3.
+4 Related Works
+Knowledge Graph Embedding KGE encodes
+entities and relations into low-dimensional latent
+spaces to assess the validity of triples. TransE (Bor-
+des et al., 2013) and RotatE (Sun et al., 2018) de-
+scribe each relation as a translation and rotation be-
+tween entities, respectively. DistMult (Yang et al.,
+2015) regards KGC as a tensor completion prob-
+lem in euclidean space, and ComplEX (Trouillon
+et al., 2016) extends it to complex space. Tran-
+sHRS (Zhang et al., 2018) improves knowledgerepresentation by using the information from the
+HRS. DURA (Zhang et al., 2020a), AnKGE (Yao
+et al., 2023), and CompliE (Cui and Zhang, 2024)
+are methods that can be applied to KGE models
+to prevent overfitting, provide analogical inference
+and enable composition reasoning. VLP (Li et al.,
+2023) presents an explicit copy strategy to allow re-
+ferring to related factual triples. GreenKGC (Wang
+et al., 2023) and SpeedE (Pavlovi ´c and Sallinger,
+2024) propose low-dimensional embedding meth-
+ods to handle large-scale KGs. WeightE (Zhang
+et al., 2023) utilizes a reweighting technique to al-
+leviate the data imbalance issue. UniGE (Liu et al.,
+2024) introduce integration KGE in both euclidean
+and hyperbolic to capture various relational pat-
+terns. However, using only a single embedding for
+an entity or a relation can restrict the learning of
+complex relation patterns.
+Entity Transformation Models ETM is a model
+that uses relation specific ET to model various at-
+tributes of an entity. Models such as TransH (Wang
+et al., 2014), TransR (Lin et al., 2015), and
+TransD (Ji et al., 2015) are variants of TransE (Bor-
+des et al., 2013), designed to handle complex rela-
+tions by employing hyperplanes, projection ma-
+trices, and dynamic mapping matrices for their
+transformation functions, respectively. Recently,
+AutoETER (Niu et al., 2020) learns the type em-
+bedding for each entity with relation specific trans-
+formation. PairRE (Chao et al., 2021) performs a
+scaling operation through the Hadamard product
+to the head and tail entities. SFBR (Liang et al.,
+2021) and AT (Yang et al., 2021) present a univer-
+sal entity transformation applicable to both DBM
+and TDM. ReflectE (Zhang et al., 2022a) intro-
+duces relation specific householder transformation
+to handle sophisticated relation mapping properties.
+CIBLE (Cui and Chen, 2022) use relation-aware-
+transformation for prototype modeling to represent
+the knowledge graph. CompoundE (Ge et al., 2023)
+applied compound operation to both head and tailKnowledge Graph EmbeddingWN18RR FB15k-237 YAGO3-10
+MRR H@1 H@10 MRR H@1 H@10 MRR H@1 H@10
+DistMult (Yang et al., 2015) .430 .390 .490 .241 .155 .419 - - -
+ComplEX (Trouillon et al., 2016) .440 .410 .510 .247 .158 .428 - - -
+RotatE (Sun et al., 2018) .476 .428 .571 .338 .241 .533 - - -
+DistMult-HRS (Zhang et al., 2018) - - - .315 .241 .496 - - -
+AutoETER (Niu et al., 2020) - - - .344 .250 .538 .550 .465 .699
+PairRE (Chao et al., 2021) - - - .351 .256 .544 - - -
+CIBLE (Cui and Chen, 2022) .490 .446 .575 .341 .246 .532 - - -
+ReflectE (Zhang et al., 2022a) .488 .450 .559 .358 .263 .546 - - -
+HAKE-AnKGE (Yao et al., 2023) .500 .454 .587 .385 .288 .572 - - -
+CompoundE (Ge et al., 2023) .491 .450 .576 .357 .264 .545 - - -
+RotatE-GreenKGC (Wang et al., 2023) .411 .367 .491 .345 .265 .507 .453 .361 .629
+RotatE-VLP (Li et al., 2023) .498 .455 .582 .362 .271 .542 - - -
+RotatE-WeightE (Zhang et al., 2023) .501 .448 .592 .371 .281 .557 .580 .504 .713
+CompliE-DURA (Cui and Zhang, 2024) .495 .453 .579 .372 .277 .563 - - -
+SpeedE (Pavlovi ´c and Sallinger, 2024) .493 .446 - .320 .227 - .413 .332 -
+UniGE (Liu et al., 2024) .502 .455 .592 .357 .264 .559 .583 .512 .715
+TransE (Bordes et al., 2013) .226 - .501 .294 - .465 - - -
+ComplEX-DURA (Zhang et al., 2020a) .491 .449 .571 .371 .276 .560 .584 .511 .713
+TransE-SFBR (Liang et al., 2021) .242 .028 .548 .338 .240 .538 - - -
+ComplEX-DURA-SFBR (Liang et al., 2021) .498 .454 .584 .374 .277 .567 .584 .512 .712
+TransE-RSCF (Ours).267 .066 .546 .363 .264 .558 - - -
+±.001 ±.002 ±.002 ±.001 ±.001 ±.001 - - -
+ComplEX-DURA-RSCF (Ours).503 .460 .588 .388 .295 .573 .589 .516 .718
+±.001 ±.001 ±.002 ±.001 ±.002 ±.004 ±.002 ±.003 ±.002
+Table 4: Test performance of KGE-based KGC on FB15k-237, WN18RR and YAGO3-10. Bold indicates the best
+result, and underlined signifies the second best result. ±indicates standard deviation. (The comparison results of
+RSCF, SFBR, and other KGE models presented in Appendix C.2.)
+entities. However, these models have no chance for
+inductive bias sharing due to the separate parameter
+of ET, and SFBR (Liang et al., 2021), which can
+be applied to both DBM and TDM, suffers from
+indistinguishable score distribution because of the
+entity embedding concentrations.
+5 Experiments
+5.1 Settings
+Dataset To evaluate our proposed RSCF
+models, we consider three KG datasets:
+WN18RR (Dettmers et al., 2018), FB15k-
+237 (Toutanova and Chen, 2015), and YAGO3-
+10 (Mahdisoltani et al., 2013). The statistics for the
+three benchmarks are shown in Appendix C.1.
+Evaluation Protocol We evaluated the perfor-
+mance of KGC following the filtered setting (Bor-
+des et al., 2013). The filtered setting removes all
+valid triples from the candidate set when evaluat-
+ing, except for the predicted triple. We adopt the
+MRR and Hits@N to compare the performance of
+different KGE models. MRR is the average of the
+inverse mean rank of the entities and Hits@N is the
+proportion of correct entities ranked within top k.
+Baselines and Training Protocol We compare
+the performance of RSCF with the KGE models:
+TransE, DistMult, ComplEX, RotatE, DistMult-
+HRS, AutoETER, ComplEX-DURA, PairRE,
+SFBR, CIBLE, ReflectE, HAKE-AnKGE, Com-poundE, RotatE-GreenKGC, RotatE-VLP, RotatE-
+WeightE, CompliE-DURA, SpeedE, and UniGE.
+Because RSCF is a module that is plugged in
+based on existing models, we use DBM, including
+TransE, RotatE, and TDM, including CP, RESCAL,
+and ComplEX as base models. Additionally, fol-
+lowing the setting of SFBR, ET is applied to both
+head and tail entities in DBM, while it is applied
+only to the head entity in TDM due to computa-
+tional cost (Liang et al., 2021). For the same reason,
+both head and tail entities are utilized for RT in
+DBM, while only the head entity is used in TDM.
+In the FB15k-237, the entity/relation ratio and the
+triple/relation ratio are significantly lower than in
+the other two datasets, limiting the context infor-
+mation available to each relation. This limitation
+is particularly critical in TDM, which relies solely
+on the head entity. Therefore, RT is not applied to
+TDM in the FB15k-237 dataset.
+5.2 Performance
+Performance on KGC Table 4 shows the perfor-
+mance comparison of the RSCF and other KGE
+models on WN18RR, FB15k-237 and YAGO3-10.
+Overall, RSCF shows higher or competitive perfor-
+mance compared to base models like TransE and
+ComplEX-DURA and other KGE models. Espe-
+cially in FB15k-237 and YAGO3-10, RSCF out-
+performs other state-of-the-art models that include
+HAKE-AnKGE and CompliE-DURA.Query (h, r, ?) |Correct Answer Related Triples in Training Set Rank(R/S)
+(Guillermo del Toro, /people/person/place_of_birth , ?)|Guadalajara(Guillermo del Toro, /people/person/places_lived./people/place_lived/location ,Jalisco )5/ 35(Guillermo del Toro, /people/person/nationality ,Mexico )
+(Shawn Pyfrom, /people/person/places_lived./people/place_lived/location , ?)|Florida(Shawn Pyfrom, /people/person/place_of_birth ,Tampa )3/ 32(Shawn Pyfrom, /people/person/nationality ,United States of America )
+(Walt Whitman, /people/person/places_lived./people/place_lived/location , ?)|New York(Walt Whitman, /people/deceased_person/place_of_death ,Camden )10/ 21(Walt Whitman, /people/person/nationality ,United States of America )
+Table 5: Example KGC results of RSCF compared to SFBR (R: rank of RSCF, S: rank of SFBR). Related triples
+show that similar relations to the queries have similar entities to the correct answers in the training set. TransE is
+used as baseline
+ModelETRP RTT C
+a⃝ b⃝&c⃝ MRR MRR
+RSCF ✓ ✓ ✓ ✓ .363 .387
++ w/o ET ✗ ✗ ✓ ✓ .356 .385
++ w/o RP ✓ ✓ ✗ ✓ .358 .374
++ w/o RT ✓ ✓ ✓ ✗ .356 .388
++ w/o RP ✓ ✓ ✗ ✗ .349 .375
++ w/o ET ✗ ✗ ✓ ✗ .338 .385
++ w/o a⃝ ✗ ✓ ✓ ✗ .354 .386
++ w/o b⃝&c⃝ ✓ ✗ ✓ ✗ .353 .377
+Table 6: Results of an ablation study of RSCF on FB15k-
+237. TransE and ComplEX are used as base models. T
+andCindicate the base models of RSCF, which denote
+TransE and ComplEX, respectively. MRR is used for
+performance comparison.
+0 100 200 300 400
+Epoch0.3500.3550.3600.3650.3700.3750.3800.3850.3900.395MRRRSCF
+RSCF (w/o N)
+SFBR (N)
+SFBR
+ComplEX-DURA
+Figure 4: MRR changes over epochs of RSCF, RSCF
+(w/o N), SFBR (N), SFBR, and ComplEX on FB15k-
+237.
+Ablation Study Table 6 presents ablation studies
+of RSCF to verify the effectiveness of each com-
+ponent. a⃝and b⃝&c⃝are the components of ET
+described in Equation 2. In the ablation study, b⃝
+&c⃝are combined because b⃝&c⃝should be
+used simultaneously to maintain the original scale.
+In Table 6, RSCF shows higher performance com-
+pared to the other ablated models in both TransE
+and ComplEX, suggesting that each component of
+RSCF contributes to the effectiveness of RSCF. Es-
+pecially, Figure 4 shows that w/o normalization ( b⃝
+&c⃝) can significantly reduce model performance
+and w/ normalization maintain model performance
+in both RSCF and SFBR in ComplEX, indicating
+that normalization is necessary to maintain the per-
+formance of models that use DURA regularizer.2In
+addition, please note that RT can reduce the perfor-
+2Detailed description of SFBR (N) is presented in Ap-
+pendix C.3.
+Number of relations that is sorted by their frequency0.250.300.350.400.450.500.55MRRRSCF SFBR TransE
+020000400006000080000100000120000140000
+Frequency of Relations
+(a) KGC performance of relation setFrequency of Relations
+PositionCurrency
+Film ProductionFilm ActorPeople PlaceFilm Place Music Role
+Organization PlaceProducer TypeAward Category
+Relation Groups0.10.20.30.40.50.6MRR
+(b) KGC performance of relation groupsRSCF SFBR TransEFigure 5: KGC performance of the relation set that is
+sorted by their frequency (above) and groups of seman-
+tically similar relations observed in Figure 1 (e) (below)
+on FB15k-237
+mance of ComplEX-RSCF on FB15k-237 because
+of context information restriction.
+Performance on Relation Frequency and Se-
+mantically Distinguished Relation Groups To
+demonstrate the generality of applying RSCF re-
+gardless of relation frequency, we sort relations by
+their frequency and divide them into ten sets. Each
+set has an equal number of relations. Figure 5 above
+shows the MRR for each set in TransE, RSCF, and
+SFBR. The results shows that RSCF outperform
+SFBR and TransE in all sets, demonstrating the ro-
+bustness of RSCF to relation frequency and show-
+ing that RSCF can be applied without trade-off
+between high and low frequency of relations.
+Figure 5 below shows the MRR for each relation
+group as defined in Figure 1 (e). RSCF outper-
+formed SFBR and TransE in all groups, demon-
+strating that RSCF can be utilized without specific
+bias to the semantics of relations and that incorpo-
+rating relation semantics into the transformation
+function can improve model performance.0 100 200 300 400
+Epoch0.00.20.40.60.81.01.2Transformation Scale
+(a) Entity Transformation ScaleRSCF
+SFBR (N)
+SFBR
+0 100 200 300 400
+Epoch0.0000.0050.0100.0150.0200.0250.0300.0350.0400.045Final Embedding Scale
+(b) Final Entity Embedding ScaleRSCF
+SFBR (N)
+SFBR
+ComplEX-DURAFigure 6: Entity transformation scale (left) and final
+entity embedding scale (right) of RSCF, SFBR (N),
+SFBR, and ComplEX-DURA over epochs on FB15k-
+237. DURA is applied in all epochs and RSCF and
+SFBR are applied after 200 epochs.
+Qualitative Example Analysis For qualitative
+analysis, Table 5 presents sampled queries, their
+correct answers, related triples with the sample
+queries, and the ranks obtained by RSCF and SFBR.
+Relations in sample queries and related triples be-
+long to the same relation group (people place).
+In Table 5, RSCF shows enhanced performance
+compared to SFBR, indicating that RSCF can use
+trained bias between semantically similar relations.
+5.3 In-Depth Analysis
+Relation-Semantics Consistency of ET and EE
+Figure 1 shows ET and their corresponding EE
+of SFBR and RSCF via T-SNE. RSCF represents
+a more concentrated cluster compared to SFBR,
+which indicates that similar relations have similar
+ET and EE in RSCF; in other words, RSCF satisfies
+relation-semantic consistency.
+Recovery of Embedding Scale and Score Dis-
+tribution Figure 6 presents transformation scale
+and final entity embedding scale over epochs on
+FB15k-237, using ComplEX as the baseline. Fol-
+lowing the approach of SFBR, DURA is applied
+in all epochs, and RSCF and SFBR are plugged
+in after 200 epochs. The results show that SFBR
+decreases both transformation scale and final en-
+tity embedding scale. In contrast, RSCF and SFBR
+(N) maintain scales, indicating that normalization
+helps preserve the embedding scale due to normal-
+ization. As shown in Figure 4, MRR decreases for
+SFBR and RSCF w/o normalization but increases
+for both RSCF and SFBR (N), implying that en-
+tity embedding concentration negatively impacts
+model performance.
+To investigate the detailed change of score dis-
+tribution, we present the score distribution of ran-
+domly sampled queries from Figure 2 (a) in Fig-
+ure 7. SFBR shows near-zero scores for most enti-
+Figure 7: Score distribution of all entities for randomly
+selected queries from Figure 2 (a)
+Model MRR H@10 Concentration
+ComplEX-RSCF .375 .609 ✗
+ComplEX-SFBR (N) .366 .587 ✗
+ComplEX-SFBR .267 .522 ✓
+ComplEX-DURA .347 .609 ✗
+Table 7: KGC performance of all queries associated
+with the relation that shows strong concentration of en-
+tity embedding in SFBR. Concentration presents entity
+embedding concentration.
+ties, with significantly similar distributions across
+queries. However, by applying normalization or us-
+ing RSCF, the diversity of scores is recovered as
+the original base model.
+Performance Decrease by Entity Embedding
+Concentration To assess the impact of indis-
+tinguishable score distribution, we conduct a per-
+formance evaluation for the selected relation that
+shows critical entity embedding concentration in
+Figure 2. Table 7 presents the MRR for all queries
+associated with the selected relation. SFBR shows
+significantly lower performance than RSCF, SFBR
+(N), and the ComplEX. This result implies that in-
+distinguishable score distribution strongly affects
+the prediction of SFBR, and simply applying nor-
+malization can recover it.
+6 Conclusion
+In this paper, we address the limit in inducing
+relation-semantics consistency, implying that se-
+mantically similar relations have similar entity
+transformation, on entity transformation models
+for KGC, especially SFBR. We clarify two causes,
+disconnected entity transformation representation
+and entity embedding concentration, and providea novel relation-semantics consistent filter (RSCF)
+method. Its entity transformation use shared affine
+transform to generate the change of entity embed-
+ding, normalize it and add it to the embedding for
+enhancing the semantic consistency. Also, RSCF
+adds relation transformation and prediction for en-
+hancing the semantics. This method significantly
+improves the performance of KGC compared to
+state-of-the-art KGE methods for overall relations.
+7 Limitations
+RSCF uses the simplest form of affine transforma-
+tion, but it has a limit of expressing all changes
+across all embeddings, which requires more ad-
+vanced approach. Future work should extend the
+method to additional KGE models to enhance gen-
+erality.
+8 Acknowledgements
+This work was partly supported by Institute of In-
+formation & communications Technology Planning
+& Evaluation (IITP) grant funded by the Korea gov-
+ernment (MSIT) (No.2019-0-01842, Artificial In-
+telligence Graduate School Program (GIST)) and
+the National Research Foundation of Korea (NRF)
+grant funded by the Korea government (MSIT)
+(No.2022R1A2C2012054, Development of AI for
+Canonicalized Expression of Trained Hypotheses
+by Resolving Ambiguity in Various Relation Lev-
+els of Representation Learning)
+References
+Ivana Balazevic, Carl Allen, and Timothy Hospedales.
+2019. Multi-relational poincaré graph embeddings.
+Advances in Neural Information Processing Systems ,
+32.
+Ivana Balaževi ´c, Carl Allen, and Timothy Hospedales.
+2019. Tucker: Tensor factorization for knowledge
+graph completion. In Proceedings of the 2019 Con-
+ference on Empirical Methods in Natural Language
+Processing and the 9th International Joint Confer-
+ence on Natural Language Processing (EMNLP-
+IJCNLP) , pages 5185–5194.
+Antoine Bordes, Nicolas Usunier, Alberto Garcia-
+Duran, Jason Weston, and Oksana Yakhnenko.
+2013. Translating embeddings for modeling multi-
+relational data. Advances in neural information pro-
+cessing systems , 26.
+Zongsheng Cao, Qianqian Xu, Zhiyong Yang, Xiaochun
+Cao, and Qingming Huang. 2021. Dual quaternion
+knowledge graph embeddings. In Proceedings of theAAAI conference on artificial intelligence , volume 35,
+pages 6894–6902.
+Zongsheng Cao, Qianqian Xu, Zhiyong Yang, and Qing-
+ming Huang. 2022. Er: equivariance regularizer for
+knowledge graph completion. In Proceedings of
+the AAAI Conference on Artificial Intelligence , vol-
+ume 36, pages 5512–5520.
+Ines Chami, Adva Wolf, Da-Cheng Juan, Frederic
+Sala, Sujith Ravi, and Christopher Ré. 2020. Low-
+dimensional hyperbolic knowledge graph embed-
+dings. In Proceedings of the 58th Annual Meeting of
+the Association for Computational Linguistics , pages
+6901–6914.
+Linlin Chao, Jianshan He, Taifeng Wang, and Wei Chu.
+2021. Pairre: Knowledge graph embeddings via
+paired relation vectors. In Proceedings of the 59th
+Annual Meeting of the Association for Computational
+Linguistics and the 11th International Joint Confer-
+ence on Natural Language Processing (Volume 1:
+Long Papers) , pages 4360–4369.
+Yihong Chen, Pasquale Minervini, Sebastian Riedel,
+and Pontus Stenetorp. 2021. Relation prediction as
+an auxiliary training objective for improving multi-
+relational graph representations. In 3rd Conference
+on Automated Knowledge Base Construction .
+Wanyun Cui and Xingran Chen. 2022. Instance-based
+learning for knowledge base completion. Advances
+in Neural Information Processing Systems , 35:30744–
+30755.
+Wanyun Cui and Linqiu Zhang. 2024. Modeling knowl-
+edge graphs with composite reasoning. In Proceed-
+ings of the AAAI Conference on Artificial Intelligence ,
+volume 38, pages 8338–8345.
+Tim Dettmers, Pasquale Minervini, Pontus Stenetorp,
+and Sebastian Riedel. 2018. Convolutional 2d knowl-
+edge graph embeddings. In Proceedings of the AAAI
+conference on artificial intelligence , volume 32.
+Xin Dong, Evgeniy Gabrilovich, Geremy Heitz, Wilko
+Horn, Ni Lao, Kevin Murphy, Thomas Strohmann,
+Shaohua Sun, and Wei Zhang. 2014. Knowledge
+vault: A web-scale approach to probabilistic knowl-
+edge fusion. In Proceedings of the 20th ACM
+SIGKDD international conference on Knowledge dis-
+covery and data mining , pages 601–610.
+Xiou Ge, Yun Cheng Wang, Bin Wang, and C-C Jay
+Kuo. 2023. Compounding geometric operations for
+knowledge graph completion. In Proceedings of the
+61st Annual Meeting of the Association for Compu-
+tational Linguistics (Volume 1: Long Papers) , pages
+6947–6965.
+Shijie Geng, Zuohui Fu, Juntao Tan, Yingqiang Ge, Ger-
+ard De Melo, and Yongfeng Zhang. 2022. Path lan-
+guage modeling over knowledge graphsfor explain-
+able recommendation. In Proceedings of the ACM
+Web Conference 2022 , pages 946–955.Nitisha Jain and Ralf Krestel. 2022. Discovering fine-
+grained semantics in knowledge graph relations. In
+Proceedings of the 31st ACM International Con-
+ference on Information & Knowledge Management ,
+pages 822–831.
+Guoliang Ji, Shizhu He, Liheng Xu, Kang Liu, and Jun
+Zhao. 2015. Knowledge graph embedding via dy-
+namic mapping matrix. In Proceedings of the 53rd
+annual meeting of the association for computational
+linguistics and the 7th international joint conference
+on natural language processing (volume 1: Long pa-
+pers) , pages 687–696.
+Jiayi Li and Yujiu Yang. 2022. Star: Knowledge graph
+embedding by scaling, translation and rotation. In
+International Conference on AI and Mobile Services ,
+pages 31–45. Springer.
+Rui Li, Xu Chen, Chaozhuo Li, Yanming Shen, Jianan
+Zhao, Yujing Wang, Weihao Han, Hao Sun, Weiwei
+Deng, Qi Zhang, et al. 2023. To copy rather than
+memorize: A vertical learning paradigm for knowl-
+edge graph completion. In Proceedings of the 61st
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers) , pages 6335–
+6347.
+Yizhi Li, Wei Fan, Chao Liu, Chenghua Lin, and Jiang
+Qian. 2022. Transher: Translating knowledge graph
+embedding with hyper-ellipsoidal restriction. In Pro-
+ceedings of the 2022 Conference on Empirical Meth-
+ods in Natural Language Processing , pages 8517–
+8528.
+Zongwei Liang, Junan Yang, Hui Liu, and Keju Huang.
+2021. A semantic filter based on relations for knowl-
+edge graph completion. In Proceedings of the 2021
+Conference on Empirical Methods in Natural Lan-
+guage Processing , pages 7920–7929.
+Yankai Lin, Zhiyuan Liu, Maosong Sun, Yang Liu, and
+Xuan Zhu. 2015. Learning entity and relation embed-
+dings for knowledge graph completion. In Proceed-
+ings of the AAAI conference on artificial intelligence ,
+volume 29.
+Yuhan Liu, Zelin Cao, Xing Gao, Ji Zhang, and Rui Yan.
+2024. Bridging the space gap: Unifying geometry
+knowledge graph embedding with optimal transport.
+InProceedings of the ACM on Web Conference 2024 ,
+pages 2128–2137.
+Farzaneh Mahdisoltani, Joanna Biega, and Fabian M
+Suchanek. 2013. Yago3: A knowledge base from
+multilingual wikipedias. In CIDR .
+Mojtaba Nayyeri, Chengjin Xu, Franca Hoffmann,
+Mirza Mohtashim Alam, Jens Lehmann, and Sa-
+har Vahdati. 2021. Knowledge graph representa-
+tion learning using ordinary differential equations.
+InProceedings of the 2021 Conference on Empiri-
+cal Methods in Natural Language Processing , pages
+9529–9548.Guanglin Niu, Bo Li, Yongfei Zhang, and Shiliang Pu.
+2022. Cake: A scalable commonsense-aware frame-
+work for multi-view knowledge graph completion.
+InProceedings of the 60th Annual Meeting of the
+Association for Computational Linguistics (Volume
+1: Long Papers) , pages 2867–2877.
+Guanglin Niu, Bo Li, Yongfei Zhang, Shiliang Pu, and
+Jingyang Li. 2020. Autoeter: Automated entity type
+representation for knowledge graph embedding. In
+Findings of the Association for Computational Lin-
+guistics: EMNLP 2020 , pages 1172–1181.
+Aleksandar Pavlovi ´c and Emanuel Sallinger. 2024.
+Speede: Euclidean geometric knowledge graph em-
+bedding strikes back. In Findings of the Association
+for Computational Linguistics: NAACL 2024 , pages
+69–92.
+Tengwei Song, Jie Luo, and Lei Huang. 2021. Rot-
+pro: Modeling transitivity by projection in knowledge
+graph embedding. Advances in Neural Information
+Processing Systems , 34:24695–24706.
+Zhiqing Sun, Zhi-Hong Deng, Jian-Yun Nie, and Jian
+Tang. 2018. Rotate: Knowledge graph embedding by
+relational rotation in complex space. In International
+Conference on Learning Representations .
+Kristina Toutanova and Danqi Chen. 2015. Observed
+versus latent features for knowledge base and text
+inference. In Proceedings of the 3rd workshop on
+continuous vector space models and their composi-
+tionality , pages 57–66.
+Théo Trouillon, Johannes Welbl, Sebastian Riedel, Éric
+Gaussier, and Guillaume Bouchard. 2016. Complex
+embeddings for simple link prediction. In Interna-
+tional conference on machine learning , pages 2071–
+2080. PMLR.
+Yun Cheng Wang, Xiou Ge, Bin Wang, and C-C Jay
+Kuo. 2023. Greenkgc: A lightweight knowledge
+graph completion method. In Proceedings of the 61st
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers) , pages 10596–
+10613.
+Zhen Wang, Jianwen Zhang, Jianlin Feng, and Zheng
+Chen. 2014. Knowledge graph embedding by trans-
+lating on hyperplanes. In Proceedings of the AAAI
+conference on artificial intelligence , volume 28.
+Bishan Yang, Scott Wen-tau Yih, Xiaodong He, Jianfeng
+Gao, and Li Deng. 2015. Embedding entities and re-
+lations for learning and inference in knowledge bases.
+InProceedings of the International Conference on
+Learning Representations (ICLR) 2015 .
+Jinfa Yang, Yongjie Shi, Xin Tong, Robin Wang, Taiyan
+Chen, and Xianghua Ying. 2021. Improving knowl-
+edge graph embedding using affine transformations
+of entities corresponding to each relation. In Find-
+ings of the Association for Computational Linguistics:
+EMNLP 2021 , pages 508–517.Jinfa Yang, Xianghua Ying, Yongjie Shi, Xin Tong,
+Ruibin Wang, Taiyan Chen, and Bowei Xing. 2022.
+Knowledge graph embedding by adaptive limit scor-
+ing loss using dynamic weighting strategy. In Find-
+ings of the Association for Computational Linguistics:
+ACL 2022 , pages 1153–1163.
+Zhen Yao, Wen Zhang, Mingyang Chen, Yufeng Huang,
+Yi Yang, and Huajun Chen. 2023. Analogical in-
+ference enhanced knowledge graph embedding. In
+Proceedings of the AAAI Conference on Artificial
+Intelligence , volume 37, pages 4801–4808.
+Qianjin Zhang, Ronggui Wang, Juan Yang, and Lixia
+Xue. 2022a. Knowledge graph embedding by re-
+flection transformation. Knowledge-Based Systems ,
+238:107861.
+Shuai Zhang, Yi Tay, Lina Yao, and Qi Liu. 2019.
+Quaternion knowledge graph embeddings. Advances
+in neural information processing systems , 32.
+Wenqian Zhang, Shangbin Feng, Zilong Chen, Zhenyu
+Lei, Jundong Li, and Minnan Luo. 2022b. Kcd:
+Knowledge walks and textual cues enhanced political
+perspective detection in news media. In Proceedings
+of the 2022 Conference of the North American Chap-
+ter of the Association for Computational Linguistics:
+Human Language Technologies , pages 4129–4140.
+Zhanqiu Zhang, Jianyu Cai, and Jie Wang. 2020a.
+Duality-induced regularizer for tensor factorization
+based knowledge graph completion. Advances in
+Neural Information Processing Systems , 33:21604–
+21615.
+Zhanqiu Zhang, Jianyu Cai, Yongdong Zhang, and Jie
+Wang. 2020b. Learning hierarchy-aware knowledge
+graph embeddings for link prediction. In Proceed-
+ings of the AAAI conference on artificial intelligence ,
+volume 34, pages 3065–3072.
+Zhao Zhang, Zhanpeng Guan, Fuwei Zhang, Fuzhen
+Zhuang, Zhulin An, Fei Wang, and Yongjun Xu. 2023.
+Weighted knowledge graph embedding. In Proceed-
+ings of the 46th international ACM SIGIR conference
+on research and development in information retrieval ,
+pages 867–877.
+Zhao Zhang, Fuzhen Zhuang, Meng Qu, Fen Lin, and
+Qing He. 2018. Knowledge graph embedding with
+hierarchical relation structure. In Proceedings of the
+2018 Conference on Empirical Methods in Natural
+Language Processing , pages 3198–3207.
+Yucheng Zhou, Xiubo Geng, Tao Shen, Guodong Long,
+and Daxin Jiang. 2022. Eventbert: A pre-trained
+model for event correlation reasoning. In Proceed-
+ings of the ACM Web Conference 2022 , pages 850–
+859.A Appendix A
+A.1 Relation Groups for Entity
+Transformation
+Figure 8 illustrates the relation embedding of
+TransE. We select ten relation groups whose re-
+lation embeddings build clear and mutually decou-
+pled clusters, which implies semantically distin-
+guished relation groups. The other relations are
+plotted as grey points. The relations correspond-
+ing to each group are listed in Table 14. Note that
+similar relations belong to the same group.
+position
+currency
+film production
+film actor
+people place
+film place
+music role
+organization place
+producer type
+award category
+others
+Figure 8: Visualization of relation embeddings of
+TransE using T-SNE
+(a) ET-SFBR
+ (b) ET-RSCF
+(c) EE-SFBR
+ (d) EE-RSCF
+Figure 9: Tail entity transformations and entity embed-
+dings for semantically similar relation groups. (a) and
+(b) indicate ET of SFBR and RSCF, (c) and (d) indicate
+EE of SFBR and RSCF.
+Metric ET-SFBR ET-RSCF EE-SFBR EE-RSCF
+Intra Cluster Distance ( ↓) 5.20 0.52 2.94 0.67
+Inter Cluster Distance ( ↑) 0.46 0.70 0.46 0.74
+Table 8: Intra Cluster Distance and Inter Cluster Dis-
+tance of tail entity transformation and entity embedding
+of SFBR and RSCF.A.2 Distribution of Tail Entity
+Transformations and Corresponding
+Entity Embedding
+Figure 9 presents the t-SNE visualization of tail ET
+and corresponding EE of RSCF and SFBR. Even
+in the tail, RSCF shows more concentrated clusters.
+Also, in Table 8, RSCF exhibits lower Intra Cluster
+Distance and higher Inter Cluster Distance com-
+pared to SFBR. The groups for ET are equivalent
+to the relation groups in Figure 8, and an entity for
+EE is randomly selected from FB15k-237.
+A.3 Measurement of Cluster Concentration
+To measure distance between elements within a
+cluster, we defined intra cluster distance score as
+follows:
+nX
+kmX
+i||(ki−Ck)||
+n||Ck||(5)
+where kis clear and mutually decoupled clusters
+andkiisi-th vector embedding of ET in group k
+andCkis centroid of cluster kthat can be calcu-
+lated as:
+Ck=Pm
+iki
+m(6)
+In the equation 5, the vector norm of C(||C||) is
+used because of the relative intra cluster distance
+score for clusters. Also to evaluate the distance
+between different clusters we defined inter cluster
+distance score as follows:
+nX
+k||(Ck−Ckc)||Pm
+i||ki||(7)
+where Ckcrepresent the centroid that is closest to
+Ck, and it can be written as:
+Ckc= min
+k̸=j{||Ck−Cj||} (8)
+In Equation 7, the norm of the cluster, which is
+calculated as the sum of the elements in the cluster,
+is used for the relative inter cluster distance.
+B Appendix B
+B.1 Proof of scale decrease of ET
+LetWrjis the ET of SFBR and wrj,nisn-th ele-
+ment of Wrj, than the gradient of wrj,nin DURAcan be calculated as:
+X
+pdL
+dwrj,n||wrj,nhi,nrj,n||2
+2+||wrjnhi,n||2
+2
+=X
+pdL
+dwrj,nw2
+rj,n(hi,nrj,n)2+w2
+rjnhi,n2
+=X
+p2wrj,n(hi,nrj,n)2+ 2wrjnhi,n2(9)
+The gradient of ET shows that the gradient of wrj,n
+has always same sign with wrj,nparameters. There-
+fore, gradient descent always reduces the scale of
+the parameters regardless of their sign.
+B.2 Normalization of Change for Reducing
+Entity Embedding Concentration
+The change generated from the affine transfor-
+mation is normalized by its length, expressed as
+Np(rA)in the part b⃝. This normalization alle-
+viates critical entity embedding concentration via
+reducing scale decrease of transformed entity em-
+beddings erin DURA regularization. In our rela-
+tion specific rooted ET, the change of eris simply
+written as
+∥α⊗e∥p (10)
+where α=Np(rA). This value has a maximum
+when αhas the same direction to e. Since αis a
+unit vector in p-norm, α=e/∥e∥p. Then, the
+maximum change is
+∥e
+∥e∥p⊗e∥p=∥e2
+∥e∥p∥p=∥e2∥p
+∥e∥p(11)
+In practice, the elements of embedding vectors are
+much less than 1 in most cases. Therefore, the max-
+imum change ∥e2∥p/∥e∥pis significantly lower
+than the unrestricted scale change in SFBR.
+B.3 Empirical Experiments on Maintaining
+Consistency through Monte Carlo
+Simulation
+Linear transformation ensures consistency when re-
+lation embeddings exist on a line. Furthermore, for
+relations that do not lie on the line, we can predict
+that that similar relations will have similar ETs be-
+cause of the continuous property of linear transfor-
+mation, i.e. if r1≈r2thenr1A≈r2A. However,
+there has been no research on the proportion of
+these relations that maintain consistency after trans-
+formation and also, after normalization, and it isKnowledge Graph EmbeddingWN18RR FB15k-237 YAGO3-10
+MRR H@1 H@10 MRR H@1 H@10 MRR H@1 H@10
+TuckER (Balaževi ´c et al., 2019) .470 .443 .526 .358 .266 .544 - - -
+QuatE (Zhang et al., 2019) .488 .438 .582 .348 .248 .550 - - -
+MuRP (Balazevic et al., 2019) .481 .440 .566 .335 .243 .518 - - -
+HAKE (Zhang et al., 2020b) .497 .452 .582 .346 .250 .542 .545 .462 .694
+RoTH (Chami et al., 2020) .496 .449 .586 .344 .246 .535 .570 .495 .706
+DualE (Cao et al., 2021) .492 .444 .584 .365 .268 .559 - - -
+FieldE (Nayyeri et al., 2021) .48 .44 .57 .36 .27 .55 .51 .41 .68
+Rot-Pro (Song et al., 2021) .457 .397 .577 .344 .246 .540 .542 .443 .699
+HAKE-CAKE (Niu et al., 2022) - - - .321 .226 .515 - - -
+GIE (Yang et al., 2022) .491 .452 .575 .362 .271 .552 .579 .505 .709
+ComplEX-ER (Cao et al., 2022) .494 .453 .575 .374 .282 .563 .588 .515 .718
+TranSHER (Li et al., 2022) - - - .360 .264 .551 - - -
+STaR-DURA (Li and Yang, 2022) .497 .452 .583 .368 .273 .557 .585 .513 .713
+ComplEX-DURA-RSCF (Ours).503 .460 .588 .388 .295 .573 .589 .516 .718
+±.001 ±.001 ±.002 ±.001 ±.002 ±.004 ±.002 ±.003 ±.002
+Table 9: Test performance of KGE-based KGC on FB15k-237, WN18RR and YAGO3-10. Bold indicates the best
+result, and underlined signifies the second best result.
+Dataset Entities Relations Entities/Relations Triples/RelationsTriples
+Train Valid Test
+WN18RR 40,943 11 3,722 7,894 86,835 3,034 3,134
+FB15k-237 14,541 237 61 1,148 272,115 17,535 20,466
+YAGO3-10 123,182 37 3,329 29,163 1,079,040 5,000 5,000
+Table 10: Statistics of KGC Benchmark Datasets
+extremely challenging to determine this proportion
+through mathematical formulations. Therefore, we
+conducted an empirical analysis using Monte Carlo
+simulations to investigate the consistency of points
+that do not lie on the line. Table 2 presents the pro-
+portion of consistency maintained under various
+conditions based on Monte Carlo simulations. For
+the experiment, we divided the scenarios into four
+cases: (1) when three randomly generated points
+(A, B, C) lie on the same line and the distance
+between A and C is greater than the distance be-
+tween A and B (Line), (2) when the three points
+(A, B, C) do not lie on the line and the distance
+between A and C is greater than the distance be-
+tween A and B (|AC|
+|AB|>1), (3) when the distance
+between A and C is at least 1.01 times greater than
+the distance between A and B (|AC|
+|AB|>1.01), and
+(4) when the distance between A and C is at least
+1.02 times greater than the distance between A and
+B(|AC|
+|AB|>1.02)and sampling was performed
+10,000 times for each condition. Under each con-
+dition, we measured the proportion of cases where
+(|AC|>|AB|)was maintained even after Trans-
+formation ( a⃝), Normalization ( b⃝), and the Add
+one ( c⃝). The results showed that consistency was
+preserved in most cases, even when the three points
+did not lie on the same line. Specifically, in con-
+dition where (|AC|
+|AB|>1), over 72.8% of the sam-
+ples maintained consistency in Transformation ( a⃝).
+Furthermore, in cases where (|AC|
+|AB|>1.02)ap-proximately 87.5% of the samples maintained con-
+sistency after Transformation ( a⃝). Also in Nor-
+malization ( a⃝), over 86.9% of the samples main-
+tained consistency in (|AC|
+|AB|>1)and 99.4% in
+(|AC|
+|AB|>1.02). Considering that relations tend to
+form clusters based on their semantics because of
+score function and RP (Chen et al., 2021), it is
+difficult to say that these conditions are unrealis-
+tic, indicating that our method performs robustly
+across various conditions.
+C Appendix C
+C.1 Datasets
+We evaluate the RSCF using three widely-used
+datasets: WN18RR, FB15k-237, and YAGO3-10.
+WN18RR, FB15k-237 and YAGO3-10 are subsets
+of WN18 (Bordes et al., 2013), FB15k (Bordes
+et al., 2013), and YAGO3 (Mahdisoltani et al.,
+2013), respectively, designed to alleviate the test
+set leakage problem. Statistics of these datasets are
+shown in Table 10.
+C.2 Additional Performance Experiments
+Performance Comparison of RSCF and Other
+KGE Models Table 9 shows the performance
+comparison of the RSCF and previous KGE-based
+models on WN18RR, FB15k-237 and YAGO3-10.
+Overall, ComplEX-DURA+RSCF shows higher
+performance than other KGE models in all settings,
+demonstrating that the effectiveness of the RSCF
+for the KGC task.Distance-Based Model
+with Entity TransformationWN18RR FB15k-237
+MRR H@1 H@10 MRR H@1 H@10
+TransE-SFBR (Diag) (Liang et al., 2021) .242 .028 .548 .338 .240 .538
+TransE-SFBR (Linear-2) (Liang et al., 2021) .263 .110 .495 .354 .258 .545
+RotatE-SFBR (Diag) (Liang et al., 2021) .489 .437 .593 .351 .254 .549
+RotatE-SFBR (Linear-2) (Liang et al., 2021) .490 .447 .576 .355 .258 .553
+TransE-RSCF.267 .066 .546 .363 .264 .558
+±.001 ±.002 ±.002 ±.001 ±.001 ±.001
+TransE-RSCF (Linear-2).343 .232 .499 .359 .262 .552
+±.009 ±.014 ±.003 ±.001 ±.001 ±.001
+RotatE-RSCF.493 .447 .584 .363 .268 .556
+±.001 ±.001 ±.001 ±.000 ±.001 ±.001
+RotatE-RSCF (Linear-2).495 .452 .578 .364 .268 .556
+±.001 ±.001 ±.001 ±.000 ±.000 ±.001
+Table 11: Test performance of DBM-based RSCF and SFBR on FB15k-237 and WN18RR. Bold indicates the best
+result, and underlined signifies the second best result.
+Tensor Decomposition Model
+with Eentity TransformationWN18RR FB15k-237 YAGO3-10
+MRR H@1 H@10 MRR H@1 H@10 MRR H@1 H@10
+CP-DURA + SFBR (Liang et al., 2021) .485 .447 .561 .370 .274 .563 .582 .510 .711
+RESCAL-DURA + SFBR (Liang et al., 2021) .500 .458 .581 .369 .276 .555 .581 .509 .712
+ComplEX-DURA + SFBR (Liang et al., 2021) .498 .454 .584 .374 .277 .567 .584 .512 .712
+CP-DURA + RSCF.486 .447 .561 .379 .287 .565 .585 .514 .711
+±.001 ±.001 ±.001 ±.000 ±.000 ±.001 ±.000 ±.001 ±.001
+RESCAL-DURA + RSCF.507 .467 .581 .381 .289 .562 .584 .511 .716
+±.000 ±.000 ±.000 ±.000 ±.000 ±.000 ±.000 ±.000 ±.000
+ComplEX-DURA + RSCF.503 .460 .588 .388 .295 .573 .589 .516 .718
+±.001 ±.001 ±.002 ±.001 ±.002 ±.004 ±.002 ±.003 ±.002
+Table 12: Test performance of TDM-based RSCF and SFBR on FB15k-237, WN18RR, and YAGO3-10. Bold
+indicates the best result, and underlined signifies the second best result.
+Performance Comparison of RSCF and SFBR
+Table 11 shows the performance comparison of the
+DBM-RSCF and DBM-SFBR on WN18RR and
+FB15k-237. Overall, DBM-RSCF shows similar or
+higher performance than DBM-SFBR in most set-
+tings. Table 12 shows the performance comparison
+in TDMs. Compared to TDM-SFBR, TDM-RSCF
+shows consistent performance improvements in all
+datasets and settings.
+Performance Comparison of RSCF with Differ-
+ent RP Weights Figure 10 shows the MRR vari-
+ations with respect to the RP weight, λ. TransE-
+RSCF achieves better performance at λ= 0.1,
+while ComplEX-DURA-RSCF performs better at
+λ= 1. In general, the MRR tends to decrease as
+λbecomes smaller, suggesting that the RP plays a
+crucial role in enhancing model performance.
+C.3 SFBR with Normalization
+To prevent entity embedding concentration, We
+apply normalization to SFBR that is presented as
+SFBR (N). Let Wris relation specific ET using
+separate parameters, then SFBR with normalization
+can be written as:
+Np(Wr) + 1 (12)
+1 0.5 0.1 0.05 0.01 0
+Weight of 
+0.330.340.350.360.370.380.39MRR
+ComplEX-DURA-RSCF
+TransE-RSCFFigure 10: MRR variations with respect to the RP weight
+λ, which is defined in Equation (3). The performance is
+measured on FB15k-237.
+where Np(Wr) =Wr
+∥Wr∥p. Additionally, trans-
+formed entity embedding can be described as:
+er= (Np(Wr) + 1) e (13)
+where eis a original entity embedding.
+C.4 Extension of RSCF
+The shared affine transformation can be easily ex-
+tended to Linear −2that is introduced in SFBR
+by extending shared affine transformation We∈
+Rn×ntoWe∈Rn×2n. Therefore, RSCF (Linear-
+2) can be written as:
+WrLinear-2=diag(w1)diag(w2)
+diag(w3)diag(w4)
+(14)ModelTraining Time Inference Time # Params MRR
+WN18RR FB15k-237 WN18RR FB15k-237 WN18RR FB15k-237 WN18RR FB15k-237
+TransE 45m 1h 30s 1m 20s 20.48M 14.78M .226 .294
+PairRE - 3h - 1m 20s - 22.52M - .351
+T-SFBR 1h 1h 15m 30s 1m 30s 20.49M 15.25M .242 .338
+CompoundE 2h 40m 2h 20m 30s 1m 20s 20.5M 9.58M .491 .357
+T-RSCF 3h 10m 5h 30m 30s 1m 50s 21.48M 18.78M .267 .363
+T-RSCF small 1h 40m 3h 30s 1m 20s 10.49M 8.4M .263 .358
+Table 13: Training time, inference time, number of parameters and MRR of RSCF and ETMs, T-SFBR (Diag)
+and T-RSCF indicate TransE-SFBR and TransE-RSCF, respectively. T-RSCF smallhas half of the entity/relation
+embedding dimension compared to T-RSCF. Inference Time denotes inference time on test set. Both training and
+inference time are measured on RTX3090.
+where WrLinear-2∈Rn×nis ET built from the re-
+lation specific change vector Np(rA) + 1 of RSCF
+that is notated as concatenation of diagonal values
+ofw1,w2,w3,w4∈Rn/2.
+C.5 Computational Complexity
+Table 13 presents the complexity comparison be-
+tween RSCF and other ETMs. In general, because
+the number of parameters in KGE methods is sig-
+nificantly influenced by the number of entities and
+relations, the parameter difference between RSCF
+and ETMs is marginal. Additionally, although
+RSCF requires more training time compared to
+other models, considering that the proposed KGE
+models assume an offline learning setting and have
+similar inference times to RSCF, this is not a sig-
+nificant drawback. Moreover, T-RSCF small that has
+half of the entity/relation embedding dimension
+compared to T-RSCF, exhibits higher performance
+than base models like TransE and T-SFBR. Es-
+pecially in FB15k-237, T-RSCF small outperforms
+all other models except for T-RSCF, while requir-
+ing lower computational cost than T-RSCF. These
+results show that RSCF can be effective even in
+resource-constrained situations.
+C.6 Implementation Details
+When training the RSCF, we followed the exper-
+imental settings described in the SFBR (Liang
+et al., 2021). Following the settings of SFBR, RSCF
+and RSCF (Linear-2) are applied to both head
+and tail entities in DBM, and RSCF is applied
+to only the head entity in TDM due to compu-
+tational costs (Liang et al., 2021). For the same
+reason, both head and tail entities are used for RT
+in DBM, whereas only the head entity is used in
+TDM. In FB15k-237, the entity/relation ratio and
+the train/relation ratio are significantly lower com-
+pared to the other two datasets, which restricts the
+context information that each relation can obtain.
+This restriction is more critical in TDM, which uses
+only the head entity, and thus RT is not appliedto TDM on FB15k-237. The hyper-parameters in
+DBM are consistent with the hyper-parameters
+in Sun et al. (2018), and hyper-parameters of TDM
+are consistent with the hyper-parameters in Zhang
+et al. (2020a). Additionally, similar to Chen et al.
+(2021), we searched the weight of RP over [1, 0.5,
+0.1, 0.05, 0.01, 0]. The presented results of RSCF
+represent the mean of the three runs for each model.
+Experiments for the DBM were conducted on an
+NVIDIA 3090 with 24GB of memory, while experi-
+ments for the TDM were conducted on an NVIDIA
+2080TI with 11GB and an A100 with 40GB of
+memory was used for both DBM and TDM.
+D Appendix D
+D.1 Special Cases with RSCF
+Lethr,trare transformed head and tail embed-
+ding by RSCF, then the score function dr(h,r)of
+TransE-RSCF can be expressed as:
+dr(h,r) =∥hr+rht−tr∥ (15)
+The score function dr(h,r)of RotatE-RSCF can
+be expressed as:
+dr(h,r) =∥hr◦rht−tr∥ (16)
+The score function dr(h,r)of RESCAL-RSCF can
+be expressed as:
+dr(h,r) =∥hrrht∥ (17)
+In TDM, tail embeddings are not transformed ac-
+cording to the settings of SFBR in order to reduce
+computational costs. For the same reason, only the
+head entity is used for relation transformation.Relation Group Relations
+position/sports/sports_team/roster./basketball/basketball_roster_position/position
+/soccer/football_team/current_roster./soccer/football_roster_position/position
+/ice_hockey/hockey_team/current_roster./sports/sports_team_roster/position
+/sports/sports_team/roster./american_football/football_historical_roster_position/position_s
+/sports/sports_team/roster./baseball/baseball_roster_position/position
+/sports/sports_team/roster./american_football/football_roster_position/position
+/american_football/football_team/current_roster./sports/sports_team_roster/position
+/soccer/football_team/current_roster./sports/sports_team_roster/position
+currency/location/statistical_region/gdp_nominal_per_capita./measurement_unit/dated_money_value/currency
+/film/film/estimated_budget./measurement_unit/dated_money_value/currency
+/business/business_operation/operating_income./measurement_unit/dated_money_value/currency
+/organization/endowed_organization/endowment./measurement_unit/dated_money_value/currency
+/business/business_operation/revenue./measurement_unit/dated_money_value/currency
+/business/business_operation/assets./measurement_unit/dated_money_value/currency
+/location/statistical_region/rent50_2./measurement_unit/dated_money_value/currency
+/education/university/local_tuition./measurement_unit/dated_money_value/currency
+/location/statistical_region/gdp_real./measurement_unit/adjusted_money_value/adjustment_currency
+/education/university/domestic_tuition./measurement_unit/dated_money_value/currency
+/education/university/international_tuition./measurement_unit/dated_money_value/currency
+/location/statistical_region/gdp_nominal./measurement_unit/dated_money_value/currency
+/location/statistical_region/gni_per_capita_in_ppp_dollars./measurement_unit/dated_money_value/currency
+/base/schemastaging/person_extra/net_worth./measurement_unit/dated_money_value/currency
+film production/film/film/costume_design_by
+/film/film/executive_produced_by
+/award/award_winning_work/awards_won./award/award_honor/award_winner
+/tv/tv_program/program_creator
+/film/film/film_art_direction_by
+/film/film/music
+/film/film/film_production_design_by
+/film/film/other_crew./film/film_crew_gig/crewmember
+/film/film/produced_by
+/tv/tv_program/regular_cast./tv/regular_tv_appearance/actor
+/film/film/edited_by
+/film/film/written_by
+/film/film/personal_appearances./film/personal_film_appearance/person
+/film/film/story_by
+/film/film/cinematography
+/film/film/dubbing_performances./film/dubbing_performance/actor
+/film/film/production_companies
+film actor/award/award_nominee/award_nominations./award/award_nomination/nominated_for
+/tv/tv_network/programs./tv/tv_network_duration/program
+/film/special_film_performance_type/film_performance_type./film/performance/film
+/film/director/film
+/tv/tv_personality/tv_regular_appearances./tv/tv_regular_personal_appearance/program
+/film/film_set_designer/film_sets_designed
+/tv/tv_writer/tv_programs./tv/tv_program_writer_relationship/tv_program
+/film/actor/film./film/performance/film
+/tv/tv_producer/programs_produced./tv/tv_producer_term/program
+/media_common/netflix_genre/titles
+/film/film_distributor/films_distributed./film/film_film_distributor_relationship/film/film/film_subject/films
+people place/music/artist/origin
+/people/person/places_lived./people/place_lived/location
+/people/person/place_of_birth
+/government/politician/government_positions_held./government/government_position_held/jurisdiction_of_office
+/people/deceased_person/place_of_death
+/people/person/nationality
+/people/deceased_person/place_of_burial
+/people/person/spouse_s./people/marriage/location_of_ceremony
+film place/film/film/distributors./film/film_film_distributor_relationship/region
+/film/film/featured_film_locations
+/film/film/release_date_s./film/film_regional_release_date/film_release_region
+/film/film/release_date_s./film/film_regional_release_date/film_regional_debut_venue
+/film/film/country
+/film/film/runtime./film/film_cut/film_release_region
+/tv/tv_program/country_of_origin
+/film/film/film_festivals
+music role/music/group_member/membership./music/group_membership/role
+/music/artist/track_contributions./music/track_contribution/role
+/music/artist/contribution./music/recording_contribution/performance_role
+organization place/organization/organization/headquarters./location/mailing_address/state_province_region
+/organization/organization/place_founded
+/user/ktrueman/default_domain/international_organization/member_states
+/organization/organization/headquarters./location/mailing_address/country
+/people/marriage_union_type/unions_of_this_type./people/marriage/location_of_ceremony
+/base/schemastaging/organization_extra/phone_number./base/schemastaging/phone_sandbox/service_location
+/government/legislative_session/members./government/government_position_held/district_represented
+/organization/organization/headquarters./location/mailing_address/citytown
+producer type/tv/tv_producer/programs_produced./tv/tv_producer_term/producer_type
+/film/film/other_crew./film/film_crew_gig/film_crew_role
+/tv/tv_program/tv_producer./tv/tv_producer_term/producer_type
+award category/award/award_category/winners./award/award_honor/award_winner
+/award/award_category/winners./award/award_honor/ceremony
+/award/award_category/category_of
+/award/award_category/nominees./award/award_nomination/nominated_for
+/award/award_category/disciplines_or_subjects
+Table 14: Clearly distinct relation groups that are selected from original TransE

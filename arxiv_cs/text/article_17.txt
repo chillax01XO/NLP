@@ -1,0 +1,911 @@
+arXiv:2505.21414v1  [cs.LG]  27 May 2025A Framework for Adversarial Analysis of Decision Support Systems Prior to
+Deployment
+Brett Bissey0 1Kyle Gatesman0 1Walker Dimon1Mohammad Alam1Luis Robaina1Joseph Weissman1
+Abstract
+This paper introduces a comprehensive frame-
+work designed to analyze and secure decision-
+support systems trained with Deep Reinforcement
+Learning (DRL), prior to deployment, by provid-
+ing insights into learned behavior patterns and vul-
+nerabilities discovered through simulation. The
+introduced framework aids in the development of
+precisely timed and targeted observation pertur-
+bations, enabling researchers to assess adversar-
+ial attack outcomes within a strategic decision-
+making context. We validate our framework, vi-
+sualize agent behavior, and evaluate adversarial
+outcomes within the context of a custom-built
+strategic game, CyberStrike. Utilizing the pro-
+posed framework, we introduce a method for sys-
+tematically discovering and ranking the impact of
+attacks on various observation indices and time-
+steps, and we conduct experiments to evaluate
+the transferability of adversarial attacks across
+agent architectures and DRL training algorithms.
+The findings underscore the critical need for ro-
+bust adversarial defense mechanisms to protect
+decision-making policies in high-stakes environ-
+ments.
+1. Introduction
+AI-enabled decision support systems trained in simulation
+are increasingly being deployed in safety-critical environ-
+ments, making them vulnerable targets to adversarial attacks.
+Deep reinforcement learning (DRL) has been effective in
+training superhuman policies in strategic board games (Sil-
+ver et al., 2017), video games like StarCraft (Vinyals et al.,
+2019), robotics tasks (Rajeswaran et al., 2018), and au-
+tonomous driving (Kiran et al., 2021). However due to
+0Equal Contribution
+1AI & Autonomy Center, MITRE Labs, McLean, V A, United
+States. Correspondence to: Brett Bissey (bbissey@mitre.org),
+Kyle Gatesman (kjgatesman@mitre.org)
+Copyright ©2024 The MITRE Corporation. ALL RIGHTS RE-
+SERVED. Approved for Public Release; Distribution Unlimited.
+Public Release Case Number 24-2499the reliance on deep neural networks (DNN) for decision-
+making, analyzing the strengths and vulnerabilities of DNN
+policies trained with DRL requires additional methodology.
+Adversarial attacks can manipulate the system’s perception
+of the environment through difficult-to-detect observation
+perturbations, leading to a policy taking sub-optimal or even
+harmful decisions with high confidence. To address this
+threat, it is essential to develop a framework that can assure
+the safety of decision-support systems prior to deployment,
+through both probing potential vulnerabilities and offering
+operators insights into the learned behavior.
+In this paper, we explore methods to develop optimally
+timed and targeted attacks, as well as measure the attack
+impact and transferability within a classic reinforcement
+learning (RL) setting. Our methodology involves collecting
+attack data, designing attack strategies that produce realistic
+and feasible perturbations, and measuring the impact of
+these attacks on various properties of the RL environment.
+We employ a custom-built strategic game, CyberStrike, as
+our experimental environment to validate our framework
+and visualizations.
+Our contributions are threefold: First, we develop an anal-
+ysis and visualization framework to help operators and re-
+searchers understand a policy’s learned behavior and vulner-
+abilities. Second, we develop a method to programmatically
+discover and rank the property impacts of attacking various
+observation indexes at various steps of an episode. Third, we
+test the transferability of adversarial attacks across agents
+trained with different algorithms and learning curricula.
+2. Related Work
+Conducting adversarial attacks on neural network policies
+is not as groundbreaking of a concept now as it was when
+first explored in (Huang et al., 2017), which extended pre-
+vious work in adversarial attacks in the computer vision
+domain such as Fast Gradient Sign Method (FGSM) (Good-
+fellow et al., 2015) and Carlini-Wagner attacks (Carlini
+& Wagner, 2017). Though, solely researching adversarial
+attacks on action selection may be too shallow of a tar-
+get to propagate meaningful influence towards a desired
+environmental property outcome. Methods introduced in
+1A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+(Hasanbeig et al., 2020) and (Velasquez et al., 2021) sug-
+gest utilizing formal language, such as Linear Temporal
+Logic (LTL) to define objectives and constraints for DRL
+policies, assist in reward function design and explain be-
+havior patterns of policies acting within a Markov Decision
+Process (MDP). More recent work (Gross et al., 2022) ex-
+plores adversarial methods to impact atomic properties of
+the formalized environment; employing the aforementioned
+action-influencing adversarial attacks as building blocks to
+influence higher-level properties of the environment MDP
+and LTL objective specification. In addition to considering
+the formal logic definitions of a policy and environment
+when formulating attacks, we also build upon analysis and
+visualization techniques utilizing the internal learned mod-
+els of a policy, or the Semi-Aggregate Markov Decision
+Processes (SAMDP) (Baram et al., 2016). SAMDP analysis
+first aggregates observed agent behavior into meta-data sets,
+then clusters model-activation layer embeddings within a
+two-dimensional space, and finally visualizes the behav-
+ioral patterns within this embedding space with respect to
+atomic properties of interest. SAMDP’s are used by (Tapley
+et al., 2023) to characterize policies and their vulnerabili-
+ties, and we supplement these methods by illustrating the
+impact of adversarial attacks on environment properties at
+various regions of the activation embedding space. While
+DRL algorithms train policies to act within an environment
+MDP, the policy’s empirical action patterns within the en-
+vironment are a proxy representation of some subset of the
+environment MDP itself; suggesting that the identification
+of vulnerable embedding-space regions and observation in-
+dexes of one policy may transfer to other policies acting
+within the same environment (Behzadan & Munir, 2017;
+Waseda et al., 2022), even if the policies were not trained
+with the same algorithm.
+We build upon this research to develop an analytical frame-
+work to determine the optimal attack timing, attack targets,
+and observation perturbations to deliberately impact envi-
+ronment properties of interest and visualize this impact.
+3. Methodology
+3.1. Collecting Attack Data
+The process for injecting adversarial attacks into the classi-
+cal Reinforcement Learning (RL) loop is shown in Figure
+1. Importantly, instead of directly altering the underlying
+state variable stthat influences the next step of the environ-
+ment dynamics, our adversary is only allowed to change the
+agent’s perception of s tby sending a perturbed adversarial
+observation otto the agent. As such, the adversary can only
+influence environment dynamics indirectly via the agent –
+the attacks engineer otin an attempt to control or alter the
+agent’s action at.
+Figure 1. RL interaction loop with an attack injected at time step
+t. This time step ends with the environment dynamics using the
+agent’s action atand the true state stto compute the next state
+st+1and the reward rt+1. Time step t+1may or may not have an
+attack.
+Figure 2. Example set of attacked episode simulations stemming
+from an unattacked episode with 4actions (top line). In this
+scenario, the attack algorithm ran several attacks on state s1(at
+time step 1), and two of these attacks induced adversarial actions a′
+1
+anda′′
+1that sufficiently differ from the original action a1, meeting
+the criteria for simulating the rest of the episode. Taking the
+adversarial actions a′
+1anda′′
+1from state s1will produce states s′
+2
+ands′′
+2, respectively, which may or may not differ from s2.
+To study the effects of adversarial attacks, we first obtain
+simulated rollouts , depicted in Figure 2. Given a state st
+and deterministic action attaken by the agent in state st,
+we call an adversarial attack on stsufficiently adversarial if
+the agent’s adversarial observation otmakes the agent take
+an action a′
+ithat sufficiently differs from at, according to
+some predefined distance metric over the action space and
+some pre-selected distance threshold. In an environment
+with discrete actions, for example, a sufficiently adversarial
+action would be a simple inequality, some action a′
+t̸=at.
+However in environments with continuous action compo-
+nents, we must define sufficiently adversarial thresholds to
+compare a′
+tandat. A simulated rollout from an attacked
+state stis only carried out if the adversarial action a′
+tis
+sufficiently adversarial, so that data may be collected on
+the end-of-episode properties and compared to those of the
+unattacked trajectory, in an attempt to gauge the impact of
+the adversarial action. Figure 2 illustrates a hypothetical
+example of the simulated rollout process from a single
+state of one observed episode; however the full simulated
+rollout process ranges over all attacks performed on all
+2A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+non-terminal states of each episode in the collected data set
+of agent experiences.
+3.1.1. C OMPUTATIONAL COSTS AND SAMPLING
+In practice, a large proportion of all attempted attacks may
+be sufficiently adversarial, in which case running simula-
+tions to determine the impact of every sufficiently adversar-
+ial attack is computationally expensive. Specifically, under
+the “best-case” assumption that each environment step runs
+inΘ(1)time, the expected time complexity of running all of
+these simulated rollouts is Θ(LN), where Nis the number
+of sufficiently adversarial attacks over the whole data set
+andLis the expected length (number of time-steps) from
+the attack point to the end of the episode. The experiments
+in this paper only explore the impacts of Nsingle attack
+points rather than chains of multiple attacks, which would
+exponentially increase the time complexity. In many cases,
+Lscales with the expected length of a full episode, often
+linearly. Therefore, for environments that tend to require
+a large number of time-steps per episode, we can expect
+simulated rollouts from attacks to be expensive, particularly
+for those attacks that stem from early states in an episode.
+To combat these computational costs, stratified sampling
+was implemented to prune the set of attacks from which to
+simulate while still guaranteeing sufficient representation
+from desired sub-populations.
+3.2. Attack Strategy Design
+Anattack strategy is an algorithm that decides how and
+when to attack the agent. In an effort to select attack strate-
+gies that produce “realistic” attacks, we propose the follow-
+ing rough criteria for assessing attack realism:
+•Feasibility: For an attack at time t, adversarial obser-
+vation otmust lie in the environment’s state space.
+•Realistic Perturbation: For an attack at time t, the
+perturbation of stshould be restricted to a known (and
+ideally small) subset of components of the state vector,
+such that this perturbation could realistically model
+a sensor inaccuracy or malfunction in a real-world
+implementation of the RL environment.
+•Low Severity: Across all time-steps in a given episode,
+the average “attack severity” (a rough measure of the
+attack’s impact on the expected action and next state)
+should be low; roughly speaking, an expected action
+is one that an expert human operator would take if
+they were the agent. In other words, attacks should
+be sparse with respect to time, especially those known
+to have severe impact on the expected action. “Be-
+nign” perturbations (those that ought to have little orno impact on the expected action) may be performed
+more frequently but will be filtered out of the simu-
+lated rollout process if the induced agent action is not
+sufficiently adversarial.
+The attack strategies in our experiments satisfy the second
+and third bulleted conditions by limiting each perturbation
+to a single state component and limiting each simulated
+rollout to one attack (equivalently, after beginning a simu-
+lated rollout from a sufficiently adversarial attack, do not
+attack further). Still, this simple attack method must use
+environment context to guarantee that the first bulleted con-
+dition holds. In general, additional environment context
+will be necessary to measure attack severity and to design
+more sophisticated, multi-index perturbation attack strate-
+gies. In the Section 4.2, we illustrate an example of benign
+perturbations in a specific RL environment.
+In addition to constraining attacks to certain time-steps and
+certain state components, an attack strategy involves a per-
+turbation algorithm that specifies a way to perturb the state
+vector within realistic bounds. Our experiments are limited
+totargeted attacks , whose perturbation algorithms deliber-
+ately alter the observation in a way that encourages the agent
+to take a specific adversarial action aadv. Whether such an
+attack ends up being sufficiently adversarial only depends
+on the normal action aand the attack-induced action a′, with
+no additional dependence on aadv. However, our framework
+allows attack strategies to employ any perturbation algo-
+rithm, targeted or untargeted, as long as the three bulleted
+realism criteria are met.
+Among the adversarial perturbation algorithms, the CW and
+FGSM attacks are particularly notable. CW attacks (Carlini
+& Wagner, 2017), are optimization-based methods that gen-
+erate minimal perturbations capable of misleading models.
+Conversely, FGSM (Goodfellow et al., 2015), is a gradient-
+based attack that quickly creates adversarial examples by
+leveraging the gradients of the loss function with respect to
+the input data. We default to using FGSM for our experi-
+ments, although the experimental framework is agnostic to
+the perturbation algorithm used.
+3.3. Measuring Attack Impact
+3.3.1. D EFINING A PROPERTY
+Attack impact is measured with respect to a handful of
+properties of interest that are chosen in advance. Each
+property captures certain information about the agent’s
+experience in the environment up until the point at which the
+property is measured; as such, a property value attributed
+to some time step of an episode should only depend on
+environment variables (observed and/or latent) and actions
+that were realized at or before that time step. All properties
+3A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+of interest should be able to be computed at the very end of
+each episode. Certain properties, such as win/loss outcome,
+may only be known at the very end of the episode; however,
+other properties, such as number of prior steps that incurred
+some kind of environment-based reward penalty, can be
+computed at any step during the episode. After a suite of
+properties of interest have been selected, these properties
+are logged during all data collection rollouts for both
+attacked and unattacked episodes. These logged properties,
+particularly those at the end of each episode, are used for
+downstream “property impact analysis” (Gross et al., 2022).
+3.3.2. M ATHEMATICALLY MODELING PROPERTIES
+To describe so-called “property impact” from an attack at
+time step t, we start by modeling the end-of-episode value
+of each i-th property Piin our suite as a random variable
+Pi(st,It,ot)that is a function of three arguments:
+•stis the state vector at time step t;
+•Itis a collection of other hidden environment informa-
+tion (including property logs) at time step t; and
+•otis the (potentially adversarial) observation sent to
+the agent at time step t(when no attack is present, one
+hasot=st).
+When Pican be expressed meaningfully as a scalar value,
+expected value of the given property mode becomes a
+relevant measure. One may estimate E(Pi(st,It,ot))by
+running repeated trials of simulations from the same
+(st,It,ot)and uniformly averaging the observed values of
+Pi(st,It,ot). Given an attack at time step tthat replaces the
+true state stwith an adversarial observation ot, the attacked
+value of property Piis defined to be Pi(st,It,ot), and the
+unattacked value of property Piis defined to be Pi(st,It,st)
+(in the latter, the agent’s observation matches the true state).
+3.3.3. I MPACT METRICS
+To measure the impact of the given attack at time step t
+on property Pi, we feed the attacked and unattacked values
+ofPiinto an impact metric function D(·,·)as the first and
+second arguments, respectively. Note that the resulting im-
+pact value D(Pi(st,It,ot),Pi(st,It,st))is a random variable.
+One simple impact metric for a scalar-valued property Piis
+the difference Pi(st,It,ot)−Pi(st,It,st), which conveys both
+magnitude and direction of the observed change in the prop-
+erty induced by the attack at time step t. Another simpleimpact metric for anyproperty Piis
+(
+1 if Pi(st,It,ot)̸=Pi(st,It,st)
+0 if Pi(st,It,ot) =Pi(st,It,st).
+While well-defined, this second impact metric may lose
+saliency when Pihas any component that ranges over a
+continuous domain. To illustrate one way to combat this
+issue, if the property Piresides in some metric space with a
+distance metric d(·,·), then one could construct an impact
+metric such as
+(
+1 if d(Pi(st,It,ot),Pi(st,It,st))>d∗
+0 if d(Pi(st,It,ot),Pi(st,It,st))≤d∗
+for some distance threshold d∗. For each impact
+metric function Dthat is invoked on a given prop-
+erty Piand a given attack st→ot, one can estimate
+E(D(Pi(st,It,ot),Pi(st,It,st)))using repeated trials. Specif-
+ically, if we let P′
+ibe the list of all observed values of
+Pi(st,It,ot)andPibe the list of all observed values of
+Pi(st,It,st), thenE(D(Pi(st,It,ot),Pi(st,It,st)))is estimated
+by the uniform average
+1
+|P′
+i||Pi|∑
+p′
+i∈P′
+i∑
+pi∈PiD(p′
+i,pi),
+where both summations range over all elements, including
+repeats, in the lists P′
+iandPi.
+4. Experiments
+The motivation behind our experiments is threefold; First
+to develop an analysis and visualization framework to sup-
+plement the researcher’s understanding of a policy’s learned
+behavior and vulnerabilities, second to analyze the property
+impact of attacking various observation indexes, and third
+to test the transferability of adversarial attacks across agents
+of various training algorithms and learning curricula.
+4.1. Experimental Environment
+Deep reinforcement learning is increasingly being used
+to discover adversarial tactics, techniques, and procedures
+(TTPs) within the cybersecurity domain (Molina-Markham
+et al., 2021). The gym environment used for notional ex-
+periments is CyberStrike; a custom-built, strategic network-
+defense game wherein an agent controlling blue nodes must
+determine information about the red network’s tree struc-
+ture, and then hack into each red node’s parent node re-
+cursively until reaching the target node. The CyberStrike
+environment is ripe for emergent, explainable learned strat-
+egy; contrasting typical control-focused benchmarks such
+as LunarLander-v2 or Cartpole (G. Brockman, 2016). The
+action space is multi-discrete, made up of four blue “hack-
+ers” that can simultaneously “hack” or “eavesdrop” on a
+4A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+Figure 3. A notional CyberStrike state. The blue agent controls
+nodes B0, B1, B2, B3. Blue chooses actions which control each
+blue node simultaneously, locating and disabling the target red
+node by peeling back the layers of the red defense network until
+the target node is undefended. In this example, the target node
+(R0) is defended by R1andR2.R2is defended by R3, which is
+defended by R4.R1is defended by R5,R6, and R7.R6is also
+defended by R7. Dashed lines denote a connection marked as
+unknown in the agent’s observation, whereas solid lines represent
+a known connection. The agent begins with a fully unknown
+network, and must use its hackers to discover the network topology
+enough to reveal the target node’s ( R0’s) defenders and eventually
+hack into the target node.
+collection of red nodes. If a blue hacker attempts to hack
+a defended red node, the red defender will counter and the
+blue hacker will be unavailable for the rest of the episode.
+The “eavesdrop” action is only available to one of the blue
+hackers ( B3), and allows the agent to stealthily learn the de-
+fenders of a red node without risking a counter from red. An
+example network structure from a mid-episode observation
+is displayed in Figure 3.
+4.2. Experimental Setup
+First, we train a suite of both Advantage Actor Critic (A2c)
+(Mnih et al., 2016) and Deep Q-Network (DQN) agents
+(Mnih et al., 2013) within the CyberStrike environment.
+Following training we collect 10,000 state-action-metadata
+tuples from the frozen policies acting within CyberStrike,
+collecting metadata such as a policy’s hidden-layer acti-
+vations, observation saliency, and step-wise environment
+properties. Due to the absence of ε-greedy or distribution
+sampling for exploration, we force a small percentage (5%)
+of random actions during the data collection to inform
+potential adversarial targets, though the researcher may
+vary the percentage of random action selected depending
+on the environment MDP and frozen policy optimality.
+These collected data sets from the trained policies help
+to represent empirical policy behavior through activation
+clustering, SAMDP transition visualization, and other
+custom metadata visualizations. For example, Figure 4
+Figure 4. This latent space representation maps a policy’s Cyber-
+Strike observations from initial time-steps in the northwest region
+to the final time-steps in the southeast region, with an aggregation
+of various intermediate trajectories connecting the initial and final
+observations. Attacks within the denser, bluer northeast region of
+the space are unlikely to yield nonzero changes in final red counts,
+whereas attacks in the sparser and redder western regions are more
+likely to be successful (increase final red counts). The sparsity of
+activation embeddings in the western region of the latent space
+representation suggests the policy is less likely to have trained on
+observations in this region and thus is more vulnerable to adversar-
+ial attacks when acting within this region.
+shows how one can track the average change rate of a
+property at any attacked observation. For each collected
+observation, the policy’s final latent activation layer is
+embedded in two dimensions and colored with a gradient
+across the aggregate change rates of a property of interest,
+the change rate being determined by the difference in
+the property value for the unperturbed versus perturbed
+observations. These behavioral visualizations help the
+researcher get a birds-eye view of policy trajectories as they
+relate to environment properties; while also highlighting
+feasible, optimally-timed, and low-severity attacks on the
+policy’s learned strategy. We can also run adversarial
+attacks on (and simulated rollouts from) the observations
+collected in these data sets, which will be necessary for
+both Property Impact and Attack Transferability Analysis.
+4.2.1. B ENIGN PERTURBATIONS IN CYBER STRIKE
+In the Cyber Strike environment, one kind of benign pertur-
+bation would consist of selecting an ordered pair (A,B)of
+distinct red assets, with at least one already compromised by
+a blue hack, and changing the agent’s perception of whether
+or not Adefends B. Such a perturbation on the defense
+A→Bis benign because an expert human hacker would
+not target Bif it were already compromised; and if Awas
+5A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+already compromised, then Awould not be able to counterat-
+tack a blue node following its hack on B, making the defense
+value for A→Birrelevant to decision-making. Therefore,
+our attack-discovery framework would permit this kind of
+benign attack to be made frequently in a single episode,
+since an ideal policy ought to not behave differently from
+any of these attacks.
+Figure 5. The Average Final Red Count delta post-attack is aggre-
+gated per observation index, across all time-steps. Eight out of
+the ten most impactful attacked observation indexes are observed
+defense network nodes, suggesting that an attacker’s best chance
+of increasing the final red count is to perturb the DQN agent’s
+perception of the network structure at various adjacency nodes.
+Figure 6. TheFinal Red Count delta is plotted at each step for all
+attacks on odn32’s value in the DQN’s observation. This plots
+suggests that attacking odn32at the first two steps may have nega-
+tive effects for the attacker, whereas attacks from step 2 onward
+correspond with an increase in red nodes (thus a decrease in blue
+win percentage) compared to an unattacked trajectory.4.3. Property Impact Attack Analysis
+In order to measure and compare the aggregate property
+impact of attacking various observation indexes, we must
+run adversarial attacks perturbing each observation index
+for each collected observation tuple. Simulated rollouts are
+performed only from adversarial attacks inducing an action
+a′
+ithat is sufficiently different from the original action ai.
+Environment properties are measured at the terminal state
+of the simulated rollout and compared to environment prop-
+erties of the unattacked trajectory, as to gauge the property
+impact of a given attack. We can aggregate these impact
+metrics across step numbers and observation indexes to
+answer questions about the ideal time-step or observation
+index to attack with respect to some environment property
+the attacker wishes to impact. In CyberStrike, we measure
+the attack impact on properties such as win percentage, final
+red count, final blue count, and trajectory length. Figure
+5 displays a ranked aggregation of final red count deltas
+across attacked observation indexes for a DQN policy. The
+policy’s most impactful observation index attack with re-
+spect to final red count is a perturbation of the value of the
+observed defense network node 3:2 ( odn32 ), denoting if
+R3is defending R2or if this connection is unknown. In
+the notional example in Figure 3, R3isdefending R2, so a
+perturbation obscuring this information may cause the agent
+to take an action hacking the defended R2node, whereas
+an optimal decision would be to hack R2’s defender node,
+R3, first. Figure 6 displays the impact aggregation across
+time-steps for all attacks on the odn32 observation value,
+suggesting that attacks early in an episode, time-steps 0
+and 1, may have negative consequences for the attacker by
+decreasing their average final red count. Figure 6 shows that
+time-steps 10 and 15 lead to the largest average final red
+count increase, suggesting an adversary may have the great-
+est impact on final red count in the middle of an episode,
+rather than at the beginning or end.
+4.3.1. P ROPERTY IMPACT ANALYSIS RESULTS
+The Property Impact Analysis results indicate that adversar-
+ial attacks may exert both positive and negative influences on
+the attacker’s desired outcome, dependent on the time-step
+when the attack is brokered. By strategically timing the ma-
+nipulation of the most vulnerable observation components
+of a policy, we are able to observe significant variations
+in policy behavior, leading to notable changes in the envi-
+ronment properties and game outcome; thus demonstrating
+the ability to deliberately impact an external environment
+property by choosing a specific adversarial attack target at a
+specific time-step.
+Figure 6 displays the “final red counts” property outcomes
+when a red attacker attacks the odn32 observation compo-
+nent at various time-steps. Specifically, we find that attack-
+6A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+Table 1. Attack transferability results from experiments outlined in Section 4.4.2. The attacks are configured using the policy in the Attack
+Source column, targeting the No-Op (left) and max(loss-win) (right) action targets. The attacks are then run on the attack-source policy
+and transferred to the other four policies of interest. Three metrics are recorded per cell: transferability success rate (white sub-cell),
+target-transferability count out of one million (light gray sub-cell), and sub-action target-transferability success proportion (dark gray
+sub-cell). Self-attacks , where the attack source and target policy are the same, are also included in this table.
+ing the observation at the initial steps of the game may lead
+to an unexpected decrease in the final red count, which runs
+contrary to the attacker’s objective. However, as the game
+progresses, attacks on specific observations can result in
+more favorable increase in the final red count, aligning with
+the attacker’s strategic intentions. This finding underscores
+the dynamic nature of learned policies, even within simple
+environments. It highlights the delicate interplay between
+attack targets, how those action targets influence future be-
+havior, and how that future behavior affects the environment
+properties and the ultimate objective outcome.
+4.4. Attack Transferability Analysis
+In addition to analyzing the property impact of various ad-
+versarial attacks on a single policy, we also analyze the
+transferability of an attack trained with one policy and de-
+ployed during another policy’s execution.
+4.4.1. T RANSFERABILITY METRICS
+In order for an attack to be transferable , the attack (parame-
+terized by policy πi) must induce a sufficiently adversarial
+action when deployed on some other policy πj. In Cyber-
+Strike, an attack parameterized by a policy πiis counted
+astransferable if it induces an action different from the
+action taken by a policy πjfrom the unattacked observa-
+tion. A targeted attack, parameterized by πi, is counted astarget-transferable if it induces the attack’s target action
+on the new policy πj. Due to the multi-discrete nature of
+CyberStrike’s action space (which has four sub-actions), we
+can also measure the proportion of the induced sub-actions
+matching the target sub-actions, or the sub-action target-
+transferability .
+4.4.2. T RANSFERABILITY EXPERIMENTAL SETUP
+We employ Automated Domain Randomization (ADR) and
+Curriculum Learning (CL) across the action and counter-
+action effectiveness dimensions, coined action stickiness by
+(Machado et al., 2017), to increase the variation in learned
+strategies, providing more heterogeneous policy targets for
+attack-transfer. We will analyze attack transferability across
+a suite of five policies: A2c-ADR+CL (A), A2c-ADR (B),
+A2c-CL (C), DQN-CL (A), DQN-deterministic (B)).
+Training curriculum and hyperparameter details for the poli-
+cies are available in the appendix. For each policy, we use
+two action-targets for transferability analysis: the 0-action
+(No-op) and the max(loss-win) action. The max(loss-win)
+action is computed by counting each collected action’s us-
+age within winning and losing trajectories; if the action was
+used ULtimes in losing trajectories and UWtimes in winning
+trajectories then the (loss-win) value is UL−UW, and the
+max(loss-win) action target maximizes this value.
+After determining the max(loss-win) action-target for each
+7A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+source policy, we run the transferred adversarial attacks. For
+each observation in each target policy’s collected dataset,
+we run an adversarial attack for each action target and col-
+lect metrics regarding transferability ,target-transferability ,
+andsubaction-target-transferability . We hypothesize that at-
+tacks may be more transferable between policies of the same
+DRL algorithm (A2c-X →A2c-Y , or DQN-X →DQN-Y),
+however the target policy should be the biggest factor in
+transferability, regardless of target action or source policy.
+We also hypothesize that the max(loss-win) action target
+may be more easily induced compared to the No-Op action,
+because the No-Op action should not be taken by an optimal
+or near-optimal policy, whereas the max(loss-win) actions
+are empirically taken by the source policies during losses.
+4.4.3. T RANSFERABILITY RESULTS
+The policy target is indeed the greatest factor on transfer-
+ability success rates, especially for the A2c policies where
+we see roughly the same transferability success rates per
+policy target, across all attack sources and action targets.
+It is also worth noting that the max(loss-win) action target
+induces target-transfers most often, but still sparsely, for
+A2c policies. DQN self-attacks induce the target action
+45.8% (DQN-A) and 2.3% (DQN-B) of the time, however
+attacks transferred to DQN policies never induce the tar-
+get action. Contrarily, A2c self-attacks induce the target
+action at roughly the same rate as attacks transferred to A2c
+policies. The variation in sub-action target-transferability
+per-row in the max(loss-win) block can be attributed to the
+max(loss-win) action being different for each source policy.
+5. Discussion & Conclusions
+The results suggest the ability to influence agent behav-
+ior, and thus future environment properties, is controllable
+through optimally timed, deliberately chosen observation
+perturbations. This capability, paired with the result show-
+casing varying levels of attack transferability across algo-
+rithm types, highlights the urgent need for robust defense
+mechanisms and adversarial evaluation schemes to safe-
+guard decision-making policies from the threat of adversar-
+ial influence, especially in high-stakes environments. The
+results also suggest that policies trained with some algo-
+rithms, like A2c, may be more vulnerable to transferred
+attacks than others, such as DQN in this specific experi-
+mental setting; and transferability must be measured on a
+per-algorithm basis. The presence of observation-dependent
+and time-dependent vulnerabilities implies the existence
+of training and fine-tuning methods to guard against these
+vulnerabilities, though we have not explored methods to do
+so in this paper and leave that to future research.
+While this paper focuses on using adversarial attacks to
+probe and analyze the behavior of policies trained throughDRL algorithms, the same behavioral analysis may be con-
+ducted on LLM-based agentic architectures, albeit with
+language-based attacks and alternate metadata for t-SNE
+embeddings. We will leave this to future adversarial analysis
+research.
+Impact Statement
+The paper presents work whose goal is to advance the field
+of machine learning, specifically regarding deep reinforce-
+ment learning explainability and adversarial analysis. As
+society continues to adopt DRL and AI solutions broadly,
+explainability and evaluation methods such as those pre-
+sented in this paper will help provide frameworks to assure
+and gain trust of these systems.
+Acknowledgments
+The authors thank Guido Zarrella and Dr. Chris Niessen for
+their advisory roles throughout the research and develop-
+ment process. This work was funded by the 2023 MITRE
+Independent Research and Development Program.
+References
+Baram, N., Zahavy, T., and Mannor, S. Deep reinforcement
+learning discovers internal models, 2016. URL https:
+//arxiv.org/abs/1606.05174 .
+Behzadan, V . and Munir, A. Vulnerability of deep re-
+inforcement learning to policy induction attacks. pp.
+262–275, 07 2017. ISBN 978-3-319-62415-0. doi:
+10.1007/978-3-319-62416-7 19.
+Biemann, C. Chinese whispers: an efficient graph clustering
+algorithm and its application to natural language process-
+ing problems. In Proceedings of the First Workshop on
+Graph Based Methods for Natural Language Processing ,
+TextGraphs-1, pp. 73–80, USA, 2006. Association for
+Computational Linguistics.
+Carlini, N. and Wagner, D. Towards evaluating the robust-
+ness of neural networks, 2017. URL https://arxiv.
+org/abs/1608.04644 .
+G. Brockman, V . Cheung, L. P. J. S. J. S. J. T. e. a. ”openai
+gym”, 2016.
+Goodfellow, I. J., Shlens, J., and Szegedy, C. Explaining
+and harnessing adversarial examples, 2015. URL https:
+//arxiv.org/abs/1412.6572 .
+Gross, D., Simao, T. D., Jansen, N., and Perez, G. A. Tar-
+geted adversarial attacks on deep reinforcement learning
+policies via model checking, 2022.
+8A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+Hasanbeig, M., Kroening, D., and Abate, A. Deep reinforce-
+ment learning with temporal logics. In Bertrand, N. and
+Jansen, N. (eds.), Formal Modeling and Analysis of Timed
+Systems , pp. 1–22, Cham, 2020. Springer International
+Publishing. ISBN 978-3-030-57628-8.
+Huang, S., Papernot, N., Goodfellow, I., Duan, Y ., and
+Abbeel, P. Adversarial attacks on neural network poli-
+cies, 2017. URL https://arxiv.org/abs/1702.
+02284 .
+Kiran, B. R., Sobh, I., Talpaert, V ., Mannion, P., Sallab, A.
+A. A., Yogamani, S., and P ´erez, P. Deep reinforcement
+learning for autonomous driving: A survey, 2021. URL
+https://arxiv.org/abs/2002.00444 .
+Machado, M. C., Bellemare, M. G., Talvitie, E., Ve-
+ness, J., Hausknecht, M. J., and Bowling, M. Revis-
+iting the arcade learning environment: Evaluation pro-
+tocols and open problems for general agents. CoRR ,
+abs/1709.06009, 2017. URL http://arxiv.org/
+abs/1709.06009 .
+Mnih, V ., Kavukcuoglu, K., Silver, D., Graves, A.,
+Antonoglou, I., Wierstra, D., and Riedmiller, M. A. Play-
+ing atari with deep reinforcement learning, 2013. URL
+http://arxiv.org/abs/1312.5602 .
+Mnih, V ., Badia, A. P., Mirza, M., Graves, A., Lilli-
+crap, T. P., Harley, T., Silver, D., and Kavukcuoglu, K.
+Asynchronous methods for deep reinforcement learning.
+CoRR , abs/1602.01783, 2016. URL http://arxiv.
+org/abs/1602.01783 .
+Molina-Markham, A., Winder, R. K., and Ridley, A. Net-
+work defense is not a game, 2021. URL https://
+arxiv.org/abs/2104.10262 .
+Rajeswaran, A., Kumar, V ., Gupta, A., Vezzani, G., Schul-
+man, J., Todorov, E., and Levine, S. Learning complex
+dexterous manipulation with deep reinforcement learn-
+ing and demonstrations, 2018. URL https://arxiv.
+org/abs/1709.10087 .
+Silver, D., Hubert, T., Schrittwieser, J., Antonoglou, I.,
+Lai, M., Guez, A., Lanctot, M., Sifre, L., Kumaran,
+D., Graepel, T., Lillicrap, T., Simonyan, K., and Has-
+sabis, D. Mastering chess and shogi by self-play with
+a general reinforcement learning algorithm, 2017. URL
+https://arxiv.org/abs/1712.01815 .
+Tapley, A., Gatesman, K., Robaina, L., Bissey, B., and
+Weissman, J. Utilizing explainability techniques for
+reinforcement learning model assurance, 2023. URL
+https://arxiv.org/abs/2311.15838 .van der Maaten, L. and Hinton, G. Visualizing data using t-
+sne. Journal of Machine Learning Research , 9(86):2579–
+2605, 2008. URL http://jmlr.org/papers/v9/
+vandermaaten08a.html .
+Velasquez, A., Bissey, B., Barak, L., Beckus, A., Alkhouri,
+I., Melcer, D., and Atia, G. Dynamic automaton-
+guided reward shaping for monte carlo tree search. Pro-
+ceedings of the AAAI Conference on Artificial Intelli-
+gence , 35(13):12015–12023, May 2021. doi: 10.1609/
+aaai.v35i13.17427. URL https://ojs.aaai.org/
+index.php/AAAI/article/view/17427 .
+Vinyals, O., Babuschkin, I., Chung, J., Mathieu, M.,
+Jaderberg, M., Czarnecki, W., Dudzik, A., Huang,
+A., Georgiev, P., Powell, R., Ewalds, T., Horgan, D.,
+Kroiss, M., Danihelka, I., Agapiou, J., Oh, J., Dalibard,
+V ., Choi, D., Sifre, L., Sulsky, Y ., Vezhnevets, S.,
+Molloy, J., Cai, T., Budden, D., Paine, T., Gulcehre,
+C., Wang, Z., Pfaff, T., Pohlen, T., Yogatama, D.,
+Cohen, J., McKinney, K., Smith, O., Schaul, T.,
+Lillicrap, T., Apps, C., Kavukcuoglu, K., Hassabis, D.,
+and Silver, D. AlphaStar: Mastering the Real-Time
+Strategy Game StarCraft II. deepmind.com/blog/
+alphastar-mastering-real-time-strategy-game-starcraft-ii/ ,
+2019.
+Waseda, F., Nishikawa, S., Le, T.-N., Nguyen, H. H., and
+Echizen, I. Closer look at the transferability of adver-
+sarial examples: How they fool different models dif-
+ferently, 2022. URL https://arxiv.org/abs/
+2112.14337 .
+9A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+A. Appendix
+A.1. Publicly Available Code
+Code for the Cyberstrike environment, DRL-SAT analysis repository, and training repository will be open sourced at:
+https://github.com/mitre/drlsat.
+A.2. CyberStrike
+Cyberstrike is a highly customizable network defense environment, initialized with the following configuration parameters.
+The values listed were used for experiments, with the exception of standard deviations of ADR variables:
+Listing 1. CyberStrike Configuration File
+a d r v a r i a b l e s :
+− i d : a d r 0 v 1
+t y p e : a d r n o r m a l r a n g e
+p a r a m e t e r s :
+mean : 1 . 0
+# s t a n d a r d d e v i a t i o n v a r i e s
+# w it h ADR & CL
+s t d e v : 1 . 0
+maximum : 1 . 0
+minimum : 0 . 1
+− i d : a d r 0 v 2
+t y p e : a d r n o r m a l r a n g e
+p a r a m e t e r s :
+mean : 1 . 0
+s t d e v : 1 . 0
+maximum : 1 . 0
+minimum : 0 . 1
+− i d : a d r 1 v 0
+t y p e : a d r n o r m a l r a n g e
+p a r a m e t e r s :
+mean : 1 . 0
+s t d e v : 1 . 0
+maximum : 1 . 0
+minimum : 0 . 1
+− i d : a d r 2 v 0
+t y p e : a d r n o r m a l r a n g e
+p a r a m e t e r s :
+mean : 1 . 0
+s t d e v : 1 . 0
+maximum : 1 . 0
+minimum : 0 . 1
+s c e n a r i o :
+r e d :
+a s s e t s :
+− i s t a r g e t : t r u e #0
+t y p e : 0
+i sa l i v e : True
+− i s t a r g e t : f a l s e #1
+t y p e : 0
+10A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+i sa l i v e : True
+− i s t a r g e t : f a l s e #2
+t y p e : 0
+i sa l i v e : True
+− i s t a r g e t : f a l s e #3
+t y p e : 0
+i sa l i v e : True
+− i s t a r g e t : f a l s e #4
+t y p e : 0
+− i s t a r g e t : f a l s e #5
+t y p e : 0
+i sa l i v e : True
+− i s t a r g e t : f a l s e #6
+t y p e : 0
+i sa l i v e : True
+− i s t a r g e t : f a l s e #7
+t y p e : 0
+i sa l i v e : True
+d e f e n s e n e t w o r k :
+− [ 1 , 2] # r e d node 0 d e f e n d e d by [ 1 , 2 ]
+− [ 5 , 6 , 7 ]# r e d node 1 i s d e f e n d e d by [ 5 , 6 and 7]
+− [ 3 ] # r e d node 2 d e f e n d e d by 3
+− [ 4 ]
+− [ ] #4
+− [ ] #5
+− [ ] #6
+− [ 6 ] # r e d node 7 i s d e f e n d e d by 6
+b l u e :
+a s s e t s :
+− t y p e : 1
+l o s s c o s t : 20
+u s e c o s t : 2
+− t y p e : 2
+l o s s c o s t : 20
+u s e c o s t : 2
+− t y p e : 2
+l o s s c o s t : 20
+u s e c o s t : 2
+i sa l i v e : True
+− t y p e : 3
+l o s s c o s t : 10
+u s e c o s t : 5
+e f f e c t p r o b a b i l i t y :
+# t y p e {r o w i d x}e f f e c t i v e n e s s
+# h a c k i n g t y p e {c o l i d x}
+− [ 0 , adr 0v1 , adr 0v2 , 0]
+− [ adr 1v0 , 0 , 0 , 0]
+− [ adr 2v0 , 0 , 0 , 0]
+− [ 0 , 0 , 0 , 0]
+A.3. Observation Space
+The observation space in CyberStrike consists of ” alive ” and ” type” information for all blue assets, ” alive ” and ” type”
+and ” istarget ” information for red assets, and the observed defense network, from blue’s perspective. This information is
+11A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+Figure 7. Embedded policy activation vectors are colored by their cluster, determined by Chinese-Whispers, and marked with aggregate
+skill-transition arrows. The shading of the arrows represent the empirical likelihood of the policy transitioning from one cluster to another;
+thus the most-travelled trajectories are marked by the darkest-shaded arrow path.
+flattened into an array and passed to the agent as a flat tensor. The size of the flat tensor is formally
+3∗(num blue +num red) +num red2
+A.4. Action Space
+The action space in CyberStrike is multi-discrete, with each blue asset capable of being paired to some red asset (or no red
+asset) for any given multi-discrete action. This means the action space linearly increases as we increase the number of red or
+blue assets in the configuration. Formally the action space is of size
+num blue∗(num red+1)
+A.5. Strategy and Optimality
+The optimal strategy in CyberStrike requires using eavesdrop assets to discover the defense network nodes, and then utilizing
+hacking assets to infiltrate the defense network, hacking undefended assets first, until the target is reached through recursive
+hacks. In the absence of adversarial attacks, DRL policies optimize towards this behavioral pattern.
+A.6. Curriculum Learning and Automated Domain Randomization
+We randomize the action effectiveness variables for Curriculum Learning (CL) and Automated Domain Randomization
+(ADR) policies. For the CL policies, the curriculum incrementally adds new variables to randomize as level difficulty
+increases. We increase the environment level whenever the learning agent reaches 90% on its current level. For instance, the
+CL agent starts training in a fully deterministic environment. Once 90% win-rate is reached, the environment randomizes one
+the four effect probabilities, sampling from a truncated normal distribution centered around 1, standard deviation of 1, and
+minimum and maximum of 0 and 1. As the agent reaches 90% win-rate on this second level, the environment randomizes
+yet another action-effectiveness dimension, until eventually all four variables are sampled with a standard deviation of 1.0 in
+the last level. During purely ADR training, we sample from this truncated distribution with a standard deviation of 1.0, for
+each of the four action effectiveness dimensions; and this pure-ADR level is identical to the final, fully-randomized level on
+the CL-denoted policies. The policy denoted ADR+CL (A2c-A) is trained with a curriculum that increases the standard
+deviation of all effectiveness probabilities by 25% every level. Once 90% win-rate is reached on the deterministic level 1,
+the agent begins training on level 2, where there is a 0.25 standard deviation for the action stickiness sampling distribution
+centered around 1. This ADR+CL lesson plan increases the standard deviation from 0 →0.25→0.5→0.75→1.0.
+12A Framework for Adversarial Analysis of Decision Support Systems Prior to Deployment
+A.7. Training hyperparameters
+All DRL policies were trained with either DQN or A2c, utilizing the standard deep Q-learning algorithm (Mnih et al., 2013)
+and the standard advantage actor critic algorithm introduced in (Mnih et al., 2016). For the DQN policies, we use a discount
+factor of .99, replay ratio of 4, target update tau of 0.05 with an interval of 250, an Adam optimizer, clip grad norm of 10,
+and a learning rate of 3e−4. The ε-greedy exploration module initializes at 1.0, decays by a factor of .99 to a minimum
+epsilon of 0.01.
+For the A2c policies, we use a discount factor of 0.99, actor learning rate of 1.5e-4, critic learning rate of 3e-4, value loss
+coefficient of 0.5, entropy loss coefficient of 0.01, Adam optimizer, and clip grad norm of 10. The networks ingest a flat
+input layer of varied size, depending on the size of the CyberStrike configuration. In the CyberStrike configuration used for
+experiments, where we have 8 red nodes and 4 blue hackers, the input size is 100. The hidden dimension, and thus the size
+of the activations used for embedding and clustering, is set to 256 by default. Policies are trained through their curriculum,
+until 90% win-rate is reached on the final level. At this point, policies are frozen, evaluated, and collected for analysis. Both
+the actor network and DQN are instantiated as follows:
+Listing 2. DQN and Actor Network
+hidden dim = 256
+s e l f . f c = t o r c h . nn . S e q u e n t i a l (
+nn . L i n e a r ( i n s h a p e [ 0 ] , hidden dim ) ,
+nn . ReLU ( ) ,
+nn . L i n e a r ( hidden dim , hidden dim ) ,
+nn . ReLU ( ) ,
+nn . L i n e a r ( hidden dim , o u t s h a p e [ 0 ] ) ,
+)
+The critic network for A2c training is instantiated as follow:
+Listing 3. Critic Network
+hidden dim = 256
+s e l f . f c = t o r c h . nn . S e q u e n t i a l (
+nn . L i n e a r ( i n s h a p e [ 0 ] , hidden dim ) ,
+nn . Tanh ( ) ,
+nn . L i n e a r ( hidden dim , hidden dim ) ,
+nn . Tanh ( ) ,
+# S i n g l e o u t p u t neuron f o r v a l u e f u n c t i o n .
+nn . L i n e a r ( hidden dim , 1 ) ,
+)
+A.8. Analysis hyperparameters
+For SAMDP analysis, we utilize the policy network activation vectors to create t-Distributed Stochastic Neighbor Embeddings
+(t-SNE) (van der Maaten & Hinton, 2008) with a perplexity of 132. We utilize Chinese-Whispers (Biemann, 2006) clustering
+algorithm with a critical distance of 15.0 to cluster the policy activation vectors, and color the associated 2d embedded
+points with a unique cluster color. In addition to coloring by cluster, shown in Figure 7, we can also color by adversarial or
+atomic property attributes as in Figure 4.
+13

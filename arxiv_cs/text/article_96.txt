@@ -1,0 +1,538 @@
+arXiv:2505.20961v1  [cs.SD]  27 May 2025Efficient and Microphone-Fault-Tolerant 3D Sound Source Localization
+Yiyuan Yang, Shitong Xu, Niki Trigoni, Andrew Markham
+Department of Computer Science, University of Oxford, United Kingdom
+{yiyuan.yang,shitong.xu,niki.trigoni,andrew.markham }@cs.ox.ac.uk
+Abstract
+Sound source localization (SSL) is a critical technology for deter-
+mining the position of sound sources in complex environments.
+However, existing methods face challenges such as high compu-
+tational costs and precise calibration requirements, limiting their
+deployment in dynamic or resource-constrained environments.
+This paper introduces a novel 3D SSL framework, which uses
+sparse cross-attention, pretraining, and adaptive signal coher-
+ence metrics, to achieve accurate and computationally efficient
+localization with fewer input microphones. The framework is
+also fault-tolerant to unreliable or even unknown microphone
+position inputs, ensuring its applicability in real-world scenarios.
+Preliminary experiments demonstrate its scalability for multi-
+source localization without requiring additional hardware. This
+work advances SSL by balancing the model’s performance and
+efficiency and improving its robustness for real-world scenarios.
+Index Terms : Spatial audio, Sound source localization
+1. Introduction
+Sound source localization (SSL) involves accurately determining
+the direction and distance of the sound sources in complex and
+noisy environments [ 9]. It is crucial for enhancing situational
+awareness, facilitating human-computer interaction, and optimiz-
+ing the performance of various signal-processing applications.
+For instance, prior works have incorporated sound source local-
+ization modules to improve speech quality in online meetings and
+virtual reality, improve speech intelligibility in hearing aids, and
+identify noise sources in surveillance and acoustic imaging [ 10].
+In the early stages, due to hardware limitations and exper-
+imental constraints, traditional sound source localization was
+primarily conducted in two-dimensional space. However, 2D
+localization only determines the azimuth angle within the hori-
+zontal plane, and neglects useful information such as elevation
+and distance of the sound source [ 8]. Since we live in a three-
+dimensional world, the advancement of technology and increas-
+ing application demands have driven the exploration toward 3D
+sound source localization, which learns a more comprehensive
+and precise spatial representation of the 3D scene.
+Existing 3D SSL algorithms typically rely on densely de-
+ployed microphone arrays to estimate the direction of arrival
+(DOA) using time-difference-of-arrival (TDOA) techniques or
+beamforming algorithms as the input features [ 29]. While these
+methods perform well in controlled environments, they require
+precise microphone calibration, which incurs high computa-
+tional costs and imposes strict sensor requirements to prevent
+catastrophic localization failures. These constraints significantly
+hinder the deployment of SSL in resource-constrained or dy-
+namic environments, particularly when microphone availability
+and reliability cannot be guaranteed [11, 30].
+Faulty MicrophoneNormal MicrophoneSound Source
+(X     , Y     , Z     )R1      R1        R1(X     , Y     , Z     )R2      R2        R2(X     , Y     , Z     )R3      R3        R3(X     , Y     , Z     )R4      R4        R4(X     , Y     , Z     )R5      R5        R5(X     , Y     , Z     )R6      R6        R6(X     , Y     , Z     )R7      R7        R7(X  , Y   , Z  )F      F         F(X  , Y   , Z  )S      S         SFigure 1: Overview of the sound source localization task. It
+aims at predicting the sound source position [XS, YS, ZS]condi-
+tioned on the recordings from calibrated microphones at known
+positions [XRi, YRi, ZRi]. If Faulty Microphones exist, our
+model is also capable of predicting their position [XF, YF, ZF]
+conditioned on their recording.
+In practical applications, 3D sound source localization faces
+several critical challenges that hinder its effectiveness and scal-
+ability. Firstly, computational efficiency is paramount, as real-
+time processing and low inference latency are essential for dy-
+namic environments such as live communication platforms [ 12].
+Secondly, reducing the number of microphones required for ac-
+curate localization is crucial to lower hardware costs and simplify
+deployment, especially in resource-constrained settings [ 13]. In
+addition, the reliability of the system is often compromised when
+microphones fail, which may degrade localization accuracy [ 11].
+Finally, the ability to simultaneously localize multiple overlap-
+ping sound sources is a significant challenge, as it requires so-
+phisticated algorithms to disentangle and process concurrent
+audio signals without increasing hardware complexity. Address-
+ing these issues is vital for advancing SSL technologies toward
+practical, real-world applications.
+As shown in Figure 1, this paper presents a novel 3D spatial
+sound source localization framework designed to overcome four
+key limitations of existing systems. (1) By leveraging sparse
+cross-attention and pretraining techniques, our approach signifi-
+cantly enhances computational efficiency and inference speed
+without compromising accuracy. (2) The proposed method in-tegrates adaptive signal coherence metrics (ASCM), enabling
+the model to achieve the same localization precision as the tradi-
+tional methods while using fewer microphones. (3) Our frame-
+work incorporates a fault-tolerant mechanism, ensuring robust
+functionality even when a subset of microphones fails or has
+a known position—an essential feature for real-world applica-
+tions. (4) Preliminary experiments demonstrate the framework’s
+scalability in handling overlapping sound events, highlighting
+its potential for simultaneous multi-source localization without
+introducing additional hardware complexity.
+2. Related Work
+2.1. Traditional Sound Source Localization
+Traditional approaches to sound source localization are based on
+establishing geometric and statistical frameworks. In the sim-
+plest scenario, when the number of independent distance mea-
+surements equals the spatial dimension, trilateration provides an
+elegant closed-form solution [ 14,15]. However, practical im-
+plementations often yield an over-determined system, wherein
+the maximum likelihood formulation is adopted under the as-
+sumption of additive Gaussian noise. This formulation, while
+theoretically appealing, results in a nonlinear, non-smooth, and
+non-convex optimization problem. Consequently, numerous iter-
+ative algorithms have been proposed, each offering various con-
+vergence guarantees, alongside methods that relax the original
+problem by minimizing errors in squared distance measurements
+to obtain a linear approximation [16, 17, 18, 19].
+In the context of multilateralism, the extraction of TDOA es-
+timates is critical. The generalized cross-correlation with phase
+transform (GCC-PHAT) has emerged as a robust and widely
+used technique for TDOA estimation [ 20]. Subsequently, these
+measurements are incorporated into linear or minimal solvers,
+typically via least squares formulations, to derive the sound
+source location. Despite the maturity of these classical methods,
+challenges persist in handling real-world conditions, such as
+reverberation and non-line-of-sight propagation.
+2.2. Learning-based 3D Sound Source Localization
+Recent advances in machine learning have catalyzed signifi-
+cant progress in sound source localization tasks, particularly in
+extending traditional 2D techniques to 3D settings. Early stud-
+ies in this domain primarily focused on estimating TDOA or
+DOA using convolutional neural networks to directly regress
+source coordinates [ 21,22,23,24]. Although such approaches
+have demonstrated promising results, their applicability is of-
+ten restricted to fixed microphone array configurations, limiting
+flexibility in dynamic or ad-hoc environments [25, 26, 27].
+To address these limitations, more sophisticated architec-
+tures have been introduced. For instance, dual-input neural
+networks that simultaneously process audio signals and spa-
+tial coordinates have shown improved localization performance
+in controlled two-dimensional scenarios [ 3]. Similarly, graph
+neural networks have been employed to accommodate variable
+numbers of microphones [ 4]. It aggregates spatial features de-
+rived from GCC-PHAT representations. Besides, wav2pos has
+designed a masked autoencoder architecture to improve the per-
+formance of the SSL task [ 5]. Despite these advancements,
+scaling learning-based methods to fully three-dimensional envi-
+ronments introduces additional complexities, notably due to the
+exponential increase in spatial discretization and the variability
+of acoustic conditions in realistic settings.
+A promising direction lies in the integration of classical ge-ometric insights with contemporary deep-learning frameworks.
+By leveraging the precise mathematical formulations of tradi-
+tional methods alongside the adaptive capabilities of neural net-
+works, hybrid approaches may offer enhanced scalability and
+robustness, thereby addressing the intrinsic challenges of three-
+dimensional sound source localization [8].
+3. Methodology
+3.1. Problem Definition
+Consider a 3D acoustic environment with Mmicrophones at
+known coordinates rm∈R3,m= 1, . . . , M andKsimulta-
+neous sound sources located at unknown positions rk∈R3,
+k= 1, . . . , K (K≪M). During a short time frame of Nsam-
+ples, each source emits a distinct signal sk∈RN, while every
+microphone records a superimposed mixture of time-delayed,
+convolved, and noisy observations:
+sm[n] =KX
+k=1(hmk∗sk)[n] +wm[n], n = 1, . . . , N, (1)
+where hmkdenotes the room impulse response from source k
+to microphone m, and wmrepresents additive i.i.d. Gaussian
+noise. The task of multiple sound source localization involves
+estimating the positions {rk}K
+k=1from the multichannel record-
+ings{sm}M
+m=1and prior knowledge of microphone geometry
+{rm}M
+m=1.
+In addition to the multiple SSL task, we also extend the
+task to perform microphone position estimation based on its
+recorded audio. Formally, in addition to the Mmicrophones with
+known coordinates, there are Ufaulty microphones at unknown
+positions ru∈R3, u= 1, . . . , U . The sound recorded by
+these microphones is {su}U. The extended multiple SSL task
+aims at jointly estimating the sound source positions rkand the
+faulty microphones’ position ru, from the known microphones’
+positions rm, and audio recordings at both known or unknown
+microphone positions. We tune our model using semi-supervised
+training to perform the extended multiple SSL task and show the
+model performance in the ablation study (Section 4.3).
+3.2. Proposed Framework
+In this subsection, we will introduce the proposed end-to-end
+framework, as illustrated in Figure 2. To provide a clearer expla-
+nation, we divide it into three parts based on whether the module
+is designed to process the audio information only (Acoustic
+stream), the spatial coordinate information only (Coordinate
+stream), or information fusion from the audio and coordinate
+stream (Joint stream).
+3.2.1. Acoustic Stream
+In the acoustic stream, shown in Figure 2 green parts, we encode
+each microphone recording with a pretrained audio encoder.
+In detail, we selected the pretrained model BEATs [ 7], which
+efficiently transforms raw audio into audio embedding semb
+m=
+BEATs (sm). Owing to its comprehensive pretrained framework,
+it does not require additional training, thus ensuring high data
+efficiency.
+3.2.2. Coordinate Stream
+For the Coordinate Stream, shown in Figure 2 pink parts, our
+goal is to integrate the sound received by the microphones with
+their spatial coordinates to enable sound source localization.Audio- pretrained model
+❄
+Positionencoder
+🔥AudioembeddingPositionembeddingCross- attentionEncoderDecoder
+Acoustic streamCoordinate streamJoint streamHigh effectiveness
+🔥
+🔥
+🔥Spatial coordinatesRecorded audiosMaskingstrategyAudio inverse mapper 
+Positiondecoder
+PredictedsourcepositionsRestoredaudios
+🔥
+🔥NGCC-PHAT
+❄
+Audio TDOAembeddingSparsecross-attentionSparsecross-attentionEmbedding vectors
+🔥
+🔥Audio TDOAencoderTraining
+🔥Frozen
+❄
+ASCM
+🔥
+Figure 2: The workflow of the proposed framework. It consists of three streams: Acoustic stream (Section 3.2.1), Coordinate stream
+(Section 3.2.2), and Joint stream (Section 3.2.3). Within these, we specifically highlight four components that can enhance the efficiency
+and the parts that need to be trained or frozen during the training process.
+First, for the original microphone spatial coordinates
+{rm}M
+m=1, we apply a simple position encoder (a two-layer
+MLP) to project them into a higher-dimensional position em-
+bedding pemb
+m. On the other hand, we input the raw sound sig-
+nals{sm}M
+m=1into the NGCC-PHAT [ 6] to extract the TDOA
+features. Given recordings si(f)andsj(f)in the frequency
+domain, the generalized cross-correlation with phase transform
+is computed as:
+rPHAT
+ij (τ) =F−1si(f)s∗
+j(f)
+|si(f)s∗
+j(f)|
+. (2)
+The NGCC-PHAT model further refines it by applying Plearned
+filters, yielding a transformed correlation function ˆrPHAT
+ij (τ) =PP
+p=1wprPHAT( p)
+ij (τ). Instead of selecting the peak value, we
+use the full correlation response as the TDOA feature vector
+fij= [ˆrPHAT
+ij (τ1),ˆrPHAT
+ij (τ2), . . . , ˆrPHAT
+ij (τL)], where Lindi-
+cates the discrete time step.
+To enhance the reliability of this feature, we introduce adap-
+tive signal coherence metrics (ASCM), where the coherence
+with the power spectral density gbetween microphone pairs is
+computed as:
+cij(f) =|gij(f)|2
+gii(f)gjj(f). (3)
+This coherence measure is used to weight different microphone
+pairs and get the updated weighted TDOA features:
+fw=X
+i,jcα
+ijfij. (4)
+Finally, after a simple audio TDOA encoder (one-layer MLP)
+with the weighted TDOA features fwas the input, we get the
+final audio TDOA embedding remb
+ij.
+3.2.3. Joint Stream
+For the joint stream, as shown in Figure 2 orange parts, we
+integrate the three above-processed embeddings (i.e., audio em-
+bedding semb, position embedding pemb, and audio TDOA em-
+bedding remb) and apply various fusion strategies to facilitate
+sound source reconstruction and achieve our primary sound
+source localization task.
+To effectively fuse the heterogeneous embeddings, we first
+employ cross-attention between the audio embeddings semb
+mandposition embeddings pemb
+m. Let q,k, and vdenote the query,
+key, and value, respectively. For the audio-to-position fusion, we
+derive qfrom semb
+mandk,vfrom pemb
+m:
+q=wqsemb
+m,k=wkpemb
+m,v=wvpemb
+m, (5)
+where wq,wk, and wvare learnable projection matrices. The
+cross-attention output fa2pis computed as:
+fa2p=Softmaxqk⊤
+√dk
+v. (6)
+This process aligns acoustic features with spatial coordinates,
+enabling the model to associate audio patterns with geometric
+contexts. The fused representation fa2pis then combined with
+the original audio embeddings via residual connection and layer
+normalization and gets the ffuse. Next, we integrate the TDOA
+embeddings remb
+ij and fusion feature ffuseusing sparse cross-
+attention to prioritize salient inter-microphone interactions and
+get the joint feature fjoint. Different from the traditional cross-
+attention, the sparse one reduces computational complexity by
+retaining only the top- Tattention weights for each query.
+The joint feature fjointserves as the input to the masked en-
+coderEmask. The masked encoder processes fjointthrough a stack
+ofLdefault transformer blocks. During training, we will ran-
+domly mask some tokens, and the corresponding masked inputs
+are excluded from gradient updates. For a masked token, its
+feature vector is replaced with a learnable mask embedding. The
+decoder Dmaskreconstructs predictions for all tokens, including
+masked ones. Let ˆsembandˆrembdenote the reconstructed au-
+dio embeddings and spatial coordinates embedding, respectively.
+The reconstruction process is formalized as:
+{ˆsemb,ˆremb}=Dmask(Emask(fjoint)), (7)
+The final reconstructed audio embeddings ˆsembwill be fed
+into a simple audio inverse mapper (a two-layer MLP) to gener-
+ate the reconstructed audio ˆs. Meanwhile, the spatial coordinates
+embedding will undergo further processing using the sparse
+cross-attention introduced earlier, where it is fused with the au-
+dio TDOA embedding remb. The resulting representation is then
+input into a position decoder (a two-layer MLP) to predict the
+sound source location {ˆrk}K
+k=1.Table 1: Model localization performance on the LuViRA [ 1]
+music3 andspeech3 recordings using all eleven microphones.
+Methodmusic3 speech3
+MAE [cm] ↓acc@30 cm ↑MAE [cm] ↓acc@30 cm ↑
+Multilat 38.8±2.5 72.5 ±1.6 72.8±4.4 55.7 ±2.1
+Multilat* 16.3±1.6 94.7 ±0.8 34.9±3.2 84.9 ±1.6
+DI-NN 26.0±0.8 73.0 ±0.2 44.7±1.7 45.9 ±2.3
+GNN 17.0±0.7 90.7 ±1.0 31.9±1.6 71.2 ±2.0
+wav2pos 14.2±0.5 95.4 ±0.7 23.6±1.2 81.6 ±1.7
+Ours 13.9±0.6 96.8±0.5 21.3±1.3 88.4±1.6
+Table 2: Sound source localization MAE [cm] on the speech3
+recording using different number of microphones M.
+Method M= 5 M= 7 M= 9
+Multilat [2] 244.9±4.8 133 .1±5.7 94 .3±5.0
+Multilat* [2, 6] N/A 105.6±6.1 56 .7±4.5
+DI-NN [3] 94.9±2.6 76 .1±2.0 58 .5±1.6
+GNN [4] 80.5±2.2 53 .1±1.9 41 .1±1.7
+wav2pos [5] 66.8±2.0 38 .8±1.7 28 .4±1.4
+Ours 42.5±2.128.7±1.523.6±1.2
+The training objective combines three loss components: re-
+construction masked audio loss, microphone coordinate loss,
+and source localization loss. The total loss is computed as a
+weighted sum of individual components, with λsound,λm-loc, and
+λs-locserving as the corresponding weighting hyperparameters.
+Ltotal=λsoundX
+m∈M||ˆsm−sgt
+m||2
+2+λm-locX
+m∈M||ˆrm−rgt
+m||2
+2
++λs-locX
+(i,j)∈K|||ˆri−ˆrj||2
+2− ||ri−rj||2
+2|1. (8)
+4. Experiment
+4.1. Experimental Setup
+Datasets : We use two recordings, music3 andspeech3 , from
+LuViRA [ 1] audio-only dataset for evaluation and other 3 music
+and 3 speech recordings for training and validation. The sound
+source is randomly sampled in a room of size 7×8×2m.Eval-
+uation metrics : The performance of localization is assessed
+using Mean Absolute Error (MAE) to quantify overall accuracy.
+Additionally, we measure the percentage of correctly localized
+points that fall within a 30 cm threshold to evaluate practical
+applicability. Baselines : We compare our method with a ro-
+bust multilateration [ 2] and extended version [ 2,6], existing
+DI-NN [ 3], GNN [ 4], and wav2pos [ 5], training them on the
+same dataset while following their original hyperparameters. De-
+ployment : We train proposed model on one NVIDIA A10 (24
+GB). The initial learning rate is 0.001, with a decay of 95% of
+every 10 epochs. A batch size of 128 and a training duration of
+300 epochs were selected for the proposed model. The model
+was developed using PyTorch 1.12 [28] under Python 3.91.
+4.2. Results
+For the single sound source localization, Table 1 presents the
+localization performance of different methods on two recordings
+using eleven microphones. Our proposed method achieves the
+best performance across both datasets. Notably, it outperforms
+wav2pos [ 5], the previous best-performing approach, reducing
+the MAE (cm) to 13.9 for music3 and 21.3 for speech3 while
+1Thank repo https://github.com/axeber01/wav2pos/Table 3: Microphone localization MAE [cm] over all unknown
+microphone locations on the speech3 recordings using different
+numbers of known microphone locations.
+Scene Method M=7 M=8 M=9
+Awav2pos 182.8±1.7 93 .1±1.9 36 .8±1.9
+Ours 168.9±1.7 86 .2±1.9 31 .2±1.8
+Bwav2pos 181.7±1.7 90 .4±1.8 34 .8±1.6
+Ours 166.5±1.8 83 .6±1.8 29 .5±1.7
+(a)Setting 1
+ (b)Setting 2
+ (c)Setting 3
+Figure 3: Result visualization under different settings with ran-
+dom initialization of sound source and microphone positions.
+achieving 96.8% and 88.4% accuracy, respectively. Our model
+has 6.8M parameters, with an average training time of 21.5 hours
+and an inference time of 0.4 seconds based on an A10 GPU. Be-
+sides, Table 2 presents the result based on different numbers
+of microphone configurations. Our approach consistently deliv-
+ers the lowest MAE. In particular, with seven microphones, it
+reduces the MAE (cm) to 28.7, which is close to the wav2pos
+performance using nine microphones. Furthermore, we also con-
+ducted extended multiple sound source localization tasks on the
+speech3 dataset. Using eleven microphones for localization, our
+method achieved an MAE (cm) of 45.21 for two sound sources
+and 69.86 for three sound sources.
+4.3. Ablation Study
+Building on the above foundational experiments, we conduct
+analyses in more complex scenes, specifically those involving
+faulty microphones. Specifically, we have designed two scenes.
+In scene A, both the microphone positions and the sound source
+are unknown. In scene B, the microphone positions are unknown,
+but the sound source is known. The results based on the different
+number of microphones and methods are shown in Table 3. From
+the results, our method improves localization performance and
+localizes a small number of faulty microphones. It shows that
+our approach exhibits potential tolerance to faulty microphones.
+Additionally, we visualized the results based on different
+settings, as shown in Figure 3. Settings 1–3 correspond to the
+following scenarios: (1) default task, (2) default task with an
+unknown source signal, and (3) default task with an unknown
+source signal while also localizing one faulty microphone.
+5. Conclusion
+This paper presented a novel 3D sound source localization frame-
+work to address key challenges in efficiency and robustness
+against microphone faults. By integrating sparse cross-attentions,
+adaptive signal coherence metrics, and pretrained audio encoders,
+the proposed method achieves accurate localization with fewer
+microphones while maintaining tolerance to unreliable micro-
+phone positions. The framework’s ability to localize faulty mi-
+crophones and handle overlapping sound events highlights its
+practicality for real-world deployments.6. References
+[1]I. Yaman, G. Tian, M. Larsson, P. Persson, M. Sandra, A. D ¨urr,
+E. Tegler, N. Challa, H. Garde, F. Tufvesson et al. , “The luvira
+dataset: Synchronized vision, radio, and audio sensors for indoor
+localization,” in 2024 IEEE International Conference on Robotics
+and Automation (ICRA) . IEEE, 2024, pp. 11 920–11 926.
+[2]K.˚Astr¨om, M. Larsson, G. Flood, and M. Oskarsson, “Extension
+of time-difference-of-arrival self calibration solutions using ro-
+bust multilateration,” in 2021 29th European Signal Processing
+Conference (EUSIPCO) . IEEE, 2021, pp. 870–874.
+[3]E. Grinstein, V . W. Neo, and P. A. Naylor, “Dual input neural net-
+works for positional sound source localization,” EURASIP Journal
+on Audio, Speech, and Music Processing , vol. 2023, no. 1, p. 32,
+2023.
+[4]E. Grinstein, M. Brookes, and P. A. Naylor, “Graph neural net-
+works for sound source localization on distributed microphone
+networks,” in ICASSP 2023-2023 IEEE International Conference
+on Acoustics, Speech and Signal Processing (ICASSP) . IEEE,
+2023, pp. 1–5.
+[5]A. Berg, J. Gulin, M. O’Connor, C. Zhou, K. ˚Astr¨om, and M. Os-
+karsson, “wav2pos: Sound source localization using masked au-
+toencoders,” in 2024 14th International Conference on Indoor
+Positioning and Indoor Navigation (IPIN) . IEEE, 2024, pp. 1–8.
+[6]A. Berg, M. O’Connor, K. ˚Astr¨om, and M. Oskarsson, “Extending
+gcc-phat using shift equivariant neural networks,” arXiv preprint
+arXiv:2208.04654 , 2022.
+[7]S. Chen, Y . Wu, C. Wang, S. Liu, D. Tompkins, Z. Chen, and
+F. Wei, “Beats: Audio pre-training with acoustic tokenizers,” arXiv
+preprint arXiv:2212.09058 , 2022.
+[8]P.-A. Grumiaux, S. Kiti ´c, L. Girin, and A. Gu ´erin, “A survey
+of sound source localization with deep learning methods,” The
+Journal of the Acoustical Society of America , vol. 152, no. 1, pp.
+107–151, 2022.
+[9]A. N. Popper, R. R. Fay, and A. N. Popper, Sound source localiza-
+tion. Springer, 2005, vol. 25.
+[10] D. Desai and N. Mehendale, “A review on sound source localiza-
+tion systems,” Archives of Computational Methods in Engineering ,
+vol. 29, no. 7, pp. 4631–4642, 2022.
+[11] Y . Gong, S. Liu, and X.-L. Zhang, “End-to-end two-dimensional
+sound source localization with ad-hoc microphone arrays,” in 2022
+Asia-Pacific Signal and Information Processing Association An-
+nual Summit and Conference (APSIPA ASC) . IEEE, 2022, pp.
+1944–1949.
+[12] R. Kapoor, S. Ramasamy, A. Gardi, C. Bieber, L. Silverberg, and
+R. Sabatini, “A novel 3d multilateration sensor using distributed
+ultrasonic beacons for indoor navigation,” Sensors , vol. 16, no. 10,
+p. 1637, 2016.
+[13] R. Munirathinam and S. Vitek, “Sound source localization and
+classification for emergency vehicle siren detection using resource
+constrained systems,” in 2024 34th International Conference Ra-
+dioelektronika (RADIOELEKTRONIKA) . IEEE, 2024, pp. 1–5.
+[14] F. Thomas and L. Ros, “Revisiting trilateration for robot localiza-
+tion,” IEEE Transactions on robotics , vol. 21, no. 1, pp. 93–101,
+2005.
+[15] D. E. Manolakis, “Efficient solution and performance analysis of
+3-d position estimation by trilateration,” IEEE Transactions on
+Aerospace and Electronic systems , vol. 32, no. 4, pp. 1239–1248,
+1996.
+[16] D. R. Luke, S. Sabach, M. Teboulle, and K. Zatlawey, “A simple
+globally convergent algorithm for the nonsmooth nonconvex sin-
+gle source localization problem,” Journal of Global Optimization ,
+vol. 69, pp. 889–909, 2017.
+[17] R. Jyothi and P. Babu, “Solvit: A reference-free source localization
+technique using majorization minimization,” IEEE/ACM Trans-
+actions on Audio, Speech, and Language Processing , vol. 28, pp.
+2661–2673, 2020.[18] N. Sirola, “Closed-form algorithms in mobile positioning: Myths
+and misconceptions,” in 2010 7th Workshop on Positioning, Navi-
+gation and Communication . Ieee, 2010, pp. 38–44.
+[19] M. Larsson, V . Larsson, K. Astrom, and M. Oskarsson, “Opti-
+mal trilateration is an eigenvalue problem,” in ICASSP 2019-2019
+IEEE International Conference on Acoustics, Speech and Signal
+Processing (ICASSP) . IEEE, 2019, pp. 5586–5590.
+[20] C. Knapp and G. Carter, “The generalized correlation method for
+estimation of time delay,” IEEE transactions on acoustics, speech,
+and signal processing , vol. 24, no. 4, pp. 320–327, 1976.
+[21] D. Salvati, C. Drioli, G. L. Foresti et al. , “Time delay estimation
+for speaker localization using cnn-based parametrized gcc-phat
+features.” in Interspeech , 2021, pp. 1479–1483.
+[22] A. Raina and V . Arora, “Syncnet: Correlating objective for time
+delay estimation in audio signals,” in ICASSP 2023-2023 IEEE
+International Conference on Acoustics, Speech and Signal Process-
+ing (ICASSP) . IEEE, 2023, pp. 1–5.
+[23] D. Diaz-Guerra, A. Miguel, and J. R. Beltran, “Robust sound
+source tracking using srp-phat and 3d convolutional neural net-
+works,” IEEE/ACM Transactions on Audio, Speech, and Language
+Processing , vol. 29, pp. 300–311, 2021.
+[24] J.-H. Cho and J.-H. Chang, “Sr-srp: Super-resolution based srp-
+phat for sound source localization and tracking,” in Proc. Inter-
+speech 2023 , 2023, pp. 3769–3773.
+[25] Y . Wang, B. Yang, and X. Li, “Fn-ssl: Full-band and narrow-
+band fusion for sound source localization,” arXiv preprint
+arXiv:2305.19610 , 2023.
+[26] W. Phokhinanan, N. Obin, and S. Argentieri, “Binaural sound
+localization in noisy environments using frequency-based audio
+vision transformer (favit),” in INTERSPEECH . ISCA, 2023, pp.
+3704–3708.
+[27] Y . He and A. Markham, “Sounddoa: Learn sound source direction
+of arrival and semantics from sound raw waveforms,” in Inter-
+speech , 2022.
+[28] A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan,
+T. Killeen, Z. Lin, N. Gimelshein, L. Antiga et al. , “Pytorch: An
+imperative style, high-performance deep learning library,” in Ad-
+vances in Neural Information Processing Systems , vol. 32, 2019.
+[29] N. Yalta, K. Nakadai, and T. Ogata, “Sound source localization us-
+ing deep learning models,” Journal of Robotics and Mechatronics ,
+vol. 29, no. 1, pp. 37–48, 2017.
+[30] S. Y . Lee, J. Chang, and S. Lee, “Deep learning-based method
+for multiple sound source localization with high resolution and
+accuracy,” Mechanical Systems and Signal Processing , vol. 161, p.
+107959, 2021.

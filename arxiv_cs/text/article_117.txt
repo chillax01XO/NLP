@@ -1,0 +1,970 @@
+An LLM-as-Judge Metric for Bridging the Gap with Human
+Evaluation in SE Tasks
+XIN ZHOU, Singapore Management University, Singapore
+KISUB KIM, Independent Researcher, Hong Kong
+TING ZHANG, Singapore Management University, Singapore
+MARTIN WEYSSOW, Singapore Management University, Singapore
+LUÍS F. GOMES, Carnegie Mellon University, USA
+GUANG YANG, Nanjing University of Aeronautics and Astronautics, China
+DAVID LO, Singapore Management University, Singapore
+Large Language Models (LLMs) and other automated techniques have been increasingly used to support
+software developers by generating software artifacts such as code snippets, patches, and comments. However,
+accurately assessing the correctness of these generated artifacts remains a significant challenge. On one hand,
+human evaluation provides high accuracy but is labor-intensive and lacks scalability. While test-based metrics
+(e.g., the widely used Pass@k) offer greater scalability, they still depend on the careful manual design of
+comprehensive test cases that capture edge scenarios. On the other hand, other existing automatic evaluation
+metrics are scalable and require minimal human effort, but they often fail to accurately reflect the actual
+correctness of generated software artifacts.
+In this paper, we present SWE-Judge , the first evaluation metric for LLM-as-Ensemble-Judge specifically
+designed to accurately assess the correctness of generated software artifacts. SWE-Judge first defines five
+distinct evaluation strategies, each implemented as an independent judge. A dynamic team selection mech-
+anism then identifies the most appropriate subset of judges to produce a final correctness score through
+ensembling. We evaluate SWE-Judge across a diverse set of software engineering (SE) benchmarks—including
+CoNaLa, Card2Code, HumanEval-X, APPS, APR-Assess, and Summary-Assess—which span three SE tasks:
+code generation, automated program repair, and code summarization. Experimental results demonstrate that
+SWE-Judge consistently achieves a higher correlation with human judgments, with improvements ranging
+from 5.9% to 183.8% over existing automatic metrics. Furthermore, SWE-Judge reaches agreement levels
+with human annotators that are comparable to inter-annotator agreement in code generation and program
+repair tasks. These findings underscore SWE-Judge’s potential as a scalable and reliable alternative to human
+evaluation.
+CCS Concepts: •Software and its engineering ;•Computing methodologies →Artificial intelligence ;
+Additional Key Words and Phrases: large language models, evaluation, human preference
+Authors’ addresses: Xin Zhou, Singapore Management University, Singapore, xinzhou.2020@phdcs.smu.edu.sg; Kisub Kim,
+Independent Researcher, Hong Kong, falconlk00@gmail.com; Ting Zhang, Singapore Management University, Singapore,
+tingzhang.2019@phdcs.smu.edu.sg; Martin Weyssow, Singapore Management University, Singapore, mweyssow@smu.
+edu.sg; Luís F. Gomes, Carnegie Mellon University, USA, lfgomes@andrew.cmu.edu; Guang Yang, Nanjing University of
+Aeronautics and Astronautics, China, novelyg@outlook.com; David Lo, Singapore Management University, Singapore,
+davidlo@smu.edu.sg.
+Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee
+provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the
+full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored.
+Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires
+prior specific permission and/or a fee. Request permissions from permissions@acm.org.
+©2025 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+XXXX-XXXX/2025/5-ART $15.00
+https://doi.org/XXXXXXX.XXXXXXX
+, Vol. 1, No. 1, Article . Publication date: May 2025.arXiv:2505.20854v1  [cs.SE]  27 May 20252 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+ACM Reference Format:
+Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo. 2025. An
+LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks. 1, 1 (May 2025), 20 pages.
+https://doi.org/XXXXXXX.XXXXXXX
+1 INTRODUCTION
+The growing demand to automate software development tasks has led to the emergence of auto-
+mated techniques for generating software artifacts, such as code snippets [ 2,35], code changes [ 13,
+43], and summarization [ 30]. However, evaluating the correctness of those generated artifacts
+remains a challenge, largely due to the existence of multiple correct or semantically equivalent
+solutions for a given problem.
+One accurate evaluation method is human evaluation, where multiple human experts directly
+assess the correctness of the generated artifacts. However, human evaluation is labor-intensive and
+time-consuming, making it impractical for large-scale assessments. An alternative is test-based
+metrics, such as pass@k [ 2], where human experts manually design a set of test cases and the
+generated code is then executed to check whether it passes these test cases. While test-based
+metrics are more scalable than human evaluation, they still require the careful manual design of
+comprehensive test cases that cover edge cases [ 16,44]. Designing complete test cases is tedious
+and challenging itself, and many Software Engineering (SE) tasks lack the necessary test cases,
+making test-based metrics not practical for large-scale evaluations.
+To enable scalable evaluation of generated artifacts, several automatic evaluation metrics have
+been proposed [ 25,27,37,41,45]. These metrics offer greater scalability by eliminating the need
+for human evaluation or test cases. However, they are typically less accurate in assessing correct-
+ness [ 11]. This study aims to advance automatic evaluation metrics to bridge the gap between
+automated evaluation results and human judgment. These automatic metrics can generally be cate-
+gorized into three types: 1) Match-based metrics , 2)Embedding-based metrics , and 3) LLM-as-judge
+metrics . Match-based metrics, such as BLEU [ 25] and CodeBLEU [ 27], evaluate the similarity be-
+tween the generated artifact and a reference, i.e., a correct answer. Embedding-based metrics [ 37,41],
+on the other hand, also compare the generated artifact to a reference, but they first encode both
+into embeddings and then measure the similarity between them. In contrast, the LLM-as-judge
+metric [ 45] instructs the LLMs to judge the quality of the generated artifact. Despite the widespread
+adoption of metrics above, they still suffer from two major limitations .
+Interpreting Similarity as Correctness. Both match-based and embedding-based metrics use
+similarity as an indicator of correctness. However, similarity does not always align with correct-
+ness. For example, if the generated artifact is semantically equivalent to the reference but differs
+significantly in syntax, the similarity scores would be low, failing to accurately reflect the correct-
+ness. Additionally, Evtikhiev et al. [ 11] provided empirical evidence demonstrating a significant
+misalignment between human judgment and match-based metrics.
+Lack of Diverse Evaluation Strategies for Correctness Assessment. The state-of-the-art
+(SOTA) LLM-as-judge evaluation metric for code, ICE-Score [ 45], instructs LLMs to directly assign
+evaluation scores based on predefined criteria—natural language descriptions of correct and incor-
+rect code. However, it primarily focuses on a single strategy, lacking diverse strategies to assess
+correctness from different angles. A more comprehensive LLM-as-judge framework is needed to
+integrate multiple evaluation strategies, ensuring a more reliable and robust assessment.
+Our Work. To address these limitations, we propose SWE-Judge (SoftWarEJudge ), the first
+LLM-as-Ensemble-Judge metric designed to assess the correctness of generated software artifacts,
+including code snippets, patches, and summarization. Unlike match-based and embedding-based
+, Vol. 1, No. 1, Article . Publication date: May 2025.An LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks 3
+metrics that approximate correctness through similarity, SWE-Judge, like other LLM-as-judge ap-
+proaches, leverages LLMs’ reasoning and software comprehension abilities for semantic evaluation.
+Inspired by the rigorous academic peer-review process [ 7], where multiple reviewers collaborate to
+ensure an accurate assessment of a paper’s quality, SWE-Judge utilizes a multi-evaluator framework.
+Specifically, SWE-Judge first defines five distinct evaluation strategies, each represented by an
+independent evaluator responsible for its own correctness assessment strategy. Second, a dynamic
+team-selection mechanism chooses the most suitable subset of evaluators. Third, the selected team
+members conduct their assessments, and their results are aggregated to generate a final correctness
+score through ensembling. This approach enhances the evaluation process by incorporating diverse
+strategies and dynamically selecting a suitable team of judges, thereby improving the quality of the
+automatic correctness assessment.
+We evaluate SWE-Judge on a diverse set of SE datasets, including CoNaLa [ 11,36], Card2Code [ 11,
+19], HumanEval-X [ 40], APPS [ 14], APR-Assess [ 15], and Summary-Assess [ 22,29]. These datasets
+encompass three popular SE tasks, code generation [ 14,19,36,40], automated program repair [ 15],
+and code comments [ 22,29], across five programming languages: Java, C++, Python, JavaScript,
+and Go, and cover three different types of generated software artifacts: code snippets, patches, and
+comments. Following prior work [ 11,45], we employ Kendall’s 𝜏coefficient, Spearman’s 𝑟𝑠, and
+Pearson’s 𝑟𝑝to quantify the statistical correlation between the assessments made by SWE-Judge
+and the ground truths, defined by either human evaluation results or test execution outcomes. The
+experimental results illustrate that SWE-Judge achieves significantly and consistently higher corre-
+lations (5.9%-183.8%) than the baselines. Moreover, SWE-Judge also achieves agreement levels with
+human annotators that are comparable to inter-annotator agreement observed in code generation
+and automated program repair. This underscores its potential to serve as a reliable substitute for
+human evaluators in these tasks.
+Contributions. The main contributions are as follows:
+•To the best of our knowledge, we are the first to propose an LLM-as-Ensemble-Judge evaluation
+metric for assessing diverse software artifacts. Our SWE-Judge is designed to integrate multi-
+ple novel evaluation strategies proposed in this work, enabling a comprehensive and robust
+correctness assessment.
+•We conducted extensive experiments to evaluate the effectiveness of SWE-Judge across five
+programming languages (i.e., Java, C++, Python, JavaScript, and Go) and three types of software
+artifacts (i.e., source code, code changes, and comments), and three popular generation-based SE
+tasks: code generation, automated program repair, and code summarization.
+•SWE-Judge significantly and consistently outperforms existing automatic evaluation metrics,
+achieving new state-of-the-art performance.
+2 PRELIMINARIES
+2.1 Problem Statement
+Automatic evaluation metrics aim to assess the quality of software artifacts generated by SE
+automation tools. In this work, we focus specifically on the aspect of functional correctness ,
+which refers to the extent to which a generated software artifact fulfills the intended functional
+behavior described in the user requirement. Correctness is a fundamental and indispensable attribute
+in many SE tasks. Without correctness, other desirable properties—such as efficiency or readability
+are rendered secondary. Formally, the task is defined as follows and illustrated in 1of Figure 2.
+Let𝑥denote a user’s requirement (e.g., a natural language description of a task), and let 𝑦be a
+software artifact generated by an automated SE tool (e.g., an LLM-based code generator), intended
+to fulfill the requirement 𝑥. Let 𝑟be a reference solution that correctly fulfills the user requirement
+, Vol. 1, No. 1, Article . Publication date: May 2025.4 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+𝑥. For each generated software artifact 𝑦, human annotators provide a correctness score, e.g.,
+𝑆∈{0,1,2,3,4}, where 0 indicates a completely incorrect software artifact and 4 indicates a fully
+correct one. Our objective is to develop an automatic evaluation metric E(𝑥,𝑦, 𝑟)that can closely
+correlate with the human-provided correctness score 𝑆.
+2.2 State-of-the-Art Metric: ICE-Score
+The state-of-the-art LLM-as-judge evaluation metric for code, ICE-Score [ 45], prompts LLMs
+to directly assign evaluation scores to the generated software artifacts. Formally, it takes the
+requirement 𝑥, the generated software artifact 𝑦, and the reference solution 𝑟, and inserts them
+into a predefined prompt, yielding 𝑃𝑟𝑜𝑚𝑝𝑡(𝑥,𝑦, 𝑟). The LLM then generates a score based on this
+prompt: 𝑃=𝐿𝐿𝑀(𝑃𝑟𝑜𝑚𝑝𝑡(𝑥,𝑦, 𝑟)). We showcase the ICE-Score’s prompt for the code generation
+task below:
+Abstracted ICE-Score Prompt
+[Task Description] Your task is to rate the code snippet only on one metric ...
+[Evaluation Criteria] Functional Correctness (0-4) - Execution-based quality of the code
+snippet combined with the problem ...
+[Evaluation Steps]
+1. Read the problem carefully;
+2. Read the code snippet and compare it to the problem;
+3. Assign a score for functional correctness on a scale of 0 to 4.
+[Data] Problem: x, Code Snippet: y, Reference Code (Optional): r
+The core idea behind ICE-Score is to directly “ask” the LLM to assess the correctness of the
+generated code 𝑦, as reflected in instructions like “ Your task is to rate the code snippet ” and “ Assign
+a score for functional correctness. ” This represents a straightforward strategy in using LLMs for
+correctness evaluation, which we refer to as the “ Direct Assess ” strategy.
+However, ICE-Score focuses solely on this strategy, leaving other potential strategies unexplored.
+For example, one could prompt the LLM to determine whether the generated software artifact
+𝑦is functionally equivalent to the reference solution 𝑟, with respect to the user requirement 𝑥.
+Alternatively, the LLM could first generate test cases based on 𝑥, and then verify whether 𝑦passes
+all those tests. To address this limitation, we propose SWE-Judge, which extends beyond the Direct
+Assess strategy. SWE-Judge explores and integrates multiple evaluation strategies for assessing
+correctness, leading to more accurate evaluation scores compared to ICE-Score.
+2.3 Motivating Example
+Our work is inspired by the rigorous academic peer-review process, as illustrated in Figure 1. In a
+typical review process, authors submit a manuscript, after which the editor selects multiple suitable
+reviewers to conduct peer review. Each reviewer independently provides their review and feedback,
+SMU Classification: Restricted
+Author Editor ReviewersSubmission Reviewer Assignment 1 2
+4Peer Review 3
+Reviews Collections & Editorial Decision
+Fig. 1. Motivating example of the academic peer-review process.
+, Vol. 1, No. 1, Article . Publication date: May 2025.An LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks 5
+automated
+SE toolsgenerate
+generated 
+software artifact
+query        Generated Data for Evaluation
+
+Reference 
+Answer for  0
+       Diverse Evaluation Strategies
+Direct Assess Equivalence 
+Assess
+Generate Tests 
+and AssessDirect Assess and 
+Rethink
+Analyze Reference 
+and Assess
+1
+S1 S2 S3
+S4 S5       Dynamic Team Formation 2
+S1
+ S2
+ S3
+ S4
+ S5
+Team 1
+(S1, S2, S3)Team 2
+(S3, S4)Team 3
+(S4, S5)....Step1: Initial Teaming 
+Step2: Team Trials on A Few Samples
+Team 1 Team 2 Team 3....
+Best Team in Trial
+       Correctness Score Generation 3
+Data for 
+EvaluationBest Team for 
+This Task3.7ensemble 
+Correctness 
+Score(,,)
+Fig. 2. Overview of SWE-Judge.
+which the editor then synthesizes into a final editorial decision. The high quality of this process
+can largely be attributed to two factors: (1) the editor’s ability to select appropriate reviewers, and
+(2) the professionalism of each individual reviewer.
+Drawing an analogy to this process, a key limitation of ICE-Score is that it relies on only a single
+“reviewer” (i.e., one evaluation strategy), without a pool of potential “reviewers” to select from.
+Moreover, it lacks a mechanism to assemble a team of complementary reviewers that can produce
+a more reliable evaluation. Motivated by this, our work proposes two core ideas:
+•Designing diverse evaluation strategies to ensure variation in perspectives—similar to how
+reviewers often bring different evaluation angles to peer review.
+•Introducing a lightweight team assembly mechanism that selects an effective combination
+of evaluation strategies, akin to the reviewer assignment step in the academic peer review.
+3 OUR APPROACH
+The framework of SWE-Judge is illustrated in Figure 2. Given a requirement 𝑥, a generated software
+artifact 𝑦, and a reference solution 𝑟,SWE-Judge produces a correctness evaluation score E(𝑥,𝑦, 𝑟).
+The framework consists of three main components: the first defines the evaluation strategies, the
+second selects an appropriate team, which consists of a few evaluation strategies, and the third
+performs the actual scoring.
+Part 1: Diverse Evaluation Strategies ( 1of Figure 2). Given a requirement 𝑥, a generated
+software artifact 𝑦, and a reference solution 𝑟, this component defines five distinct correctness
+evaluation strategies to assess the correctness of the generated software artifact 𝑦from diverse
+perspectives.
+Part 2: Dynamic Team Formation ( 2of Figure 2). Given the five evaluation strategies, this
+part aims to assemble an effective subset, referred to as a “team”, from these strategies. Importantly,
+the team selection is performed dynamically for each dataset, allowing the assembled team to adapt
+to the characteristics of different datasets.
+Part 3: Correctness Score Generation ( 3of Figure 2). Once the team is determined, it is used
+to evaluate the correctness of data samples in the evaluation dataset, generating individual scores
+for each data sample. These individual scores are then aggregated to produce the final correctness
+score.
+, Vol. 1, No. 1, Article . Publication date: May 2025.6 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+3.1 Diverse Evaluation Strategies
+Basics of Evaluation Strategy. Our tool is built upon the zero-shot capabilities of LLMs.
+Specifically, we do not provide any human-annotated scores as input totheLLMs . Instead, for each
+evaluation data sample, we construct prompts containing the user requirement 𝑥, the generated
+software artifact 𝑦, and the reference solution 𝑟. These prompts are then fed into the LLM, which
+generates a response score based on its assessment of the correctness of 𝑦.
+Each unique prompt design corresponds to a distinct evaluation strategy. By pairing a specific
+strategy’s prompt with an LLM, we form an evaluator that generates individual correctness scores
+in a zero-shot fashion. We introduce the prompt designs of five different evaluation strategies as
+follows:
+Strategy 1: Direct Assess. Similar to the previous SOTA approach ICE-Score [ 45], Strategy 1 (P1)
+directly asks the LLM to assess the correctness of the generated output 𝑦. Below, we present an
+example of the prompt used in P1 for the code generation task. For the detailed prompts used in P1
+across different datasets, please refer to our online replication package.
+Prompt of Strategy 1
+[Task Description] Your task is to rate the code snippet...
+[Evaluation Criteria] Functional Correctness (0-4) - Execution-based quality of the code
+snippet combined with the problem ...
+[Evaluation Steps]
+1. Read the problem carefully;
+2. Read the code snippet and compare it to the problem;
+3. Assign a score for functional correctness on a scale of 0 to 4.
+[Data] Problem: x, Code Snippet: y, Reference Code (Optional): r
+In Strategy 1, we can choose whether or not to provide the reference solution 𝑟in the data fields,
+leading to two variants of Strategy 1, denoted as 𝑃1𝑎and𝑃1𝑏. In𝑃1𝑎, no reference solution is
+provided, while in 𝑃1𝑏, the reference solution is included.
+Strategy 2: Direct Assess and Rethink. Strategy 2 (P2) builds upon Strategy 1 (P1). In P1, the LLM
+directly provides a correctness score ˆ𝑠1for the generated software artifact 𝑦, typically accompanied
+by a brief explanation (1–2 sentences) justifying the assigned score. Inspired by the way humans
+often reflect on their initial judgments, P2 introduces a rethink step. This step prompts the LLM to
+review both its previously assigned score and the reasoning behind it, and to consider whether any
+revision is necessary.
+Concretely, the LLM is asked to critically re-evaluate the validity of its earlier explanation and
+adjust its score accordingly. For example, suppose in P1 the LLM assigns a low score to the generated
+software artifact 𝑦due to a flaw it identifies (e.g., a reason 𝑒). During the rethink phase, if the
+LLM realizes that this reason 𝑒is actually incorrect, it is encouraged to revise the score upward.
+Conversely, if the LLM initially gives a high score based on a positive justification 𝑒, but later
+determines that 𝑒does not hold, it should lower the score accordingly in the rethink step. If the
+LLM in the rethink step agrees on the previous reason 𝑒, then the score is unchanged. Below, we
+present an example of the prompt used in P2 for the code generation task.
+, Vol. 1, No. 1, Article . Publication date: May 2025.An LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks 7
+Prompt of Strategy 2
+<Prompt of Strategy 1>
+<Response from Strategy 1: predicted score ˆ𝑠1and its reasons 𝑒>
+""" Prompt Segment Unique to Strategy 2 """
+[Task Description] Your task is to recheck whether the reason and score are proper...
+[Evaluation Criteria]
+1. If a bad reason about the code snippet is validated to be ‘False’, increase the score a bit...
+2. If a good reason about the code snippet is validated to be ‘False’, decrease the score a bit...
+3. If a reason is validated to be ‘True’, then please do not change the score...
+[Evaluation Steps]
+1. Please only validate the previous score and reason.
+2. Please reply with your adjusted score.
+[Data] Problem: x, Code Snippet: y, Predicted Score from P1: ˆ𝑠1, Reasons from P1: e
+After the rethink step, the LLM will produce an adjusted score ˆ𝑠2by either increasing, decreasing,
+or maintaining the original correctness score generated in P1 ( ˆ𝑠1). For the detailed prompts used in
+P2 and other strategies across different datasets, please refer to our online replication package.
+Strategy 3: Equivalence Assess. Strategy 3 (P3) adopts a fundamentally different approach from
+P1 and P2. Since the reference solution, 𝑟, can correctly satisfy the user requirement 𝑥, we can
+assess the correctness of 𝑦by evaluating its equivalence to 𝑟. The underlying idea is that if 𝑦and𝑟
+are semantically or functionally equivalent, then it is highly likely that 𝑦also meets the original
+requirement 𝑥. Therefore, rather than reasoning directly on the correctness of 𝑦, the LLM focuses
+on comparing 𝑦and𝑟, making this strategy an equivalence-based evaluation strategy. We present
+an example of the prompt used in P3 for the code generation task:
+Prompt of Strategy 3
+[Task Description] Given two code implementations or code diffs, your task is to assess
+whether they are semantically equivalent...
+[Evaluation Criteria] Semantic Equivalence: To what extent do the two code versions
+produce the same behavior...
+[Evaluation Steps]
+1. Read and analyze both code versions carefully. Read the problem description too...
+2. Compare their functionality, structure, and logic to determine if they yield the same
+output and behavior...
+3. Assign a Semantic Equivalence score...
+[Data] Problem: x, Code Snippet: y, Reference Code: r
+Strategy 4: Generate Tests and Assess. Strategy 4 (P4) introduces another different evaluation
+strategy. The core idea is straightforward: when the generated artifact 𝑦is a code snippet or a
+code change, test cases serve as an effective means for assessing its correctness. Figure 3 illustrates
+the prompt design for Strategy 4. This strategy consists of two steps. In the first step, we prompt
+the LLM to generate test cases based on the user requirement 𝑥and the reference code 𝑟, as our
+evaluation data does not include test cases in the input. In the second step, we provide the generated
+software artifact 𝑦along with the previously generated test cases as input to the LLM. The LLM is
+then asked to evaluate whether 𝑦can pass all the generated test cases and, based on this evaluation,
+assign a correctness score.
+, Vol. 1, No. 1, Article . Publication date: May 2025.8 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+P4: Generate Tests and 
+then AssessP5: Analyze Reference 
+and then Assess
+[Task] Your task is to generate tests that evaluate 
+correctness...
+[Steps] 
+1. Read the problem...
+2. Identify key functional aspects, edge cases...
+3. Generate a diverse set of test cases...
+[Data] Problem: x, Reference Code: rStep1: Generate Tests 
+Generated tests are: ... (t)
+[Task] Your task is to determine whether the code 
+will pass all the test cases...
+[Evaluation Criteria] To what extent is the code 
+expected to pass the given test cases?
+[Steps] 1. Read the code and the test cases...
+2. Determine if the code pass all test cases...
+[Data] Code Snippet: y, Tests: tStep2: Assess Correctness (About Passing Tests) 
+Correctness Score: ...LLM
+LLM
+[Task] Your task is to identify the core key points 
+from the golden answer...
+[Steps] 
+1. Read the problem...
+2. Analyze the golden answer to identify its 
+essential components...
+3. List the extracted key points...
+[Data] Problem: x, Reference Code: r Step1: Generate Key Properties of Correct Code 
+Generated Key Propertie are: ... (k)LLM
+[Task] Your task is to assess whether the code 
+contains all the key points...
+[Evaluation Criteria] To what extent does the 
+code accurately capture the essential key points?
+[Steps] 1. Read the code and the key points...
+2. Assign a Key Points Coverage score...
+[Data] Code Snippet: y, Key Properties: kStep2: Assess Correctness (Fulfilling Key Properties) 
+Correctness Score: ...
+LLM
+Fig. 3. Prompt Designs of Strategy 4 and Strategy 5.
+Strategy 5: Analyze Reference and Assess. Strategy 5 (P5) adopts an analytical approach. The
+right side of Figure 3 illustrates the prompt design for Strategy 5. This strategy involves two steps.
+First, the LLM identifies the critical properties of 𝑟that make it a correct solution for 𝑥. In the
+second step, the LLM checks whether 𝑦preserves those core properties. If the LLM determines that
+𝑦aligns with the reference solution’s key characteristics, it considers 𝑦to be correct.
+Turning Strategies into Evaluators. With all strategies defined, we can now pair each strategy
+with a specific LLM to construct a set of evaluators. Each evaluator produces an independent
+correctness score according to its respective evaluation strategy. In addition, as the target human
+score ranges vary across datasets such as CoNaLa [ 11,36] using a 0–4 scale, APR-Assess [ 15] using
+0–1, and Summary-Assess [ 22,29] using 1–5, we standardize the output range across all strategies
+to ensure consistency. To do this, we include an instruction in each prompt that constrains the LLM
+to output a score within the 0–100 range. In a later stage of SWE-Judge (described in Section 3.3), we
+apply a linear transformation to map the predicted score from the 0–100 range to the corresponding
+range used by the evaluation dataset.
+3.2 Dynamic Team Formation
+Just like an academic peer-review process depends on selecting suitable reviewers to ensure the
+quality of reviews, we argue that evaluating generated software artifacts similarly benefits from
+assembling a well-matched team. Building on this insight, this component dynamically assembles
+an effective team from the available 5 strategies, tailoring the combination to each dataset in order
+to better align with its specific characteristics.
+Initial Teaming. Although we have 5 evaluation strategies, Strategy 1 has two variants. Let
+P={𝑃1𝑎, 𝑃1𝑏, 𝑃2, 𝑃3, 𝑃4, 𝑃5}denote the set of strategy variants we can choose from. We leverage
+LLMs to automatically obtain correctness scores, allowing us to explore a broad space of strategy
+combinations. Specifically, we consider all combinations that include at least two distinct strategies.
+In principle, there areÍ6
+𝑘=2 6
+𝑘=57possible teams that can be formed from P. We denote these
+combinations asT={𝑇1,𝑇2, . . . ,𝑇 57}.
+, Vol. 1, No. 1, Article . Publication date: May 2025.An LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks 9
+Team Trials on A Few Annotated Samples. To identify the best team from T={𝑇1,𝑇2, . . . ,𝑇 57},
+we utilize a small set of annotated examples from the evaluation dataset. We randomly sample 10
+instances, assuming their ground truth correctness scores are available, as annotating this number
+is feasible for a human developer. Each team generates predicted scores for these samples, and we
+measure their alignment with the ground truth using Kendall’s 𝜏coefficient, Spearman’s 𝑟𝑠, and
+Pearson’s 𝑟𝑝. The team with the highest correlation is selected as the best team for the dataset.
+3.3 Final Correctness Score Generation
+For illustration purposes, suppose the selected team 𝑇𝑖comprises strategies 𝑃1,𝑃2, and 𝑃3. Please
+note that 𝑇𝑖=(𝑃1, 𝑃2, 𝑃3)is just an example.
+Individual Score Prediction. Each sample 𝑑𝑖∈ D is represented as a tuple (𝑥𝑖,𝑦𝑖, 𝑟𝑖). The
+strategies in the selected team independently generate correctness scores for each sample, resulting
+in three individual scores: 𝑠1,𝑠2, and 𝑠3, corresponding to 𝑃1,𝑃2, and 𝑃3, respectively.
+Score Ensembling. To generate the final score for each sample, we aggregate the individual scores
+from the team members using a simple averaging ensembling strategy. The final predicted score ˆ𝑠
+is computed as: ˆ𝑠=𝑠1+𝑠2+𝑠3
+3.
+Mapping Score to Target Scale. The predicted score ˆ𝑠is initially on a 0–100 scale. However, human-
+annotated scores in different datasets may use different scales (e.g., 1–5). To ensure compatibility
+with the evaluation criteria, we apply a linear transformation [ 5]. For example, for datasets where
+the human-annotated scores follow a 1–5 scale, we map the predicted score as follows: E(𝑥,𝑦, 𝑟)=
+ˆ𝑠
+100×4+1. This transformation ensures that the predicted scores align with the target scale of each
+dataset, andE(𝑥,𝑦, 𝑟)is the final correctness score produced by our SWE-Judge.
+4 EXPERIMENTAL SETUP
+In this section, we introduce the datasets used in our experiments, the baseline methods for
+comparison, and the evaluation methodology to assess the effectiveness of our proposed metric.
+We also outline the implementation details and define the key research questions.
+4.1 Datasets
+We evaluate SWE-Judge on three popular SE tasks: code generation, automated program repair,
+and code summarization. The primary goal is to assess how well SWE-Judge’s results align with
+human evaluation results. Therefore, we have selected evaluation datasets that include human
+evaluation scores. The selected datasets are:
+•CoNaLa [36] is a Python Code Generation benchmark consisting of 472 tasks sourced from
+StackOverflow. We selected CoNaLa because Evtikhiev et al.[ 11] provided human evaluation
+scores for code generated by various automated code generation tools addressing these CoNaLa
+coding problems. Specifically, experienced software developers rated the generated code on a
+scale from 0–4.
+•Card2Code Hearthstone (shortened as Card2Code) [ 19] is a Python Code Generation benchmark
+derived from the collectible trading card game Hearthstone. The dataset contains 665 pairs, each
+consisting of a Hearthstone card description and its corresponding Python code snippet. We
+selected Card2Code Hearthstone due to its inclusion in Evtikhiev et al. ’s[ 11] study, where human
+evaluators rated the generated code on a scale from 0–4.
+•APR-Assess [15] is a human-annotated dataset for Automated Program Repair (APR) , involving
+the generation of patches (i.e., code changes) to fix identified bugs. It consists of 189 patches gen-
+erated by program repair tools, each manually evaluated for correctness. Experienced developers
+rated the quality of these patches on a scale from 0–1.
+, Vol. 1, No. 1, Article . Publication date: May 2025.10 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+•Summary-Assess [29] is a human-annotated dataset for Code Summarization , which focuses on
+generating accurate descriptions for given code snippets. It consists of 1,611 code summaries
+annotated by 226 human developers and is based on a publicly available Java code summarization
+dataset[ 17]. Human annotators evaluate various aspects of each summary, including conciseness,
+fluency, and content adequacy, on a scale from 1 to 5. Since our study focuses on the correctness
+aspect, we use the human evaluation results specifically for content adequacy as the ground
+truth labels.
+In addition to evaluating the alignment with human assessment results, we also examine how
+well SWE-Judge aligns with test case execution outcomes. To this end, we select two popular code
+generation datasets with available test cases: HumanEval-X [ 40], which spans multiple programming
+languages, and APPS [14], which includes more complex and challenging coding tasks.
+•HumanEval-X [40] is a multilingual extension of the widely used code generation benchmark
+HumanEval [ 2]. It consists of 164 introductory coding tasks, each with a natural language
+description, test cases, and a reference solution. For our evaluation, we focus on five programming
+languages: Python, C++, Java, JavaScript, and Go.
+•APPS [14] is a Python code generation benchmark that includes introductory-level, interview-
+level, and competition-level coding tasks collected from code competition websites. We evaluate
+SWE-Judge on 100 sampled competition-level tasks of APPS.
+4.2 Selected Baselines
+Match-based Metrics. We choose 7 popular match-based metrics as baselines. BLEU [25] measures
+the similarity between the generated content and the ground-truth answer by comparing n-gram
+overlaps while applying a penalty for excessively short responses. ROUGE-L [18] measures the simi-
+larity by using the longest common subsequence between the generated code/text and the reference
+code/text. METEOR [1] measures the similarity based on the number of matched tokens. ChrF++ [26]
+measures the similarity by character-level n-gram precision and recall. CodeBLEU [28] enhances
+traditional BLEU by incorporating structural code similarities. RUBY [32] evaluates similarity by
+considering lexical, syntactical, and semantic representations of source code. CrystalBLEU [10] is
+the state-of-the-art match-based metric designed to measure code similarity. It first removes the
+most common n-grams before calculating the BLEU score to better capture meaningful differences
+between the generated content and the ground truth answer.
+Embedding-based Metric. We choose 4 popular embedding-based metrics as baselines. Mover-
+Score [39] evaluates similarity by computing the Earth Mover’s Distance between the generated con-
+tent and the reference answer. It represents both code/texts using token embeddings. BERTScore [38]
+calculates pairwise token similarity between the generated content and the reference answer with
+token representations from a pre-trained model BERT. CodeBERTScore [42] is a state-of-the-art
+embedding-based metric designed for code evaluation, building upon BERTScore with adaptations
+for code-specific tasks. It leverages a fine-tuned CodeBERT model [ 12] to encode both the gen-
+erated and reference code, then calculates a cosine similarity matrix between their embeddings
+to assess semantic alignment. Lastly, for the code summarization task specifically, SIDE [22] is a
+state-of-the-art metric that leverages contrastive learning when calculating cosine similarity.
+LLM-as-judge Metrics. We select two LLM-as-judge metrics as baselines. Vanilla LLM refers to
+the default LLM used with a straightforward prompt, without employing the specialized strategies
+proposed in this work. Specifically, we provide the LLM with a simple instruction:“Please assign
+a correctness score to the given input data.” ICE-Score [45] is the state-of-the-art LLM-as-judge
+method for code evaluation. It extends the recent LLM-as-judge approach for text, G-Eval [ 20],
+, Vol. 1, No. 1, Article . Publication date: May 2025.An LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks 11
+with adaptations for code evaluation. ICE-Score prompts the LLM to generate a correctness score
+based on pre-defined evaluation criteria.
+4.3 Effectiveness Evaluation
+We use two evaluation approaches to assess the effectiveness of SWE-Judge and baselines.
+Statistical Correlations. Prior studies [ 11,45] have employed statistical correlation metrics,
+such as Kendall’s 𝜏coefficient ,Spearman’s 𝑟𝑠, and Pearson’s 𝑟𝑝, as robust methods to measure the
+statistical correlation between evaluation results produced by automatic evaluation metrics and
+the ground truth. Specifically, Kendall’s 𝜏coefficient [ 4] measures the ordinal association between
+two data, Spearman 𝑟𝑠[8] is a measure of rank correlation, and Pearson’s 𝑟𝑝[6] is a measure of
+linear correlation. In this work, we adopt those three correlation scores to evaluate SWE-Judge
+on all studied tasks and datasets. For ease of comparing different methods, we also calculate the
+averaged correlation score by averaging the three kinds of correlations above.
+Statistical Agreements. We also evaluate the statistical agreement between our tool’s results and
+human evaluation scores. Specifically, we use Cohen’s Kappa score [3], a statistical measure that
+assesses the agreement between two raters who independently classify items into categories.
+4.4 Implementation Details
+We evaluate the effectiveness of SWE-Judge using the OpenAI GPT-4o mini model (i.e., gpt-4o-
+mini-2024-07-18 ) [23] as the backbone. We selected the GPT-4o mini model due to its lightweight,
+fast, and cost-effective nature, providing a more affordable alternative compared to the OpenAI
+GPT-3.5, GPT-4, GPT-4o, o1, o3, and GPT-4.5 models [ 24]. We set the temperature to 0 to reduce
+the impact of randomness in the LLM on the results.
+4.5 Research Questions
+Our work aims to mainly answer three Research Questions (RQs).
+•RQ1: How well does SWE-Judge correlate with human judgment compared to baseline
+methods? In RQ1, we investigate whether SWE-Judge generates evaluation results that more
+closely correlate with human judgment compared to baseline evaluation metrics.
+•RQ2: How does the agreement between SWE-Judge and human evaluators compare to
+the agreement among humans? In RQ2, we quantify the gap between human-tool agreement
+and human-human agreement to assess how closely SWE-Judge can replace human evaluators.
+•RQ3: How do the key design components of SWE-Judge impact its effectiveness? We
+conduct an ablation study to assess the contributions of the main modules within SWE-Judge.
+5 EXPERIMENTAL RESULTS
+In this section, we present experimental results and answers to each research question.
+5.1 RQ1: Correlation with Human Scores
+In this RQ, we evaluate the correlation between SWE-Judge ’s scores and human-annotated scores.
+Table 1 shows how well SWE-Judge ’s scores correlate with human judgments across four human-
+annotated datasets. For the results of each dataset, the first three columns report statistical correla-
+tion metrics: Kendall’s 𝜏, Spearman’s 𝑟𝑠, and Pearson’s 𝑟𝑝, respectively.
+SWE-Judge achieves the highest alignment with human evaluations, consistently and
+significantly outperforming all baseline methods. As shown in Table 1, on the CoNaLa dataset,
+SWE-Judge surpasses all baselines by 27.1%–159.1%, based on the average of three statistical
+correlation metrics. On the Card2Code dataset, it demonstrates gains between 5.9% and 63.8%, while
+, Vol. 1, No. 1, Article . Publication date: May 2025.12 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+Table 1. Experimental results for correlation with human scores. The highest correlation is highlighted in
+bold, and the second-highest is underlined.
+CoNaLa Card2Code APR-Assess Summary-Assess
+Metrics 𝜏 𝑟 𝑝 𝑟𝑠 𝜏 𝑟 𝑝 𝑟𝑠 𝜏 𝑟 𝑝 𝑟𝑠 𝜏 𝑟 𝑝 𝑟𝑠
+Existing Metrics
+BLEU 29.3 37.0 32.5 46.9 56.5 55.1 24.6 28.6 30.0 13.5 15.2 15.5
+ROUGE-L 44.1 54.2 51.1 58.3 64.1 65.3 21.2 25.8 25.9 17.7 21.1 21.9
+METEOR 38.0 47.1 44.4 68.8 75.1 76.9 39.6 48.2 48.3 17.9 21.1 22.1
+ChrF++ 47.4 55.3 54.5 61.0 66.3 67.8 23.8 28.1 29.1 19.2 21.4 23.4
+CodeBLEU 22.6 28.9 25.5 41.8 52.8 49.3 20.7 25.8 25.3 13.5 15.9 16.2
+RUBY 36.6 47.9 43.1 61.7 65.0 67.9 12.1 13.1 14.7 17.1 19.7 21.1
+CrystalBLEU 26.6 32.9 29.5 42.2 53.5 49.0 28.5 33.1 34.8 13.0 14.9 14.8
+MoverScore 39.9 46.9 44.0 65.1 78.0 79.5 18.6 23.0 22.7 16.0 17.8 18.5
+BERTScore 43.7 48.5 48.0 55.9 69.2 69.6 0.7 2.7 0.8 21.8 24.2 24.1
+CodeBERTScore 42.1 46.7 46.6 58.0 68.4 72.5 7.0 7.7 8.6 15.1 16.9 17.2
+SIDE - - - - - - - - - 23.5 27.4 27.8
+Vanilla LLM 42.4 15.7 49.0 66.4 77.6 75.0 34.7 38.6 36.3 31.0 36.6 36.7
+ICE-Score (SOTA) 59.3 30.4 66.2 58.8 59.2 66.7 42.1 25.1 45.0 30.2 34.8 36.1
+Our LLM-as-Ensemble-Judge Metric
+SWE-Judge 60.3 71.2 68.3 70.4 83.8 81.7 77.5 77.5 77.5 35.7 42.9 42.4
+w/o Team Selection 57.8 66.4 64.8 69.8 85.4 83.0 61.0 61.0 61.0 30.3 36.9 35.6
+w/o Team & Agents 42.4 15.7 49.0 66.4 77.6 75.0 34.7 38.6 36.3 31.0 36.6 36.7
+on APR-Asses, improvements exceed 70.7%. For the Summary-Assess dataset, SWE-Judge again
+leads with gains from 15.8% to 183.8% on average. Furthermore, SWE-Judge shows generalizability
+across diverse software artifacts: code changes in APR-Assess, code snippets in CoNaLa and
+Card2Code, and natural language descriptions in Summary-Assess. In all cases, SWE-Judge achieves
+the highest correlation with human scores, consistently outperforming all the others
+SWE-Judge achieves strong alignment with human judgments on code generation and
+automated program repair datasets. For code generation, SWE-Judge achieves high correlations
+on the CoNaLa dataset, with Kendall’s 𝜏= 60.3, Spearman’s 𝑟𝑝= 71.2, and Pearson’s 𝑟𝑠= 68.3. On
+the Card2Code code generation dataset, the scores are even higher: Kendall’s 𝜏= 70.4, Spearman’s
+𝑟𝑝= 83.8, and Pearson’s 𝑟𝑠= 81.7. For automated program repair, SWE-Judge demonstrates even
+stronger alignment on the APR-Assess dataset, reaching 77.5 across all three metrics. Although
+SWE-Judge ’s performance on the code summarization dataset (Summary-Assess) is relatively
+lower compared to other datasets, it still significantly outperforms competing methods.
+Answer to RQ1 :SWE-Judge achieves the highest alignment with human evaluations,
+consistently and significantly outperforming all baseline methods by 5.9%–183.8% across
+four human-annotated datasets. These datasets cover three popular SE tasks, namely code
+generation, automated program repair, and code summarization, and include three distinct
+types of software artifacts.
+5.2 RQ2: Human-Tool Agreement V.S. Human-Human Agreement
+In RQ2, we evaluate how closely SWE-Judge aligns with individual human annotators compared to
+how well humans agree with each other.
+Setup. It is important to note that the datasets we study, i.e., CoNaLa, Card2Code, APR-Assess, and
+Summary-Assess, are all annotated by multiple human developers. In RQ1, we used the aggregated
+, Vol. 1, No. 1, Article . Publication date: May 2025.An LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks 13
+Fig. 4. Experimental results for agreement between human developers (highlighted in blue) and agreement
+between SWE-Judge and humans (highlighted in blue).
+human score as the ground truth. This score is obtained by combining the individual ratings
+from different annotators. For example, in the CoNaLa dataset, Evtikhiev et al. [ 11] adopted the
+M-MSR algorithm [ 21] to aggregate multiple human grades into a single aggregated human score.
+In contrast, RQ2 uses individual human annotations as the ground truth to evaluate SWE-Judge . Our
+objective is to measure the gap between the agreement levels of SWE-Judge with human annotators
+(human-tool agreement) and the agreement among human annotators themselves (human-human
+agreement). If its agreement with individual annotators matches the level of agreement among
+humans themselves, it indicates that SWE-Judge could serve as a reliable surrogate for human
+evaluation.
+Specifically, we group human annotators into pairs and compute Cohen’s Kappa [ 3] scores to
+quantify their agreement levels. For each dataset, we report:
+•Min Human–Human: the lowest agreement score observed among all human annotator pairs;
+•Max Human–Human: the highest agreement score observed among all annotator pairs;
+•Average Human–Human: the mean agreement across all annotator pairs.
+Additionally, we pair SWE-Judge with each human annotator and compute the average Cohen’s
+Kappa score on all human-tool pairs, denoted as Average Human–Tool. This metric reflects the
+overall agreement between SWE-Judge and individual human annotators. In Figure 4, we highlight
+the Average Human–Tool score in red for visual clarity.
+Results. Figure 4 presents the comparison between human–tool and human–human agreement
+across the four human-annotated datasets.
+SWE-Judge achieves agreement levels with human annotators that, on average, are
+comparable to the agreement observed among human annotators themselves on the code
+, Vol. 1, No. 1, Article . Publication date: May 2025.14 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+generation and automated program repair tasks. For code generation, SWE-Judge achieves an
+average Cohen’s Kappa score of 24.1 on the CoNaLa dataset, slightly below the human–human
+average of 25.7. On the Card2Code dataset, SWE-Judge performs even better, with a score of
+35.1 compared to the human–human average of 30.5. For automated program repair, SWE-Judge
+attains a Cohen’s Kappa score of 66.7, surpassing the human–human agreement average of 60.1.
+These results suggest that SWE-Judge has the potential to serve as a reliable substitute for human
+evaluators in evaluating both code generation and automated program repair tasks.
+However, in the code summarization task, there remains a substantial gap between the
+agreement of SWE-Judge and human annotators compared to human–human agreement.
+On the Summary-Assess dataset, SWE-Judge achieves an average Cohen’s Kappa score of 4.6, which
+is significantly lower than the human–human average of 15.5. This suggests that SWE-Judge is not
+yet a viable replacement for human evaluators in the context of code summarization. Nonetheless,
+as shown in Table 1, SWE-Judge remains the best-performing automatic evaluation metric in the
+code summarization task, highlighting the progress made through our approach.
+Answer to RQ2 : On average, SWE-Judge achieves agreement levels with human annotators
+that are comparable to those observed among human annotators themselves in code gener-
+ation and automated program repair tasks. This suggests that SWE-Judge can be reliably
+used as a substitute for human evaluators in these tasks. However, a gap remains in using
+SWE-Judge to replace human evaluators in the code summarization task.
+5.3 RQ3: Ablation Study
+In this RQ, we examine the contribution of two key components in SWE-Judge : 1) the Strategy
+Design, and 2) the Dynamic Team Selection. Table 1 presents the results of the ablation study in the
+last two rows. The row labeled as “wo Team Selection” shows the performance of SWE-Judge without
+the team selection mechanism, where all strategies are combined through simple ensembling. The
+row labeled “wo Team & Strategy” presents SWE-Judge ’s performance when both the team selection
+mechanism and custom-designed strategies are removed, relying solely on an LLM with a basic
+prompt: “Please assign a correctness score to the given input data.”
+All key designs are essential for achieving the best effectiveness. Based on the results
+shown in Table 1, we observe that removing any key design in SWE-Judge leads to a reduction in
+statistical correlation scores. Specifically, without the team selection mechanism, the variant of
+SWE-Judge shows drops of 5.4%, 21.3%, and 14.9% in the average correlation scores for CoLaNa,
+APR-assess, and Summary-assess, respectively. While the lack of team selection does not negatively
+impact performance on the Card2Code dataset, the overall average performance across all four
+datasets decreases by 9.6%. Furthermore, removing both the team selection mechanism and the
+custom-designed strategies leads to drops of 46.4%, 7.1%, 52.8%, and 13.6% in the average correlation
+scores for CoLaNa, Card2Code, APR-assess, and Summary-assess, respectively. These results
+underscore the critical role of each component in SWE-Judge’s effectiveness.
+Answer to RQ3 : The key designs are essential for the effectiveness of SWE-Judge. Removing
+these designs results in performance drops of 46.4%, 7.1%, 52.8%, and 13.6% in the average
+correlation scores for CoLaNa, Card2Code, APR-assess, and Summary-assess, respectively.
+, Vol. 1, No. 1, Article . Publication date: May 2025.An LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks 15
+Table 2. Experimental results for correlation with test case execution outcomes. The highest correlation is
+highlighted in bold, and the second-highest is underlined.
+HumanEval-X [40] APPS
+Python Java C++ JavaScript Go [14]
+Metrics 𝑎𝑣𝑔-𝑐𝑜𝑟 𝑎𝑣𝑔 -𝑐𝑜𝑟 𝑎𝑣𝑔 -𝑐𝑜𝑟 𝑎𝑣𝑔 -𝑐𝑜𝑟 𝑎𝑣𝑔 -𝑐𝑜𝑟 𝑎𝑣𝑔-𝑐𝑜𝑟
+BLEU 53.7 32.1 44.5 37.4 37.0 7.2
+ROUGE-L 52.7 32.9 41.9 40.1 34.3 7.4
+METEOR 58.2 36.6 42.8 43.4 35.1 10.9
+ChrF++ 53.6 36.2 44.3 43.0 34.2 6.6
+CodeBLEU 56.6 41.3 42.7 45.4 34.7 15.6
+RUBY 47.6 34.3 41.4 39.6 34.7 14.1
+CrystalBLEU 43.9 30.1 37.3 36.9 34.3 9.7
+MoverScore 48.0 34.0 39.6 37.0 40.6 4.5
+BERTScore 48.7 32.3 39.6 38.3 24.8 9.6
+CodeBERTScore 51.4 36.6 44.0 38.3 36.3 2.4
+Vanilla LLM 61.8 41.2 49.6 61.6 33.4 13.9
+ICE-Score (SOTA) 70.3 42.7 39.4 59.8 34.8 15.2
+SWE-Judge 75.4 62.6 68.8 61.7 57.8 43.0
+6 DISCUSSION
+6.1 Generalizability to Test Case Execution Outcomes
+In this subsection, we examine the generalizability of SWE-Judge to labels based on test execution,
+evaluating how well SWE-Judge’s scores align with the execution outcomes, where 0 indicates test
+failure while 1 represents test success. To this end, we select two popular code generation datasets
+that include accompanying test cases: HumanEval-X [ 40], which spans multiple programming
+languages, and APPS [ 14], which provides more complex and challenging coding tasks. Table 2
+presents the average correlation between SWE-Judge ’s evaluation scores and test case execution
+results on both datasets.
+Table 2 demonstrates that SWE-Judge achieves the highest average correlation with test case
+execution outcomes, consistently and significantly outperforming all baseline methods. On the
+HumanEval-X dataset, SWE-Judge outperforms all baselines by an average margin of 32.1% to
+78.8% across all programming languages. On the APPS dataset, SWE-Judge achieves even greater
+improvements, surpassing all baselines by 175.6% to 1691.7% in terms of average correlation scores.
+These results confirm SWE-Judge ’s generalizability from human-annotated scores to test case-based
+execution outcomes.
+6.2 Case Study
+Figure 5 presents selected examples of generated software artifacts, along with their corresponding
+scores from top-performing automatic evaluation metrics and human annotators. The figure
+includes evaluations of generated code from the CoNaLa dataset and code summaries from the
+Summary-Assess dataset. Those human scores range from 0 (incorrect) to 4 (fully correct). From
+these examples, we identify three main issues with existing metrics. First, BERTScore, MoverScore,
+and CodeBERTScore tend to assign high scores across most examples, while ChrF++ and CodeBLEU
+tend to give relatively low scores. This reduces score variation and makes it harder to distinguish
+correct data from incorrect ones, potentially misleading the users. Second, except for ICE-Score
+and the Vanilla LLM method, the other baselines fail to produce scores that fall within the same
+range as human annotations, which makes direct comparison challenging. Third, some baselines
+mistakenly assign higher or equal scores to incorrect data compared to correct ones. For example,
+in Case I of Figure 5, Vanilla LLM, BERTScore, CodeBERTScore, ChrF++, CodeBLEU, and RUBY
+, Vol. 1, No. 1, Article . Publication date: May 2025.16 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+Input NL count the occurrences of item "b" in list `l`
+Reference Code l.count('b')
+Generated Code sum(a == 'b' for a in l)
+Input NL get the type of `i`
+Reference Code type(i)
+Generated Code isinstance(i,i)
+Human Score: 4
+SWE-Judge: 4
+Vanilla LLM: 0
+ICE-Score: 2
+BertScore: 83.8Moverscore: 63.8
+CodeBertScore: 69.1
+Chrf++: 11.3
+CodeBleu: 25.0
+Ruby: 18.2
+Human Score: 0
+SWE-Judge: 0
+Vanilla LLM: 1
+ICE-Score: 1
+BertScore: 85.2Moverscore: 61.0
+CodeBertScore: 82.3
+Chrf++: 21.0
+CodeBleu: 25.0
+Ruby: 77.6
+(a) Case I: NL to Code (from CoNaLa)
+Input
+Codepublic void setTransactionIsolation(int level) {
+transIsolation = level; 
+}
+Reference 
+Summaryset the level of the transaction isolation for the 
+current database
+Generated 
+Summarysets the transaction isolation level
+Input
+Codeprotected void die() {
+        assert !initialized();
+        playerDies = true;
+}
+Reference 
+Summaryinvoke this method while precomputing the effects 
+of this move if it is
+Generated 
+Summarythis method is called when the user has been 
+createdHuman Score: 4
+SWE-Judge: 4
+Vanilla LLM: 3
+ICE-Score: 3
+BertScore: 93.8
+Moverscore: 68.9
+CodeBertScore: 84.7
+Chrf++: 44.4
+CodeBleu: 29.5
+Ruby: 27.3
+Human Score: 0
+SWE-Judge: 0
+Vanilla LLM: 1
+ICE-Score: 1
+BertScore: 86.7
+Moverscore: 62.3
+CodeBertScore: 73.9
+Chrf++: 23.3
+CodeBleu: 27.0
+Ruby: 15.4
+(b) Case II: Code to NL (from Summary-Assess)
+Fig. 5. Case study comparing different automated evaluation metric approaches. Human-assigned scores
+range from 0 (completely incorrect) to 4 (completely correct).
+all give higher or equal scores to flawed code. In contrast, SWE-Judge does not suffer from those
+issues. Its scores are more consistent with human judgments and better reflect the correctness of
+the data under evaluation.
+6.3 Threats to Validity
+Our findings are limited to the specific SE datasets examined in this study and may not generalize
+to all SE datasets. To mitigate this limitation, we selected three widely adopted datasets—CoNaLa,
+Card2Code, and Summary-Assess—and introduced APR-Assess, a human-annotated dataset not
+previously studied in this context. These benchmarks collectively span three major SE tasks: code
+generation, automated program repair, and code summarization. They also cover diverse software
+artifacts, including source code, code changes, and code comments. Moreover, SWE-Judge uses the
+OpenAI GPT-4o mini model for its cost-effectiveness, though its performance may improve when
+more advanced LLMs (e.g., GPT-4.5) are used. Users may choose a more advanced and inevitably
+more expensive LLM if they aim to achieve even higher performance.
+7 RELATED WORK
+Evaluating the correctness of software artifacts generated by automated tools remains a major
+challenge. While human evaluation is accurate, it is labor-intensive and not scalable. Test-based
+, Vol. 1, No. 1, Article . Publication date: May 2025.An LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks 17
+metrics like pass@k [ 2] require manually written test cases, making them also impractical for
+large-scale use. To address this, many automatic evaluation metrics have been adopted in SE
+tasks. Several are adapted from natural language processing (NLP), such as BLEU [ 25], ROUGE-
+L [18], METEOR [ 1], ChrF++ [ 26], and BERTScore [ 38]. Beyond these, SE-specific metrics have been
+proposed to better capture the characteristics of SE data. Ren et al. introduced CodeBLEU [ 28], which
+extends BLEU by incorporating code syntax and structure. Tran et al. proposed RUBY [ 32], which
+measures similarity using lexical, syntactic, and semantic representations. Eghbali et al. developed
+CrystalBLEU [ 10], which improves BLEU by filtering out common n-grams to focus on more
+informative patterns. Zhou et al. proposed CodeBERTScore [ 42], which adapts BERTScore to code
+by leveraging a fine-tuned CodeBERT model to compute semantic similarity between generated and
+reference code. Mastropaolo et al. introduced SIDE [ 22], a metric that applies contrastive learning
+to enhance cosine similarity-based evaluation on code summaries. Recently, Zhuo et al. proposed
+ICE-Score[ 45], which prompts an LLM to assign a correctness score (0–4) based on predefined
+criteria, enabling more accurate evaluation aligned with human judgment. Additionally, Evtikhiev
+et al. [ 11] empirically evaluated six metrics—BLEU, ROUGE-L, METEOR, ChrF, CodeBLEU, and
+RUBY—against human judgments and found significant misalignment, emphasizing the need for
+more accurate and reliable automatic metrics.
+In contrast to existing SE-specific metrics, SWE-Judge (1) leverages LLMs to better capture the
+semantics of software artifacts, (2) introduces diverse evaluation strategies to infer correctness, and
+(3) incorporates a lightweight team selection process to identify effective strategy combinations,
+thereby enhancing the accuracy and reliability of automatic correctness evaluation. Moreover,
+while prior metrics are typically evaluated on a single SE task (e.g., code generation), our study
+demonstrates the effectiveness of SWE-Judge across three popular tasks: code generation, automated
+program repair, and code summarization.
+Additionally, several concurrent studies investigate similar topics in parallel. Wang et al. [ 33]
+empirically investigate LLM-as-a-judge methods from NLP for evaluating SE tasks, focusing on
+consistency and readability aspects. In contrast, our study introduces a new SE-specific metric
+that accurately reflects the functional correctness of generated software artifacts. Tong et al. [ 31]
+proposed CODEJUDGE, which uses LLMs to evaluate the functional correctness of generated code
+in code generation. Dong et al. [ 9] proposed CodeScore, a method that estimates the functional
+correctness of generated code by evaluating its pass ratio and executability. Unlike their approaches,
+we propose a team selection mechanism and diverse prompting strategies to infer functional
+correctness, while also evaluating our tool across three popular tasks. CodeUltraFeedback [ 34]
+assesses LLMs’ alignment with human evaluations from five non-functional code aspects, such
+as coding style. In contrast, our study focuses on proposing a new, effective SE-specific metric to
+evaluate the functional correctness of software artifacts.
+8 CONCLUSION AND FUTURE WORK
+In this paper, we present SWE-Judge, the first LLM-as-Ensemble-Judge metric specifically designed
+to evaluate the correctness of generated software artifacts. SWE-Judge employs a multi-evaluator
+framework to ensure accurate and reliable evaluations. It defines five distinct evaluation strategies
+and introduces a dynamic team selection mechanism that chooses the most appropriate subset of
+strategies. Our experiments show that SWE-Judge achieves significantly and consistently higher cor-
+relations with human judgments—ranging from 5.9% to 183.8% improvement on average, compared
+to existing automated evaluation metrics. Furthermore, SWE-Judge reaches agreement levels with
+human annotators that are comparable to inter-annotator agreement in tasks like code generation
+and automated program repair.
+, Vol. 1, No. 1, Article . Publication date: May 2025.18 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+In future work, we plan to extend SWE-Judge beyond correctness evaluation to cover additional
+dimensions, such as assessing non-functional properties of generated software artifacts.
+REFERENCES
+[1]Satanjeev Banerjee and Alon Lavie. 2005. METEOR: An Automatic Metric for MT Evaluation with Improved Correlation
+with Human Judgments. In Proceedings of the Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine
+Translation and/or Summarization@ACL 2005, Ann Arbor, Michigan, USA, June 29, 2005 . Association for Computational
+Linguistics, 65–72.
+[2]Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Pondé de Oliveira Pinto, Jared Kaplan, Harri Edwards,
+Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri, Gretchen Krueger, Michael Petrov, Heidy Khlaaf,
+Girish Sastry, Pamela Mishkin, Brooke Chan, Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz Kaiser,
+Mohammad Bavarian, Clemens Winter, Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias Plappert,
+Fotios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex Nichol, Alex Paino, Nikolas Tezak,
+Jie Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain, William Saunders, Christopher Hesse, Andrew N. Carr, Jan
+Leike, Joshua Achiam, Vedant Misra, Evan Morikawa, Alec Radford, Matthew Knight, Miles Brundage, Mira Murati,
+Katie Mayer, Peter Welinder, Bob McGrew, Dario Amodei, Sam McCandlish, Ilya Sutskever, and Wojciech Zaremba.
+2021. Evaluating Large Language Models Trained on Code. CoRR abs/2107.03374 (2021).
+[3]Wikipedia contributors. 2025. Cohen’s kappa. https://en.wikipedia.org/wiki/Cohen%27s_kappa#Interpreting_
+magnitude Accessed: 2025-03-25.
+[4]Wikipedia contributors. 2025. Kendall rank correlation coefficient. https://en.wikipedia.org/wiki/Kendall_rank_
+correlation_coefficient Accessed: 2025-03-25.
+[5] Wikipedia contributors. 2025. Linear map. https://en.wikipedia.org/wiki/Linear_map Accessed: 2025-03-25.
+[6]Wikipedia contributors. 2025. Pearson correlation coefficient. https://en.wikipedia.org/wiki/Pearson_correlation_
+coefficient Accessed: 2025-03-25.
+[7]Wikipedia contributors. 2025. Scholarly peer review. https://en.wikipedia.org/wiki/Scholarly_peer_review Accessed:
+2025-03-25.
+[8]Wikipedia contributors. 2025. Spearman’s rank correlation coefficient. https://en.wikipedia.org/wiki/Spearman%27s_
+rank_correlation_coefficient Accessed: 2025-03-25.
+[9]Yihong Dong, Jiazheng Ding, Xue Jiang, Ge Li, Zhuo Li, and Zhi Jin. 2025. Codescore: Evaluating code generation by
+learning code execution. ACM Transactions on Software Engineering and Methodology 34, 3 (2025), 1–22.
+[10] Aryaz Eghbali and Michael Pradel. 2022. CrystalBLEU: Precisely and Efficiently Measuring the Similarity of Code. In
+37th IEEE/ACM International Conference on Automated Software Engineering, ASE 2022, Rochester, MI, USA, October
+10-14, 2022 . ACM, 28:1–28:12.
+[11] Mikhail Evtikhiev, Egor Bogomolov, Yaroslav Sokolov, and Timofey Bryksin. 2023. Out of the BLEU: How should we
+assess quality of the Code Generation models? J. Syst. Softw. 203 (2023), 111741. https://doi.org/10.1016/J.JSS.2023.111741
+[12] Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xiaocheng Feng, Ming Gong, Linjun Shou, Bing Qin, Ting Liu,
+Daxin Jiang, and Ming Zhou. 2020. CodeBERT: A Pre-Trained Model for Programming and Natural Languages. In
+Findings of the Association for Computational Linguistics: EMNLP 2020, Online Event, 16-20 November 2020 (Findings of
+ACL, Vol. EMNLP 2020) . Association for Computational Linguistics, 1536–1547.
+[13] Qi Guo, Junming Cao, Xiaofei Xie, Shangqing Liu, Xiaohong Li, Bihuan Chen, and Xin Peng. 2024. Exploring the
+Potential of ChatGPT in Automated Code Refinement: An Empirical Study. In Proceedings of the 46th IEEE/ACM
+International Conference on Software Engineering, ICSE 2024, Lisbon, Portugal, April 14-20, 2024 . ACM, 34:1–34:13.
+https://doi.org/10.1145/3597503.3623306
+[14] Dan Hendrycks, Steven Basart, Saurav Kadavath, Mantas Mazeika, Akul Arora, Ethan Guo, Collin Burns, Samir
+Puranik, Horace He, Dawn Song, and Jacob Steinhardt. 2021. Measuring Coding Challenge Competence With APPS.
+InProceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks 1, NeurIPS Datasets and
+Benchmarks 2021, December 2021, virtual , Joaquin Vanschoren and Sai-Kit Yeung (Eds.). https://datasets-benchmarks-
+proceedings.neurips.cc/paper/2021/hash/c24cd76e1ce41366a4bbe8a49b02a028-Abstract-round2.html
+[15] Xuan-Bach Dinh Le, Lingfeng Bao, David Lo, Xin Xia, Shanping Li, and Corina S. Pasareanu. 2019. On reliability of
+patch correctness assessment. In Proceedings of the 41st International Conference on Software Engineering, ICSE 2019,
+Montreal, QC, Canada, May 25-31, 2019 , Joanne M. Atlee, Tevfik Bultan, and Jon Whittle (Eds.). IEEE / ACM, 524–535.
+https://doi.org/10.1109/ICSE.2019.00064
+[16] Xuan-Bach Dinh Le, Ferdian Thung, David Lo, and Claire Le Goues. 2018. Overfitting in semantics-based automated
+program repair. Empir. Softw. Eng. 23, 5 (2018), 3007–3033. https://doi.org/10.1007/S10664-017-9577-2
+[17] Alexander LeClair and Collin McMillan. 2019. Recommendations for datasets for source code summarization. arXiv
+preprint arXiv:1904.02660 (2019).
+, Vol. 1, No. 1, Article . Publication date: May 2025.An LLM-as-Judge Metric for Bridging the Gap with Human Evaluation in SE Tasks 19
+[18] Chin-Yew Lin. 2004. Rouge: A package for automatic evaluation of summaries. In Text summarization branches out .
+74–81.
+[19] Wang Ling, Phil Blunsom, Edward Grefenstette, Karl Moritz Hermann, Tomás Kociský, Fumin Wang, and Andrew W.
+Senior. 2016. Latent Predictor Networks for Code Generation. In Proceedings of the 54th Annual Meeting of the
+Association for Computational Linguistics, ACL 2016, August 7-12, 2016, Berlin, Germany, Volume 1: Long Papers . The
+Association for Computer Linguistics. https://doi.org/10.18653/V1/P16-1057
+[20] Yang Liu, Dan Iter, Yichong Xu, Shuohang Wang, Ruochen Xu, and Chenguang Zhu. 2023. G-Eval: NLG Evaluation using
+Gpt-4 with Better Human Alignment. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language
+Processing, EMNLP 2023, Singapore, December 6-10, 2023 . Association for Computational Linguistics, 2511–2522.
+[21] Qianqian Ma and Alex Olshevsky. 2020. Adversarial crowdsourcing through robust rank-one matrix completion.
+Advances in Neural Information Processing Systems 33 (2020), 21841–21852.
+[22] Antonio Mastropaolo, Matteo Ciniselli, Massimiliano Di Penta, and Gabriele Bavota. 2024. Evaluating Code Sum-
+marization Techniques: A New Metric and an Empirical Characterization. In Proceedings of the 46th IEEE/ACM
+International Conference on Software Engineering, ICSE 2024, Lisbon, Portugal, April 14-20, 2024 . ACM, 218:1–218:13.
+https://doi.org/10.1145/3597503.3639174
+[23] OpenAI. 2024. GPT-4o Mini. https://platform.openai.com/docs/models/gpt-4o-mini Accessed: 2024-03-25.
+[24] OpenAI. 2024. Pricing. https://platform.openai.com/docs/pricing Accessed: 2024-03-25.
+[25] Kishore Papineni, Salim Roukos, Todd Ward, and Wei-Jing Zhu. 2002. Bleu: a Method for Automatic Evaluation of
+Machine Translation. In Proceedings of the 40th Annual Meeting of the Association for Computational Linguistics, July
+6-12, 2002, Philadelphia, PA, USA . ACL, 311–318. https://doi.org/10.3115/1073083.1073135
+[26] Maja Popovic. 2017. chrF++: words helping character n-grams. In Proceedings of the Second Conference on Machine
+Translation, WMT 2017, Copenhagen, Denmark, September 7-8, 2017 . Association for Computational Linguistics, 612–618.
+[27] Shuo Ren, Daya Guo, Shuai Lu, Long Zhou, Shujie Liu, Duyu Tang, Neel Sundaresan, Ming Zhou, Ambrosio Blanco,
+and Shuai Ma. 2020. CodeBLEU: a Method for Automatic Evaluation of Code Synthesis. CoRR abs/2009.10297 (2020).
+arXiv:2009.10297 https://arxiv.org/abs/2009.10297
+[28] Shuo Ren, Daya Guo, Shuai Lu, Long Zhou, Shujie Liu, Duyu Tang, Neel Sundaresan, Ming Zhou, Ambrosio Blanco,
+and Shuai Ma. 2020. CodeBLEU: a Method for Automatic Evaluation of Code Synthesis. CoRR abs/2009.10297 (2020).
+arXiv:2009.10297 https://arxiv.org/abs/2009.10297
+[29] Devjeet Roy, Sarah Fakhoury, and Venera Arnaoudova. 2021. Reassessing automatic evaluation metrics for code
+summarization tasks. In ESEC/FSE ’21: 29th ACM Joint European Software Engineering Conference and Symposium on the
+Foundations of Software Engineering, Athens, Greece, August 23-28, 2021 , Diomidis Spinellis, Georgios Gousios, Marsha
+Chechik, and Massimiliano Di Penta (Eds.). ACM, 1105–1116. https://doi.org/10.1145/3468264.3468588
+[30] Weisong Sun, Chunrong Fang, Yuchen Chen, Quanjun Zhang, Guanhong Tao, Yudu You, Tingxu Han, Yifei Ge, Yuling
+Hu, Bin Luo, and Zhenyu Chen. 2024. An Extractive-and-Abstractive Framework for Source Code Summarization.
+ACM Trans. Softw. Eng. Methodol. 33, 3 (2024), 75:1–75:39. https://doi.org/10.1145/3632742
+[31] Weixi Tong and Tianyi Zhang. 2024. CodeJudge: Evaluating Code Generation with Large Language Models. arXiv
+preprint arXiv:2410.02184 (2024).
+[32] Ngoc M. Tran, Hieu Tran, Son Nguyen, Hoan Nguyen, and Tien N. Nguyen. 2019. Does BLEU score work for code
+migration?. In Proceedings of the 27th International Conference on Program Comprehension, ICPC 2019, Montreal, QC,
+Canada, May 25-31, 2019 , Yann-Gaël Guéhéneuc, Foutse Khomh, and Federica Sarro (Eds.). IEEE / ACM, 165–176.
+https://doi.org/10.1109/ICPC.2019.00034
+[33] Ruiqi Wang, Jiyu Guo, Cuiyun Gao, Guodong Fan, Chun Yong Chong, and Xin Xia. 2025. Can LLMs Replace Human
+Evaluators? An Empirical Study of LLM-as-a-Judge in Software Engineering. arXiv preprint arXiv:2502.06193 (2025).
+[34] Martin Weyssow, Aton Kamanda, Xin Zhou, and Houari Sahraoui. 2024. Codeultrafeedback: An llm-as-a-judge dataset
+for aligning large language models to coding preferences. arXiv preprint arXiv:2403.09032 (2024).
+[35] Martin Weyssow, Xin Zhou, Kisub Kim, David Lo, and Houari A. Sahraoui. 2023. Exploring Parameter-Efficient
+Fine-Tuning Techniques for Code Generation with Large Language Models. CoRR abs/2308.10462 (2023). https:
+//doi.org/10.48550/ARXIV.2308.10462 arXiv:2308.10462
+[36] Pengcheng Yin, Bowen Deng, Edgar Chen, Bogdan Vasilescu, and Graham Neubig. 2018. Learning to mine aligned
+code and natural language pairs from stack overflow. In Proceedings of the 15th International Conference on Mining
+Software Repositories, MSR 2018, Gothenburg, Sweden, May 28-29, 2018 , Andy Zaidman, Yasutaka Kamei, and Emily Hill
+(Eds.). ACM, 476–486. https://doi.org/10.1145/3196398.3196408
+[37] Tianyi Zhang, Varsha Kishore, Felix Wu, Kilian Q. Weinberger, and Yoav Artzi. 2020. BERTScore: Evaluating Text
+Generation with BERT. In 8th International Conference on Learning Representations, ICLR 2020, Addis Ababa, Ethiopia,
+April 26-30, 2020 . OpenReview.net. https://openreview.net/forum?id=SkeHuCVFDr
+[38] Tianyi Zhang, Varsha Kishore, Felix Wu, Kilian Q. Weinberger, and Yoav Artzi. 2020. BERTScore: Evaluating Text
+Generation with BERT. In 8th International Conference on Learning Representations, ICLR 2020, Addis Ababa, Ethiopia,
+, Vol. 1, No. 1, Article . Publication date: May 2025.20 Xin Zhou, Kisub Kim, Ting Zhang, Martin Weyssow, Luís F. Gomes, Guang Yang, and David Lo
+April 26-30, 2020 .
+[39] Wei Zhao, Maxime Peyrard, Fei Liu, Yang Gao, Christian M. Meyer, and Steffen Eger. 2019. MoverScore: Text Generation
+Evaluating with Contextualized Embeddings and Earth Mover Distance. In Proceedings of the 2019 Conference on
+Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language
+Processing, EMNLP-IJCNLP 2019, Hong Kong, China, November 3-7, 2019 . Association for Computational Linguistics,
+563–578.
+[40] Qinkai Zheng, Xiao Xia, Xu Zou, Yuxiao Dong, Shan Wang, Yufei Xue, Lei Shen, Zihan Wang, Andi Wang, Yang Li,
+Teng Su, Zhilin Yang, and Jie Tang. 2023. CodeGeeX: A Pre-Trained Model for Code Generation with Multilingual
+Benchmarking on HumanEval-X. In Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data
+Mining, KDD 2023, Long Beach, CA, USA, August 6-10, 2023 . ACM, 5673–5684.
+[41] Shuyan Zhou, Uri Alon, Sumit Agarwal, and Graham Neubig. 2023. CodeBERTScore: Evaluating Code Generation
+with Pretrained Models of Code. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language
+Processing, EMNLP 2023, Singapore, December 6-10, 2023 , Houda Bouamor, Juan Pino, and Kalika Bali (Eds.). Association
+for Computational Linguistics, 13921–13937. https://doi.org/10.18653/V1/2023.EMNLP-MAIN.859
+[42] Shuyan Zhou, Uri Alon, Sumit Agarwal, and Graham Neubig. 2023. CodeBERTScore: Evaluating Code Generation
+with Pretrained Models of Code. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language
+Processing, EMNLP 2023, Singapore, December 6-10, 2023 , Houda Bouamor, Juan Pino, and Kalika Bali (Eds.). Association
+for Computational Linguistics, 13921–13937. https://doi.org/10.18653/V1/2023.EMNLP-MAIN.859
+[43] Xin Zhou, Kisub Kim, Bowen Xu, DongGyun Han, Junda He, and David Lo. 2023. Generation-based Code Review Au-
+tomation: How Far Are We? CoRR abs/2303.07221 (2023). https://doi.org/10.48550/ARXIV.2303.07221 arXiv:2303.07221
+[44] Xin Zhou, Bowen Xu, Kisub Kim, DongGyun Han, Hung Huu Nguyen, Thanh Le-Cong, Junda He, Bach Le, and David
+Lo. 2024. Leveraging Large Language Model for Automatic Patch Correctness Assessment. IEEE Trans. Software Eng.
+50, 11 (2024), 2865–2883. https://doi.org/10.1109/TSE.2024.3452252
+[45] Terry Yue Zhuo. 2024. ICE-Score: Instructing Large Language Models to Evaluate Code. In Findings of the Association
+for Computational Linguistics: EACL 2024, St. Julian’s, Malta, March 17-22, 2024 , Yvette Graham and Matthew Purver
+(Eds.). Association for Computational Linguistics, 2232–2242. https://aclanthology.org/2024.findings-eacl.148
+, Vol. 1, No. 1, Article . Publication date: May 2025.

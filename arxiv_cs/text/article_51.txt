@@ -1,0 +1,891 @@
+arXiv:2505.21219v1  [cs.LG]  27 May 2025Addressing Data Quality Decompensation in
+Federated Learning via Dynamic Client Selection
+Qinjun FeiaNuria Rodríguez-Barrosoa, *María Victoria Luzónb
+Zhongliang Zhangc, dFrancisco Herreraa
+aDepartment of Computer Science and Artificial Intelligence, Andalusian Research Institute in Data Science
+and Computational Intelligence (DaSCI), University of Granada, Spain
+bDepartment of Software Engineering, Andalusian Research Institute in Data Science and Computational
+Intelligence (DaSCI), University of Granada, Spain
+cSchool of Management, Hangzhou Dianzi University, China
+dShaanxi Key Laboratory of Information Communication Network and Security, Xi’an University of Posts &
+Telecommunications, China
+Abstract
+In cross-silo Federated Learning (FL), client selection is critical to ensure high
+model performance, yet it remains challenging due to data quality decompensa-
+tion, budget constraints, and incentive compatibility. As training progresses, these
+factors exacerbate client heterogeneity and degrade global performance. Most ex-
+isting approaches treat these challenges in isolation, making jointly optimizing
+multiple factors difficult. To address this, we propose Shapley-Bid Reputation
+Optimized Federated Learning (SBRO-FL), a unified framework integrating dy-
+namic bidding, reputation modeling, and cost-aware selection. Clients submit bids
+based on their perceived data quality, and their contributions are evaluated using
+Shapley values to quantify their marginal impact on the global model. A repu-
+tation system, inspired by prospect theory, captures historical performance while
+penalizing inconsistency. The client selection problem is formulated as a 0-1 inte-
+ger program that maximizes reputation-weighted utility under budget constraints.
+Experiments on FashionMNIST, EMNIST, CIFAR-10, and SVHN datasets show
+that SBRO-FL improves accuracy, convergence speed, and robustness, even in ad-
+versarial and low-bid interference scenarios. Our results highlight the importance
+of balancing data reliability, incentive compatibility, and cost efficiency to enable
+scalable and trustworthy FL deployments.
+Keywords: Federated learning, Reputation-based client selection, Data quality decompensation,
+Incentive mechanism, Client selection, Shapley value
+*Corresponding Author: Nuria Rodríguez-Barroso
+Email: qinjun@correo.ugr.es (Qinjun Fei), rbnuria@ugr.es (Nuria Rodríguez-
+Barroso), luzon@ugr.es (María Victoria Luzón), zzl19860210@126.com (Zhongliang Zhang),
+herrera@decsai.ugr.es (Francisco Herrera)
+Preprint.1 Introduction
+Federated Learning (FL) has emerged as a distributed machine learning paradigm that enables col-
+laborative model training without centralizing data, effectively mitigating privacy concerns and re-
+ducing communication overhead [18, 25]. FL initially gained attention in large-scale cross-device
+settings, such as mobile networks and edge computing, and has since been widely adopted in decen-
+tralized AI applications [1, 3]. Meanwhile, cross-silo FL collaboration continues to evolve, intro-
+ducing additional complexities beyond those encountered in cross-device settings. These challenges,
+including data quality decompensation, budget constraints, and incentive mechanisms, create a dy-
+namic landscape of interacting practical factors, making cross-silo scenarios particularly demanding
+[11, 42].
+Unlike cross-device FL, which involves a large number of resource-constrained devices, cross-silo
+FL typically involves a limited number of organizational clients such as hospitals, financial institu-
+tions, and industrial enterprises that have abundant data and computational resources [31]. How-
+ever, the quality of data from these sources can vary widely. For instance, in healthcare-oriented
+FL, a hospital may inadvertently provide mislabeled patient records due to inconsistent annotation
+practices or human error, while in industrial IoT applications, sensor calibration mismatches across
+factories can inject systematic biases into the global model. Moreover, adversarial behaviors like la-
+bel flipping or model poisoning further distort the training process, increasing the risk of unreliable
+global updates [21, 32, 36]. This variability in data quality introduces a persistent issue referred to
+as data quality decompensation, where the accumulation of unreliable client updates over multiple
+rounds leads to global model instability and performance degradation, despite individual datasets
+remaining unchanged. Consequently, robust mechanisms are required to assess and selectively filter
+clients, ensuring that only high-quality contributions drive model optimization.
+Beyond client selection, another key challenge is incentivizing high-quality clients to participate
+consistently [30]. The value of data is highly task-dependent and as data become increasingly com-
+moditized, clients expect fair compensation [41]. Furthermore, local training incurs resource costs,
+including computation, storage, and communication, which require financial incentives to sustain
+engagement [38]. However, in real-world FL systems with financial incentives, the FL initiator faces
+budget constraints, limiting client compensation. This requires careful budget allocation across data
+valuation, incentive mechanisms, and cost-effective client selection.
+Most client selection strategies in FL primarily focus on optimizing a single aspect, such as maxi-
+mizing convergence speed [20], designing incentive mechanisms [37], or improving communication
+efficiency [29]. Although effective in their respective domains, these approaches often overlook
+the interdependencies between data quality decompensation, incentive compatibility, and budget
+constraints. In practical cross-silo scenarios, a unified framework that coherently integrates these
+dimensions is essential for jointly optimizing data reliability, cost-effectiveness, and equitable par-
+ticipation incentives.
+To address these challenges, we hypothesize that integrating a bidding mechanism with a dynamic
+reputation system can mitigate data quality decompensation while ensuring budget efficiency. How-
+ever, historical reputation alone may not fully capture the reliability of clients, as clients with similar
+scores can exhibit varying stability. To account for this, selection should incorporate risk sensitivity,
+prioritizing clients with consistent contributions and cost-effectiveness. This approach is expected
+to improve the stability of the model and optimize the participation incentives in cross-silo FL.
+This paper proposes Shapley-Bid Reputation Optimized Client Selection for Federated Learning
+(SBRO-FL), a method that integrates reputation-driven bidding with cost-aware optimization. Be-
+fore training, clients submit bid prices based on perceived data quality, aligned with budget con-
+straints set by the FL initiator. SBRO-FL maintains a reputation value to track historical contribu-
+tions, while reputation scores, adjusted through prospect theory, guide selection by accounting for
+risk sensitivity. The selection process is formulated as a 0-1 integer programming problem, optimiz-
+ing reputation-weighted utility under budget constraints. At the end of each round, the Shapley value
+quantifies marginal contributions, shaping a cost-effectiveness metric that updates reputation values
+and informs future selection. A dynamic penalty mechanism discourages unreliable participation,
+reinforcing system stability. By incorporating bidding incentives and dynamic reputation tracking,
+the proposed method increases FL efficiency and encourages stable client participation. Specifically,
+we make the following contributions:
+2(1)Unified Client Selection Framework: Unlike existing approaches that optimize a single
+aspect, SBRO-FL jointly optimizes data quality decompensation, incentive compatibility,
+and budget constraints in a unified selection framework, enhancing practical applicability
+in cross-silo FL.
+(2)Reputation-Driven Bidding: A novel bidding mechanism is introduced, where clients
+propose bid prices based on perceived data quality. This approach provides a practical
+incentive alignment strategy under budget constraints, fostering stable and cost-efficient
+client engagement.
+(3)Shapley Value-Based Contribution Assessment: SBRO-FL leverages the Shapley value
+to quantify the marginal impact of each client on the global model. This contribution metric
+is incorporated into a cost-effectiveness measure, which influences both reputation updates
+and future selection probabilities.
+(4)Budget-Constrained Optimization for FL: The client selection problem is formulated as
+a 0-1 integer programming model, optimizing reputation-weighted utility while adhering
+to strict budget constraints. This ensures that selected clients provide an optimal balance of
+data reliability and participation cost.
+The experiments compared SBRO-FL with three baselines: (1) random client selection, (2) selection
+of all clients, and (3) random selection from a high-quality subset. These baselines represent varying
+selection strategies, from uncontrolled participation to partial quality-aware selection. SBRO-FL
+consistently outperformed these baselines in four datasets, improving the accuracy of the global
+model by an average of 7.14% compared to random selection after a fixed number of rounds. Its
+performance closely approached that of an idealized selection strategy in which only high-quality
+clients were chosen, free of label noise. This highlights SBRO-FL’s ability to infer client reliability
+dynamically, effectively balancing data quality, incentives, and budget constraints.
+2 Background
+In this section, we provide an overview of key concepts and related work. Section 2.1 covers the fun-
+damentals of FL, Section 2.2 reviews client selection strategies that focus on resource-oriented and
+performance-oriented approaches, and Section 2.3 explores incentive mechanisms aimed at main-
+taining client participation in FL.
+2.1 Federated Learning
+FL is a distributed machine learning paradigm designed to protect data privacy and has drawn con-
+siderable attention [25]. In FL, each client receives the global model at the start of each round, trains
+it locally on private data, and then sends the updated parameters for aggregation into a new global
+model, as illustrated in Fig. 1. This process repeats over multiple rounds until a stopping condition
+is met. FL enables collaborative model training across decentralized data sources without requiring
+data sharing, making it ideal for privacy-sensitive applications.
+A typical FL architecture consists of a central server and multiple clients, denoted as C=
+{C1, . . . , C n}. The goal of FL is to collaboratively train a global model wby leveraging decentral-
+ized data from multiple clients. This is achieved by iteratively solving the following optimization
+problem:
+min
+wnX
+i=1|Di|Pn
+j=1|Dj|ℓ(w;Di) (1)
+where wdenotes the global model parameters, Direpresents the local dataset of client Ci, with|Di|
+denoting its number of data samples, serving as the weighting factor in the aggregation process.
+The term ℓ(w;Di)represents the local loss function evaluated on Di. One of the most widely used
+algorithms in FL is FedAvg, which iteratively solves the optimization problem. At the beginning
+of each round t, the global model parameters wtare sent to all participating clients. Each client
+independently updates the global model based on its local data Diby performing several steps of a
+local optimization algorithm on the corresponding loss function:
+wt
+i=wt−ηgt
+i (2)
+3Fig. 1. Federated learning example: client–server architecture.
+where ηis the learning rate and gt
+irepresents the gradient or update direction calculated on the local
+data. After local training, the clients transmit their updated parameters wt
+iback to the server. The
+server then aggregates these updates by computing a weighted average, based on the size of each
+client’s dataset, to yield the new global model parameters for the next round:
+wt+1=nX
+i=1|Di|Pn
+j=1|Dj|wt
+i. (3)
+This process continues iteratively until a convergence criterion is satisfied, such as achieving a spec-
+ified number of rounds or achieving a target accuracy.
+2.2 Client Selection
+In the context of FL, effective client selection is essential to improve model performance and op-
+timize resource utilization. The distinction between resource-oriented and performance-oriented
+selection strategies clarifies their respective impacts on training efficiency and model reliability.
+Resource-oriented criteria emphasize the relevance of the computational capabilities of clients and
+the efficiency of communication, enabling faster, more reliable, and resource-efficient processes.
+The FedCS framework proposed by Nishio and Yonetani [27] prioritizes clients capable of com-
+pleting a training round within a predefined deadline. The selection process analyzes the update
+efficiency of each client, considering their computational capabilities and the conditions of the wire-
+less channel. From another perspective, this approach allows FL to involve more clients in training
+in a shorter time, thereby accelerating the overall FL process. Yu et al. [40] designed the energy
+and latency-aware resource management and client selection algorithm (ELASTIC), which not only
+aims to maximize the number of selected clients, but also minimizes the total energy consumption
+based on the CPU frequency and transmission power of the clients. These approaches are particu-
+larly effective in FL between devices, where resource limitations are more pronounced [24].
+Performance-oriented criteria focus primarily on data quality and model attributes, in order to se-
+lect clients that significantly improve the effectiveness of the global model. Given the substantial
+influence of training data volume on model performance, some approaches prioritize clients based
+on the quantity of their data. For example, Jeon et al. [13] proposed a selection strategy that consid-
+ers the quantity of client data, the quality of communication, and the residual energy. Similarly, Li
+et al. [22] introduced an unbiased sampling scheme based on a polynomial distribution, where the
+probability of selection of a client is proportional to their quantity of data. However, the relation-
+ship between data quantity and global model quality is often non-linear and complex, particularly
+in scenarios with inconsistent data quality and Non-IID (independent and identically distributed)
+data distributions. To address these complexities, Fraboni et al. [8] compared two clustering-based
+sampling methods: one based on sample size and the other on model similarity. Their findings
+demonstrated that the model similarity-based method improved convergence speed and stability, es-
+pecially as data heterogeneity increased. Beyond data quantity, other important indicators of client
+4data quality include data distribution [20], local model parameters [2, 43], and local model loss [12].
+These approaches are more prevalent in cross-silo FL, where the focus is on optimizing global model
+performance.
+While existing methods optimize either computational efficiency or model performance, they typi-
+cally overlook economic constraints. In cross-silo FL, client selection must also account for budget
+limitations, where high-quality data alone does not guarantee selection if participation costs are ex-
+cessive. This necessitates a balance between data reliability and financial feasibility. Moreover,
+since incentives directly impact client engagement, selection strategies must align compensation
+with contribution quality.
+2.3 Incentive Mechanisms
+In FL, the selection of clients presupposes the availability of a pool of candidates willing to con-
+tribute. Clients invest significant resources, including data and computational power, but without
+fair incentives, many may opt out [17]. This highlights the need for robust incentive mechanisms to
+maintain engagement, especially when limited budgets restrict the selection of all clients.
+Reputation has emerged as a key incentive mechanism in client selection, directly related to both data
+quality and client reliability [5, 24]. Several works have proposed using reputation as a benchmark
+for assessing client trustworthiness and performance. For example, Kang et al. [16] designed a
+reputation-based client selection framework where clients’ reliability is measured using subjective
+logic models. Similarly, Song et al. [35] adopted a beta distribution-based reputation model to
+systematically assess client trustworthiness. While these frameworks enhance selection reliability,
+they often overlook how reputation interacts with budget constraints to shape sustainable incentive
+strategies. In practice, aligning reputation-based selection with economic feasibility is essential for
+maintaining long-term engagement and cost-effective participation.
+Moreover, auction-based mechanisms have gained prominence in FL to align client incentives with
+the server’s objectives. Pang et al. [28] designed an incentive mechanism using a procurement auc-
+tion model and a greedy algorithm to optimize client selection and scheduling, aiming to minimize
+social cost by efficiently distributing training participation across iterations. Jiao et al. [14] proposed
+a budget optimization framework for multi-session FL auctions, leveraging hierarchical reinforce-
+ment learning to refine strategic pricing adjustments by data consumers. In parallel, game-theoretic
+models, particularly Stackelberg games, have also been employed to balance incentives and resource
+allocation. Sarikaya and Ercetin [33] and Khan et al. [17] formulated Stackelberg-based strategies
+where the FL server acts as a leader setting rewards, while clients respond by adjusting their partic-
+ipation efforts. However, many of these methods operate under the assumption that data quality is
+relatively uniform or fail to explicitly address the heterogeneous nature of cross-silo data sources,
+which may also be prone to adversarial behavior.
+While existing methods have separately addressed data-driven selection, incentive mechanisms, and
+budget-aware strategies, their independent treatment often overlooks the interdependencies among
+these factors. To address these interrelated challenges, our approach jointly considers data quality
+decompensation, incentive compatibility, and budget constraints, thereby aligning client participa-
+tion with both model reliability and economic feasibility. The following sections detail the method-
+ology.
+3 Shapley-Bid Reputation Optimized Client Selection
+SBRO-FL integrates reputation-driven bidding with cost-aware optimization to improve efficiency
+in FL under budget constraints. The framework dynamically evaluates client reliability and cost-
+effectiveness, adapting selection strategies to evolving training conditions. For clarity, Section 3.1
+illustrates its workflow within a traditional FL setup.
+3.1 Workflow of SBRO-FL
+Fig. 2 illustrates the workflow of this method. The steps highlighted in yellow indicate the key
+differences from standard FL procedures. The communication flow for each round is as follows:
+5Fig. 2. Workflow of SBRO-FL within the traditional FL framework.
+1.Task Publication: The central server publishes the task requirements, including the data
+type, model size, and training methodology, to all potential clients.
+2.Bid Collection: Clients submit bid prices based on their estimated capacity to meet the
+task requirements.
+3.Client Selection: The server calculates a reputation score for each client based on historical
+performance and selects clients through an optimization model formulated as a 0-1 integer
+programming problem.
+4.Model Distribution: The central server distributes the specification of the FL task, includ-
+ing the type and parameters of the global model.
+5.Local Training: The selected clients train the model locally using their private datasets.
+6.Model Uploading: The selected clients upload the locally trained model parameters to the
+server.
+7.Model Aggregation: The central server aggregates all the local model parameters to update
+the global model for the current communication round.
+8.Client Assessment: After allocating rewards based on their bid prices, the central server
+calculates the selected clients’ contributions to the global model using the Shapley value
+and updates their reputations by considering both their contributions and submitted bids.
+The following subsections follow the natural execution order of the client selection process in FL.
+Since the selection model aims to maximize reputation-based utility, Section 3.2 first introduces
+the reputation score, which serves as the foundation for the clients selections model in Section 3.3.
+To reflect the dynamic nature of the overall system, the client assessment phase at the end of each
+training round employs a Shapley value-based evaluation method in Section 3.4 to quantify client
+contributions, which also serves as an indicator of data quality. This assessment then forms the basis
+for reputation updates in Section 3.5, ensuring an adaptive selection process over time.
+3.2 Reputation Values and Scores
+In FL, selecting reliable clients over multiple training rounds is crucial for mitigating the risks posed
+by poor-quality data. To achieve this, we introduce a reputation system that dynamically evaluates
+and tracks client behavior across rounds, ensuring that clients with a consistent history of meaningful
+contributions are prioritized in future selections.
+Each client is assigned a reputation value, denoted as R={R1, . . . , R n}for clients C=
+{C1, . . . , C n}. This reputation value serves as a measure of long-term reliability and is continu-
+ously updated after each training round. Initially, each client’s reputation is set to zero and evolves
+based on their observed contributions. The details of the update procedure, including its influencing
+factors and process, are provided in Section 3.4 and Section 3.5.
+6Fig. 3. Prospect theory value function. The X-axis represents gains and losses relative to a reference
+point, while the Y-axis represents perceived value. The function is asymmetric: losses have a steeper
+curve than gains, reflecting loss aversion, meaning individuals perceive losses more strongly than
+equivalent gains. Conversely, gains exhibit diminishing sensitivity, meaning the perceived impact of
+additional gains decreases as they accumulate.
+Although Riprovides a long-term measure of client reliability, directly using it for selection may
+overlook the disproportionate impact of data quality decompensation. Specifically, poor-quality
+contributions tend to degrade the global model more significantly than high-quality updates improve
+it [7].
+To address this, we apply a transformation process inspired by prospect theory [15]. As illustrated
+in Fig. 3, the prospect theory function emphasizes loss aversion, meaning that reductions in reputa-
+tion (i.e., poor contributions) have a greater impact than equivalent increases. This transformation
+converts reputation values into reputation scores, denoted as Z(R) ={z(R1), . . . , z (Rn)}in Defi-
+nition 1, which are subsequently used in the client selection process.
+Definition 1. Reputation Score Function z(Ri).It computes the reputation score of client Ciby
+applying the prospect theory value function, which accounts for loss aversion and the asymmetric
+treatment of low- and high-quality clients following
+z(Ri) =γ(Rth−Ri)βifRi≤Rth
+(Ri−Rth)αifRi> R th. (4)
+In practice, after each round, we compute an average reputation Rth=1
+pPp
+i=1Riacross all clients,
+serving as the reference point in the prospect theory function. If a client’s reputation Ri≤Rth,
+the function treats this as a “loss” region with heightened negativity, reflecting a higher perceived
+risk or potentially low-quality updates. Conversely, when Ri> R th, the client is considered more
+reliable, but the gain region in the Prospect transformation grows gradually rather than steeply. This
+prevents excessive reliance on a few high-reputation clients, ensuring that model updates leverage
+diverse data sources for better generalization.
+The parameters αandβdetermine the degree of asymmetry. A higher βleads to stronger penalties
+for underperforming clients, whereas αcontrols the diminishing impact of higher reputations. The
+specific values of α,β, and γwere determined through preliminary tuning and guided by common
+parameter choices in prospect theory literature. For instance, βis typically set between 0.2 and 0.4
+to reflect strong loss aversion, while a smaller αindicates faster saturation of perceived gains. Based
+on these considerations, we set α= 0.15, β= 0.3, and γ= 1, as this configuration provided stable
+performance across multiple datasets.
+The adjusted reputation score z(Ri)serves as the foundation for client selection in each round,
+guiding the optimization process described in Section 3.3. By incorporating this risk-aware adjust-
+ment, our framework enhances the selection of high-quality contributors while reducing the impact
+of unreliable clients, ensuring a more stable and effective training process.
+73.3 Selection Model
+Within our reputation system, client selection must balance reliability and budget constraints to
+ensure effective participation. The objective is to optimize client selection by prioritizing high-
+reputation clients, with prospect theory-adjusted scores ensuring a risk-aware balance between reli-
+ability and budget feasibility. The client selection model is defined as follows:
+Definition 2. Client Selection Model: St=Select (Z,B, Bbudget,Ht).Given a set of reputation
+scores Z={z(R1), . . . , z (Rn)}, bid prices B={B1, . . . , B n}, and a total budget Bbudget , the goal
+is to select an optimal subset of clients while considering past selection history Ht. The selection
+problem is formulated as the following integer programming model:
+maxnX
+i=1(z(Ri)−zmin)·δcount i·xi
+s.t.
+
+nX
+i=1Bixi≤Bbudget,
+Bi≥0,
+xi∈ {0,1}(5)
+where:
+• The term zminensures that all reputation scores are non-negative by shifting the minimum reputa-
+tion score to zero. The decision variable xi∈ {0,1}determines whether client Ciis selected in
+round t. The selection history Ht={xt−1
+1, . . . , xt−1
+n, . . . , xt−5
+1, . . . , xt−5
+n}keeps track of each
+client’s participation in the last five rounds. St={Ci|xt
+i= 1}denotes the set of clients selected
+to participate in round t.
+• The adjustment factor δcount iintroduces diversity in selection, where δis a decay factor and
+count iis the number of times client Cihas been selected in the previous five rounds:
+count i=5X
+k=1xt−k
+i. (6)
+The adjustment factor δcount imitigates over-selection bias by discouraging repeated choices in
+early rounds while ensuring diverse participation over time. During the early rounds, it decreases
+the likelihood of repeatedly selecting clients that have already been chosen multiple times, ensuring
+a thorough review of all clients. This allows the system to evaluate a broader range of clients, accel-
+erating the identification of high-quality clients without relying on a narrow subset. Consequently,
+the model enables faster filtering based on client contributions in the initial stages. In the later
+rounds, the model increases the likelihood of selecting clients that have been chosen less frequently,
+promoting both diversity and fairness. This dynamic adjustment ensures that while high-performing
+clients are prioritized, valuable but underrepresented clients are not excluded for extended periods,
+maintaining a balanced and equitable selection process.
+By integrating prospect theory-based reputation scores with a dynamic adjustment factor, this model
+optimizes client participation while ensuring a more adaptive and balanced selection process in FL.
+To implement this selection strategy, the formulated integer programming problem is solved using
+standard optimization solvers, ensuring practical feasibility. The detailed implementation and solver
+configurations are further discussed in the Section 4.3.
+3.4 Evaluation of Client Contributions
+Although reputation values help solve the client selection model Definition 2 for optimal decisions,
+client behavior can evolve over time due to various factors [4]. In real-world scenarios, clients
+may possess varying data quality and training capabilities, which directly impact their contributions
+to the global model. Moreover, clients may conceal their intentions and attempt to degrade the
+overall model quality in subsequent communication rounds through tactics such as Byzantine attack.
+Therefore, an accurate and fair evaluation mechanism is essential to ensure that reputation values
+evolve based on client contributions to the global model, effectively guiding future client selection.
+8To achieve this, we adopt the Shapley value from cooperative game theory, which systematically
+quantifies each participant’s contribution to a shared outcome [34]. Mathematically, the Shapley
+value for a client Ciis defined as:
+svi=1
+mX
+T ⊆S\{Ci}1 m−1
+|T |[v(T ∪ { Ci})−v(T)], (7)
+where mis the total number of clients in the selected group S, andTdenotes any subset of partic-
+ipants excluding Ci. The function v(T)represents the utility or outcome (e.g., profit, accuracy, or
+any relevant metric) achieved by the subset T. This formula quantifies each participant’s marginal
+contribution, ensuring fairness by considering all possible client combinations. The Shapley value
+has been widely applied across various domains, including data valuation [9], where it quantifies the
+significance of individual data points in machine learning models. Its effectiveness in fairly assess-
+ing collaborative contributions makes it a natural choice for evaluating the impact of selected clients
+in FL. In the FL scenario, the Shapley value of client CiinSis formally defined in Definition 3.
+Definition 3. Shapley value in FL: SVSt=CalculateSV (wSt,Dval).Here wStrepresents the
+model parameters uploaded in round tby the selected clients in the group St, andDvalis the vali-
+dation dataset used to evaluate model performance. The Shapley value svt
+ifor each client Ci∈St,
+representing their individual contribution in round t, is expressed as:
+svt
+i=1
+mX
+T ⊆St\{Ci}1 m−1
+|T |h
+E
+1
+|T ∪{ Ci}|X
+Cj∈T ∪{ Ci}wt
+j,Dval
+−E
+1
+|T |X
+Cj∈Twt
+j,Dvali
+. (8)
+Here, E(w,Dval)evaluates model performance in the validation dataset Dval, using the chosen
+metric (e.g., accuracy, area under the curve, or recall). The Shapley value quantifies each client’s
+marginal contribution by comparing model performance with and without their participation. Specif-
+ically, it computes the difference E(T ∪Ci)−E(T), where E(T)represents the performance of the
+model when trained with a subset Tof clients, and E(T ∪Ci)measures the performance when Ci
+is additionally included. By aggregating these differences across all possible subsets T ⊆ St\Ci,
+the Shapley value provides a fair assessment of individual contributions in each round.
+Since a client’s contribution to global model performance is directly influenced by the quality of
+their local dataset, the Shapley value naturally serves as a proxy for data quality. Clients with
+higher-quality data tend to provide more informative updates, leading to greater positive contribu-
+tions, whereas lower-quality data may introduce noise, amplifying data quality decompensation and
+potentially degrading model performance. This property makes the Shapley value a reliable indi-
+cator of data quality, which forms the basis for reputation updates in Definition 4. In addition, we
+maintain a historical record SV his={SV 1, . . . ,SVn}, where SVistores the Shapley values of the
+client Ciin the rounds they were selected. This historical record further supports the reputation
+update in Section 3.5, ensuring informed and adaptive adjustments.
+Calculating Shapley values for all possible subsets has exponential complexity. However, practical
+approximations such as the Monte Carlo–Shapley method [9] and GTG-Shapley [23] reduce com-
+putational overhead, making them suitable for large-scale FL. As cross-silo FL typically involves
+a limited number of participants, we employ exact Shapley value computation to ensure a precise
+contribution evaluation.
+3.5 Reputation Update
+The Shapley value provides a quantitative measure of client contributions, which forms a key com-
+ponent in reputation updates. However, effective client selection must balance both performance and
+economic feasibility. To achieve this, reputation updates incorporate bid prices alongside Shapley
+values, ensuring that high-quality participants are incentivized while maintaining cost-effectiveness.
+Specifically, positively contributing clients ( svt
+i>0) receive increased reputation, while negative or
+near-zero values ( svt
+i≤0) trigger penalization. The update rule is defined as follows:
+9Definition 4. Reputation Update Rule. Reputation updates depend on each client’s Shapley value
+svt
+i, bid price Bi, and recent performance history erri. First, we define:
+Spos=X
+Ci∈St,svt
+i>0svi, B pos=X
+Ci∈St,svt
+i>0Bi (9)
+where Sposis the total Shapley value of all positively contributing clients, and Bposis the total bid
+price of those clients. The reputation update formula is expressed as follows:
+Ri=
+
+Ri−ψ·ρerri ifCi∈Standsvt
+i≤0,
+Ri+ω·
+1−exp
+−svt
+i/Spos
+Bi/Bpos
+ifCi∈Standsvt
+i>0
+Ri ifCi/∈St.(10)
+Algorithm 1 Shapley-Bid Reputation Optimized Client Selection
+1:Initialize: Model parameters w0, Reputation R={R1, . . . , R n}, bid price B={B1, . . . , B n}
+2:forround t= 1toTdo
+3: Rth←1
+nPn
+i=1Ri
+4: foreachCi∈ Cdo
+5: z(Ri)←γ(Rth−Ri)β,ifRi≤Rth
+(Ri−Rth)α,ifRi> R th
+6: end for
+7: St←Select (Z,B, Bbudget,Ht)
+8: Distribute global model wtto clients in St
+9: foreachCi∈Stdo
+10: wt
+i←wt−1−ηgt−1
+i
+11: end for
+12: wt←Aggregate (wt
+St)
+13: SVSt←CalculateSV (wt
+St,Dval)
+14: Spos←P
+Ci∈St,svt
+i>0svt
+i
+15: Bpos←P
+Ci∈St,svt
+i>0Bi
+16: foreachCi∈Stdo
+17: Ri←(
+Ri−ψ·ρerri, ifsvt
+i≤0
+Ri+ω·
+1−exp
+−svt
+i/Spos
+Bi/Bpos
+ifsvt
+i>0
+18: end for
+19: Update SV his,Ht
+20:end for
+Here, ωandψrepresent the reward and punishment coefficients, respectively, while erritracks
+the number of times client Cihas demonstrated poor performance (i.e., svt
+i≤0) in the last five
+rounds they were selected. The set SV his, which stores each client’s Shapley values across rounds,
+is used to calculate erriby identifying rounds with negative contributions. The penalty factor ρ
+increases exponentially with repeated poor performance, ensuring harsher penalties for clients who
+consistently underperform.
+The penalty mechanism swiftly filters out clients whose updates degrade model performance,
+whether due to unreliable data or overfitting. In contrast, positively contributing clients receive rep-
+utation updates based on both their impact and bid price, ensuring that high-quality, cost-effective
+participants are incentivized for future selection. This approach encourages clients to submit real-
+istic bids while maintaining high-quality selections in subsequent rounds. Additionally, the use of
+an exponential reward function prevents excessively rapid reputation increases, mitigating the risk
+of overfitting the global model to specific clients. For clients not selected in a given round, their
+reputation remains unchanged, ensuring fairness across rounds.
+Thus, SBRO-FL forms a closed-loop framework, integrating bidding, reputation-based selection,
+contribution evaluation, and adaptive reputation updates. This iterative process continuously refines
+client participation, ensuring a balance between data reliability, budget constraints, and incentive
+alignment. The full procedure is detailed in Algorithm 1.
+104 Experiments Setup
+This section presents the experimental setup used to evaluate the proposed SBRO-FL method. Sec-
+tion 4.1 outlines the datasets used and describes how we simulate data quality decompensation via
+label flipping. Section 4.2 introduces the baseline methods for comparison, and Section 4.3 provides
+the implementation details, including the FL framework, model architectures, and the parameters
+used to simulate the FL environment under budget constraints.
+4.1 Data Partitioning
+We utilized four widely recognized benchmark datasets—FashionMNIST [39], EMNIST-Letter [6],
+SVHN [26], and CIFAR-10 [19]—for image classification tasks in a FL environment. These datasets
+were selected for their diverse characteristics, including variations in image resolution, color chan-
+nels, and class distributions, providing a comprehensive basis for evaluating FL algorithms under
+different conditions. Table 1 summarizes the key statistics of each dataset, including the number of
+classes and train/test splits.
+Table 1
+Statistics of the datasets used in FL experiments
+Dataset Total Samples Training Samples Test Samples Classes
+EMNIST-letter 124,800 88,800 36,000 26
+FashionMNIST 70,000 60,000 10,000 10
+SVHN 600,000 73,257 53,608 10
+CIFAR-10 60,000 50,000 10,000 10
+To simulate a realistic cross-silo FL scenario, the training data for each dataset was limited to 10,000
+samples, which were randomly partitioned among 40 clients. Each client was assigned an equal
+portion of the training data, and in each FL round, a subset of clients was selected for training based
+on the proposed selection model. The central server aggregated client updates to refine the global
+model over multiple communication rounds.
+To examine the impact of data quality decompensation on model performance, label flipping was
+applied to 32 of the clients. These clients were randomly divided into four groups of eight, with
+label flipping proportions set at 90%, 80%, 70% and 60%, respectively. The remaining eight clients
+retained their original labels and served as high-quality participants.
+Label flipping is chosen as a straightforward yet practical method to simulate data quality decompen-
+sation. Compared to other noise models, label flipping more directly affects the training objective
+and mimics malicious and unintentional mislabeling scenarios. By manipulating the flipping ratios,
+it is possible to assess the effectiveness of the method in identifying and mitigating the impact of
+low-quality updates.
+4.2 Baselines
+To evaluate the effectiveness of our proposed SBRO-FL approach, we compare it with three baseline
+methods that capture a broad spectrum of client selection strategies:
+•Random Selection (RS-FL) : In each round, the server randomly chooses a subset of clients
+within the budget constraint [25]. This method does not consider client reliability or historical
+performance and serves as a baseline to assess whether reputation-based selection improves FL
+outcomes.
+•High-Quality Random Selection (HQRS-FL) : Clients are randomly selected from a high-quality
+subset (unaffected by label flipping) while maintaining the same budget constraint. This represents
+an “oracle” scenario where the server selects only high-quality clients based on prior knowledge of
+their data quality. Although such an assumption is unrealistic in practical FL settings, HQRS-FL
+serves as a reference to assess how well SBRO-FL approximates high-quality selection without
+explicit quality labels.
+•All Clients Selected without Budget (All-FL) : All clients, regardless of their data quality or bid
+price, are selected in each round without budget constraints. However, in real-world FL deploy-
+11ments, unrestricted participation often leads to lower model robustness, as unreliable updates from
+low-quality clients degrade overall performance. This comparison allows us to evaluate whether
+SBRO-FL effectively balances inclusiveness and reliability within a realistic budget-constrained
+setting.
+Although there are many advanced FL methods, such as those that focus on incentive mechanisms,
+communication efficiency, or adversarial robustness, these approaches typically optimize a single
+objective. In contrast, our work addresses data quality decompensation, incentive compatibility, and
+budget constraints simultaneously. A direct comparison with single-focus methods would not fully
+capture the effectiveness of our integrated approach. Therefore, we adopt these three baselines,
+which collectively benchmark the core aspects of client selection in our setting.
+4.3 Implementation Details
+The experiments were carried out using the FLEXible platform [10], an open source framework that
+provides a comprehensive set of tools for deep learning and machine learning in federated environ-
+ments. FLEXible allows full customization of the FL scenario, from foundational components to
+high-level configurations, making it well suited to evaluate the proposed method.
+CNN architectures were adapted to the complexity of the data et: two convolutional layers for
+FashionMNIST and EMNIST, and three for CIFAR-10 and SVHN. All models were trained with
+mini-batch SGD (batch size = 16) with an initial learning rate of η= 0.01. Client updates were
+aggregated using FedAvg over 300 communication rounds.
+The bid prices of the clients were generated following a Gaussian distribution ( µ= 10 ,σ2= 1)
+to simulate natural variation in the valuation of the clients’ data and computational costs, and the
+task budget was fixed at Bbudget = 45 . The selection process incorporated a decay factor δ= 0.5
+to balance participation diversity. The prospect theory parameters were established as α= 0.15,
+β= 0.3, and γ= 1, after prior studies and preliminary adjustments. The client selection problem
+was solved using the PuLP linear programming solver. To improve computational stability and
+ensure effective selection, standard preprocessing techniques were applied before solving.
+The complete implementation and experimental configurations are available on GitHub1, ensuring
+full reproducibility.
+5 Experimental Results
+This section presents the experimental results of SBRO-FL compared with the baseline methods
+across four benchmark datasets. We evaluated (i) the final performance and training stability of the
+global model across multiple datasets (see Section 5.1), and (ii) the robustness of SBRO-FL against
+low-cost interference (see Section 5.2).
+5.1 Performance and Stability Evaluation
+In this subsection, we first compare the accuracy of the global model in the final round of each
+method in Table 2, then examine their convergence stability by plotting accuracy trends over multiple
+communication rounds (see Fig. 4).
+Table 2 reports the accuracy of the global model in the final round for different methods. SBRO-FL
+consistently outperforms RS-FL in all datasets, demonstrating its ability to prioritize high-quality
+client updates while operating under budget constraints. Furthermore, we computed the variance of
+the final 20 rounds for each method, which remained negligibly small. This confirms that random
+fluctuations did not influence the analysis, reinforcing the robustness of the reported results.
+In particular, CIFAR-10 and SVHN exhibit larger gains around 19%, probably due to their greater
+complexity and higher susceptibility to label-flipping noise. In contrast, simpler datasets such as
+FashionMNIST show smaller relative gains, as even random selection can achieve a relatively high
+baseline accuracy.
+1GitHub repository: https://github.com/ari-dasci/S-SBRO-FL
+12Table 2
+Final round global model accuracy of different methods on four datasets. The variance across the final training
+rounds is negligible (less than 10−4), indicating that observed accuracy improvements are not due to random
+fluctuations. Note: “Gain" represents the accuracy improvement of SBRO-FL over RS-FL, calculated as
+(SBRO-FL −RS-FL )/RS-FL ×100% .
+Dataset SBRO-FL RS-FL HQRS-FL All-FL Gain (% over RS-
+FL)
+EMNIST-letter 0.8166 0.7835 0.8515 0.7777 +4.2%
+FashionMNIST 0.8600 0.8294 0.8590 0.7966 +3.7%
+CIFAR-10 0.5853 0.4920 0.6121 0.4828 +19.0%
+SVHN 0.7902 0.6617 0.8036 0.5595 +19.4%
+Average 0.7630 0.6917 0.7816 0.6541 +10.3%
+Fig. 4. Trends in Model Accuracy: Comparing SBRO-FL and Baseline Methods Across Diverse
+Datasets.
+Another interesting observation from the FashionMNIST experiment is that SBRO-FL achieved a
+slightly higher final accuracy than HQRS-FL, the ideal “oracle" scenario. This phenomenon can be
+attributed to the ability of SBRO-FL to learn additional knowledge from clients with label noise,
+while HQRS-FL exclusively selects clients from a pool entirely free of label noise. This finding
+underscores the importance of diversity in client selection.
+Additionally, although All-FL involves all available clients, it does not consistently improve accu-
+racy and incurs higher computational costs. This highlights the need for strategic client selection, as
+indiscriminate participation amplifies data quality decompensation, leading to accumulated unreli-
+able updates and global performance degradation.
+Fig. 4 provides a visual comparison of the accuracy of the global model in all training rounds, pro-
+viding insight into the stability and convergence behavior of different methods. The trends observed
+here reinforce the findings from Table 2, demonstrating the ability of SBRO-FL to adaptively opti-
+mize client selection over time. During training, SBRO-FL exhibits slight fluctuations and initially
+lags behind RS-FL. This is due to the ongoing assessment of client reliability, during which some
+lower-quality clients may still be selected. However, as training progresses, SBRO-FL progressively
+refines its selection, leading to a sustained improvement in both accuracy and stability. In later
+rounds, high-quality clients have been consistently prioritized, enabling SBRO-FL to surpass RS-
+FL and maintain more stable performance. In contrast, All-FL exhibits a “peak-and-drop" behavior,
+13where an initial increase in accuracy is followed by a decline due to the incorporation of noisy up-
+dates, ultimately degrading overall performance. Although All-FL benefits from a higher number of
+participants, the lack of selective filtering leads to poor long-term generalization.
+For more complex datasets such as CIFAR-10 and SVHN, the advantage of SBRO-FL becomes
+even more pronounced. In these cases, SBRO-FL not only achieves higher accuracy, but also
+demonstrates faster and more stable convergence compared to RS-FL. These trends confirm that
+SBRO-FL’s selection mechanism successfully adapts over time, ensuring long-term stability and
+performance improvements.
+5.2 Robustness Against Low-Cost Interference
+FL systems face the risk of adversarial bidding, where unreliable clients reduce their bids to increase
+the probability of selection. This section evaluates SBRO-FL’s resilience to such low-cost interfer-
+ence, testing whether it can effectively prioritize high-quality clients despite financial manipulations.
+To model a realistic low-bid interference scenario, bid prices are assigned based on label-flipping
+ratios: clients with flipping rates of 90%, 80%, 70%, 60%, and 0% receive bids of 6, 8, 10, 12, and
+14, respectively. This setup mimics a practical challenge in which low-quality clients strategically
+lower their bids to increase selection chances.
+Table 3
+Final round global model accuracy of different methods on four datasets after adjusting the bid strategy.
+“Gain" represents the improvement of SBRO-FL over RS-FL, calculated as
+(SBRO-FL −RS-FL )/RS-FL ×100% .
+Dataset SBRO-FL RS-FL HQRS-FL All-FL Gain (% over RS-
+FL)
+EMNIST-letter 0.8176 0.7735 0.8532 0.7605 +5.7%
+FashionMNIST 0.8499 0.7638 0.8590 0.8010 +11.3%
+CIFAR-10 0.5999 0.4818 0.6073 0.4817 +24.5%
+SVHN 0.7808 0.5935 0.8055 0.5590 +31.6%
+Average 0.7620 0.6532 0.7812 0.6506 +16.7%
+As shown in Table 3, SBRO-FL effectively selects high-quality clients, even amidst varying data
+quality and low-bid interference. SBRO-FL significantly outperforms both RS-FL and All-FL across
+all datasets, with particularly strong results on the more complex SVHN and CIFAR-10 datasets. On
+average, SBRO-FL achieves an improvement in accuracy of 10.89% over RS-FL and an improve-
+ment of 1.92% over All-FL, underscoring its robustness in client selection despite data variability
+and low bids.
+Fig. 5 shows the accuracy of the global model per round for the four methods after adjusting the
+bid strategy. This price-sensitive experiment reveals a key insight: The SBRO-FL decision-making
+mechanism, which balances reputation and bid price, is resistant to manipulation by low bids. Even
+when lower bids are present, SBRO-FL successfully avoids selecting clients with poor data quality,
+highlighting the method’s emphasis on data quality over short-term financial incentives to maintain
+high model performance.
+When comparing these results with Fig. 4, we observe similar trends: SBRO-FL consistently out-
+performs RS-FL and All-FL in stability and convergence speed, even with low-bid interference.
+Although SBRO-FL shows slight oscillations in accuracy, these variations are minimal, indicating
+that the low-bid strategy has a limited impact on its performance. In general, SBRO-FL maintains
+its advantage, reaffirming its robustness under challenging conditions.
+Interestingly, a comparison between Fig. 4 and Fig. 5 shows that while All-FL occasionally con-
+verges faster than SBRO-FL, it eventually experiences a decline in accuracy due to the continual
+incorporation of noisy updates. This underscores the importance of excluding low-quality clients
+in FL. The negative impact of such clients, misaligned updates and poor data quality, can lead to
+persistent degradation in global model performance. Consequently, SBRO-FL’s approach to filtering
+out low-quality clients proves essential to achieve both stability and superior final performance.
+14Fig. 5. Trends in Model Accuracy: Evaluating SBRO-FL and Baseline Methods Under Low-Cost
+Interference Across Datasets.
+5.3 Discussion on Component Contributions
+While the experimental results demonstrate the effectiveness of SBRO-FL as a unified framework, a
+detailed ablation study remains a valuable direction for further investigation. Specifically, evaluating
+the isolated impact of each component, such as the bidding mechanism without reputation model-
+ing, the reputation system without Shapley-based evaluation, or the use of simpler heuristics in place
+of Shapley values, would help quantify their respective contributions to overall performance. Such
+an analysis would provide deeper insights into the role of each module in improving accuracy, ro-
+bustness, and cost-efficiency, and would further justify the design choices made in SBRO-FL. We
+consider this to be an important avenue for future empirical work.
+6 Conclusion and future work
+This work presents SBRO-FL, a unified client selection framework for FL in silos that addresses
+the intertwined challenges of data quality decompensation, incentive compatibility, and budget
+constraints. By combining a reputation-driven bidding mechanism with cost-aware optimization,
+SBRO-FL ensures that client selection reflects both historical contributions and economic feasibil-
+ity. The integration of a Shapley value-based contribution evaluation and a prospect-theory-inspired
+reputation update enables robust and adaptive client participation over time. Our extensive empiri-
+cal evaluation in four benchmark datasets shows that SBRO-FL consistently outperforms traditional
+random and inclusive selection strategies, even in the presence of adversarial bidding and noisy
+data. These results confirm the practical effectiveness of our approach in enhancing the robustness
+and efficiency of FL systems.
+6.1 Limitations
+While SBRO-FL demonstrates strong performance across diverse datasets and adversarial scenar-
+ios, certain limitations remain. The exact computation of Shapley values, while offering fair and
+precise contribution assessments, incurs combinatorial complexity that may not scale efficiently to
+federations involving hundreds or thousands of clients. Although this is less critical in cross-silo
+settings where the number of clients is typically small, future work should investigate scalable ap-
+proximations or surrogate contribution metrics to maintain fairness and computational efficiency
+15in larger deployments. Additionally, our current implementation assumes honest bid submissions;
+future versions could incorporate mechanisms for bid verification or robustness against strategic
+misreporting.
+From a computational standpoint, the client selection problem formulated in SBRO-FL is a variant
+of the 0–1 knapsack problem, which is known to be NP hard. This implies that finding an opti-
+mal solution becomes computationally intensive as the number of clients increases, necessitating
+efficient solvers or approximations in large-scale deployments. Regarding convergence, SBRO-FL
+builds upon standard FL frameworks like FedAvg, whose convergence under non-i.i.d. settings has
+been established in prior work. Since our selection mechanism preserves the core iterative structure
+and does not alter local training dynamics, it inherits similar convergence behavior under bounded-
+variance assumptions. Furthermore, although exact Shapley value computation is used in this study,
+approximate methods such as Monte Carlo sampling and GTG-Shapley provide theoretical error
+bounds and can be adopted in future work to ensure scalability while retaining fairness.
+6.2 Future Work
+While SBRO-FL demonstrates strong performance in controlled experimental settings, several
+promising directions remain for future research. First, real-world deployment studies in industrial
+or healthcare cross-silo environments could validate the method’s robustness under real operational
+constraints. Second, exploring adaptive or learnable reputation metrics—possibly using neural at-
+tention mechanisms or metalearning—may enhance the selection dynamics beyond fixed prospect-
+theoretic functions. Finally, scaling SBRO-FL to larger federations with hundreds or thousands of
+clients will require more computationally efficient approximations of Shapley values, such as Monte
+Carlo or GTG-based methods, to maintain scalability without compromising fairness or accuracy.
+Acknowledgements
+This work was supported in part by the National Natural Science Foundation of China under Grant
+72171065 and in part by the Open Fund of Shaanxi Key Laboratory of Information Communication
+Network and Security under Grant ICNS201807.
+It also results from the Strategic Project IAFER-Cib (C074/23), as a result of the collaboration
+agreement signed between the National Institute of Cybersecurity (INCIBE) and the University of
+Granada. This initiative is carried out within the framework of the Recovery, Transformation and
+Resilience Plan funds, financed by the European Union (Next Generation).
+Qinjun Fei acknowledges the support of the China Scholarship Council program (Project ID:
+202308330099).
+References
+[1] Mahmoud M. Badr, Mohamed M. E. A. Mahmoud, Yuguang Fang, Mohammed Abdulaal,
+Abdulah Jeza Aljohani, Waleed Alasmary, and Mohamed I. Ibrahem. Privacy-preserving and
+communication-efficient energy prediction scheme based on federated learning for smart grids.
+IEEE Internet of Things Journal , 10(9):7719–7736, May 2023. ISSN 2372-2541.
+[2] Ravikumar Balakrishnan, Tian Li, Tianyi Zhou, Nageen Himayat, Virginia Smith, and Jeff
+Bilmes. Diverse client selection for federated learning: Submodularity and convergence anal-
+ysis. In ICML 2021 International Workshop on Federated Learning for User Privacy and Data
+Confidentiality , volume 3, page 139. PMLR, 2021.
+[3] Kallista Bonawitz, Hubert Eichner, Wolfgang Grieskamp, Dzmitry Huba, Alex Ingerman,
+Vladimir Ivanov, Chloe Kiddon, Jakub Kone ˇcný, Stefano Mazzocchi, H. McMahan, Timon
+Overveldt, David Petrou, Daniel Ramage, and Jason Roselander. Towards federated learning
+at scale: System design. Proceedings of machine learning and systems , 1:374–388, 2019. doi:
+abs/1902.01046.
+[4] Enrique Mármol Campos, Pablo Fernández Saura, Aurora González-Vidal, José L Hernández-
+Ramos, Jorge Bernal Bernabé, Gianmarco Baldini, and Antonio Skarmeta. Evaluating feder-
+ated learning for intrusion detection in internet of things: Review and challenges. Computer
+Networks , 203:108661, 2022.
+16[5] Leiming Chen, Dehai Zhao, Liping Tao, Kai Wang, Sibo Qiao, Xingjie Zeng, and Chee Wei
+Tan. A credible and fair federated learning framework based on blockchain. IEEE Transactions
+on Artificial Intelligence , 6(2):301–316, February 2025. ISSN 2691-4581.
+[6] Gregory Cohen, Saeed Afshar, Jonathan Tapson, and André van Schaik. Emnist: Extend-
+ing mnist to handwritten letters. In 2017 International Joint Conference on Neural Networks
+(IJCNN) , pages 2921–2926, 2017.
+[7] Minghong Fang, Xiaoyu Cao, Jinyuan Jia, and Neil Zhenqiang Gong. Local model poisoning
+attacks to byzantine-robust federated learning. In Proceedings of the 29th USENIX Conference
+on Security Symposium , SEC’20, pages 1623–1640, USA, 2020. USENIX Association.
+[8] Yann Fraboni, Richard Vidal, Laetitia Kameni, and Marco Lorenzi. Clustered sampling: Low-
+variance and improved representativity for clients selection in federated learning. In Proceed-
+ings of the 38th International Conference on Machine Learning , volume 139 of Proceedings
+of Machine Learning Research , pages 3407–3416. PMLR, 18–24 Jul 2021.
+[9] Amirata Ghorbani and James Zou. Data shapley: Equitable valuation of data for machine learn-
+ing. In Proceedings of the 36th International Conference on Machine Learning , volume 97 of
+Proceedings of Machine Learning Research , pages 2242–2251. PMLR, 2019.
+[10] Francisco Herrera, Daniel Jiménez-López, Alberto Argente-Garrido, Nuria Rodríguez-
+Barroso, Cristina Zuheros, Ignacio Aguilera-Martos, Beatriz Bello, Mario García-Márquez,
+and M. Victoria Luzón. Flex: Flexible federated learning framework. Information Fusion ,
+117:102792, 2025.
+[11] Chao Huang, Ming Tang, Qian Ma, Jianwei Huang, and Xin Liu. Promoting collaboration in
+cross-silo federated learning: Challenges and opportunities. IEEE Communications Magazine ,
+62(4):82–88, April 2024. ISSN 1558-1896.
+[12] Yae Jee Cho, Jianyu Wang, and Gauri Joshi. Towards understanding biased client selection
+in federated learning. In Proceedings of The 25th International Conference on Artificial In-
+telligence and Statistics , volume 151 of Proceedings of Machine Learning Research , pages
+10351–10375. PMLR, 28–30 Mar 2022.
+[13] Joohyung Jeon, Soohyun Park, Minseok Choi, Joongheon Kim, Young-Bin Kwon, and Sun-
+grae Cho. Optimal user selection for high-performance and stabilized energy-efficient feder-
+ated learning platforms. Electronics , 9(9):1359, 2020.
+[14] Yutao Jiao, Ping Wang, Dusit Niyato, Bin Lin, and Dong In Kim. Toward an automated
+auction framework for wireless federated learning services market. IEEE Transactions on
+Mobile Computing , 20(10):3034–3048, 2020.
+[15] Daniel Kahneman and Amos Tversky. Prospect theory: An analysis of decision under risks.
+Econometrica , 47(2):363–391, 1979.
+[16] Jiawen Kang, Zehui Xiong, Dusit Niyato, Shengli Xie, and Junshan Zhang. Incentive mech-
+anism for reliable federated learning: A joint optimization approach to combining reputation
+and contract theory. IEEE Internet of Things Journal , 6(6):10700–10714, 2019.
+[17] Latif U. Khan, Shashi Raj Pandey, Nguyen H. Tran, Walid Saad, Zhu Han, Minh N. H. Nguyen,
+and Choong Seon Hong. Federated learning for edge networks: Resource optimization and
+incentive mechanism. IEEE Communications Magazine , 58(10):88–93, 2020.
+[18] Jakub Kone ˇcn`y, H Brendan McMahan, Daniel Ramage, and Peter Richtárik. Federated
+optimization: Distributed machine learning for on-device intelligence. arXiv preprint
+arXiv:1610.02527 , 2016.
+[19] Alex Krizhevsky and Geoffrey Hinton. Learning multiple layers of features from tiny images.
+Technical report, University of Toronto, 2009.
+[20] Jaewook Lee, Haneul Ko, Sangwon Seo, and Sangheon Pack. Data distribution-aware online
+client selection algorithm for federated learning in heterogeneous networks. IEEE Transac-
+tions on Vehicular Technology , 72(1):1127–1136, 2023.
+[21] Li Li, Yuxi Fan, Mike Tse, and Kuo-Yi Lin. A review of applications in federated learning.
+Computers & Industrial Engineering , 149:106854, 2020.
+[22] Xiang Li, Kaixuan Huang, Wenhao Yang, Shusen Wang, and Zhihua Zhang. On the conver-
+gence of fedavg on non-iid data. In International Conference on Learning Representations
+(ICLR) , 2020.
+17[23] Zelei Liu, Yuanyuan Chen, Han Yu, Yang Liu, and Lizhen Cui. Gtg-shapley: Efficient and
+accurate participant contribution evaluation in federated learning. ACM Transactions on intel-
+ligent Systems and Technology (TIST) , 13(4):1–21, 2022.
+[24] Samara Mayhoub and Tareq M. Shami. A review of client selection methods in federated
+learning. Archives of Computational Methods in Engineering , 31(2):1129–1152, November
+2023. ISSN 1886-1784.
+[25] Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Aguera y Arcas.
+Communication-efficient learning of deep networks from decentralized data. In Proceedings
+of the 20th International Conference on Artificial Intelligence and Statistics , volume 54 of
+Proceedings of Machine Learning Research , pages 1273–1282. PMLR, 2017.
+[26] Yuval Netzer, Tao Wang, Adam Coates, Alessandro Bissacco, Bo Wu, and Andrew Y . Ng.
+Reading digits in natural images with unsupervised feature learning. In NIPS Workshop on
+Deep Learning and Unsupervised Feature Learning , 2011.
+[27] Takayuki Nishio and Ryo Yonetani. Client selection for federated learning with heterogeneous
+resources in mobile edge. In ICC 2019 - 2019 IEEE International Conference on Communi-
+cations (ICC) , pages 1–7. IEEE, 2019.
+[28] Jinlong Pang, Jieling Yu, Ruiting Zhou, and John CS Lui. An incentive auction for heteroge-
+neous client selection in federated learning. IEEE Transactions on Mobile Computing , 22(10):
+5733–5750, 2022.
+[29] Monalisa Panigrahi, Sourabh Bharti, and Arun Sharma. Feddcs: A distributed client selection
+framework for cross device federated learning. Future Generation Computer Systems , 144:
+24–36, July 2023. ISSN 0167-739X.
+[30] Jiahao Qi, Feilong Lin, Zhongyu Chen, Changbing Tang, Riheng Jia, and Minglu Li. High-
+quality model aggregation for blockchain-based federated learning via reputation-motivated
+task participation. IEEE Internet of Things Journal , 9(19):18378–18391, 2022.
+[31] Anichur Rahman, Md Sazzad Hossain, Ghulam Muhammad, Dipanjali Kundu, Tanoy Deb-
+nath, Muaz Rahman, Md Saikat Islam Khan, Prayag Tiwari, and Shahab S Band. Federated
+learning-based ai approaches in smart healthcare: concepts, taxonomies, challenges and open
+issues. Cluster computing , 26(4):2271–2311, 2023.
+[32] Nuria Rodríguez-Barroso, Daniel Jiménez-López, M Victoria Luzón, Francisco Herrera, and
+Eugenio Martínez-Cámara. Survey on federated learning threats: Concepts, taxonomy on
+attacks and defences, experimental study and challenges. Information Fusion , 90:148–173,
+2023.
+[33] Yunus Sarikaya and Ozgur Ercetin. Motivating workers in federated learning: A stackelberg
+game perspective. IEEE Networking Letters , 2(1):23–27, 2020.
+[34] L. S. Shapley. A value for n-person games. In H. W. Kuhn and A. W. Tucker, editors, Con-
+tributions to the Theory of Games , number 28, pages 307–317. Princeton University Press,
+1953.
+[35] Zhendong Song, Hongguang Sun, Howard H. Yang, Xijun Wang, Yan Zhang, and Tony Q. S.
+Quek. Reputation-based federated learning for secure wireless networks. IEEE Internet of
+Things Journal , 9(2):1212–1226, 2022.
+[36] Gan Sun, Yang Cong, Jiahua Dong, Qiang Wang, Lingjuan Lyu, and Ji Liu. Data poisoning
+attacks on federated machine learning. IEEE Internet of Things Journal , 9(13):11365–11375,
+2022.
+[37] Zhilin Wang, Qin Hu, Ruinian Li, Minghui Xu, and Zehui Xiong. Incentive mechanism design
+for joint resource allocation in blockchain-based federated learning. IEEE Transactions on
+Parallel and Distributed Systems , 34(5):1536–1547, May 2023. ISSN 2161-9883.
+[38] Jie Wen, Zhixia Zhang, Yang Lan, Zhihua Cui, Jianghui Cai, and Wensheng Zhang. A survey
+on federated learning: challenges and applications. International Journal of Machine Learning
+and Cybernetics , 14(2):513–535, 2023.
+[39] Han Xiao, Kashif Rasul, and Roland V ollgraf. Fashion-mnist: a novel image dataset for bench-
+marking machine learning algorithms. arXiv preprint arXiv:1708.07747 , 2017.
+18[40] Liangkun Yu, Rana Albelaihi, Xiang Sun, Nirwan Ansari, and Michael Devetsikiotis. Jointly
+optimizing client selection and resource management in wireless federated learning for internet
+of things. IEEE Internet of Things Journal , 9(6):4385–4395, 2021.
+[41] Liangqi Yuan, Ziran Wang, Lichao Sun, Philip S. Yu, and Christopher G. Brinton. Decentral-
+ized federated learning: A survey and perspective. IEEE Internet of Things Journal , 11(21):
+34617–34638, November 2024. ISSN 2372-2541.
+[42] Yifei Zhang, Dun Zeng, Jinglong Luo, Xinyu Fu, Guanzhong Chen, Zenglin Xu, and Irwin
+King. A survey of trustworthy federated learning: Issues, solutions, and challenges. ACM
+Transactions on Intelligent Systems and Technology , 15(6):1–47, October 2024. ISSN 2157-
+6912.
+[43] Jianxin Zhao, Xinyu Chang, Yanhao Feng, Chi Harold Liu, and Ningbo Liu. Participant se-
+lection for federated learning with heterogeneous data in intelligent transport system. IEEE
+Transactions on Intelligent Transportation Systems , 24(1):1106–1115, 2023.
+19
