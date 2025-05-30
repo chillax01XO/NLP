@@ -1,0 +1,692 @@
+arXiv:2505.20714v1  [cs.NI]  27 May 2025Wideband RF Radiance Field Modeling Using
+Frequency-embedded 3D Gaussian Splatting
+Zechen Li1∗Lanqing Yang1∗Yiheng Bian1Hao Pan1†
+Yongjian Fu2Yezhou Wang1Yi -Chao Chen1Guangtao Xue1Ju Ren3
+1Shanghai Jiao Tong University2Central South University3Tsinghua University
+{zechlee, yanglanqing, byhbye123, panh09,
+yezhouwang, yichao, gt_xue}@sjtu.edu.cn
+fuyongjian@csu.edu.cn renju@tsinghua.edu.cn
+Abstract
+This paper presents an innovative frequency-embedded 3D Gaussian splatting
+(3DGS) algorithm for wideband radio-frequency (RF) radiance field modeling,
+offering an advancement over the existing works limited to single-frequency mod-
+eling. Grounded in fundamental physics, we uncover the complex relationship
+between EM wave propagation behaviors and RF frequencies. Inspired by this,
+we design an EM feature network with attenuation and radiance modules to learn
+the complex relationships between RF frequencies and the key properties of each
+3D Gaussian, specifically the attenuation factor and RF signal intensity. By train-
+ing the frequency-embedded 3DGS model, we can efficiently reconstruct RF
+radiance fields at arbitrary unknown frequencies within a given 3D environment.
+Finally, we propose a large-scale power angular spectrum (PAS) dataset contain-
+ing 50000 samples ranging from 1 to 100 GHz in 6 indoor environments, and
+conduct extensive experiments to verify the effectiveness of our method. Our
+approach achieves an average Structural Similarity Index Measure (SSIM) up
+to 0.72, and a significant improvement up to 17.8% compared to the current
+state-of-the-art (SOTA) methods trained on individual test frequencies. Addi-
+tionally, our method achieves an SSIM of 0.70 without prior training on these
+frequencies, which represents only a 2.8% performance drop compared to models
+trained with full PAS data. This demonstrates our model’s capability to estimate
+PAS at unknown frequencies. For related code and datasets, please refer to
+https: // github. com/ sim-2-real/ Wideband3DGS .
+1 Introduction
+Radio frequency (RF) signals constitute various wireless systems that offer numerous conveniences
+in daily life. For instance, low-frequency RFID is utilized for object identification [ 1],5GHz
+WiFi/Bluetooth facilitates communication and device connectivity [ 2], and 77-81GHz FMCW radar
+is employed for human motion detection [ 3]. Efficient comprehension of these RF signal channels
+is crucial for optimizing wireless systems [ 4]. However, due to the complex nature of RF signal
+propagation, modeling RF radiance fields remains a significant challenge [5–7].
+Neural radiance fields (NeRF [ 8]), originally developed for visible light modeling using deep
+learning, have been extended to RF radiation field reconstruction, seen in Nerf2 [ 9] and NeWRF
+[10]. However, these approaches face issues such as high training costs, slow rendering, and limited
+∗Both authors contributed equally.
+†Corresponding author.
+Preprint. Under review.interpretability [ 11]. Inspired by 3D Gaussian Splatting (3DGS [ 12–17]) technology, researchers
+have proposed WRF-GS [ 18] and RF-3DGS [ 19], which facilitate ease of training and fast rendering
+speeds while achieving reconstruction performance comparable to NeRF-based methods. However,
+existing works primarily focus on modeling RF radiation fields at a single frequency, despite daily
+scenarios often involving RF signals across wideband [ 20,21]. Given that current methods use
+specific frequency datasets to train models, developing a wideband model based on existing work
+would require retraining a model for each new frequency. Additionally, these methods cannot transfer
+trained models to frequency bands without datasets, highlighting a key limitation. This raises a
+research question: Can we design a unified model to model RF radiation fields within a given 3D
+scene, allowing inference of radiation fields across all frequencies within a broad range?
+In electromagnetic physics, reflection, transmission, and absorption are closely related to a material’s
+frequency-dependent permittivity and conductivity, while diffraction is highly-related to wavelength
+and obstacle size [ 22]. Consequently, EM waves of different frequencies exhibit varying propaga-
+tion behaviors [ 23], which are strongly frequency-dependent but complex, also influenced by the
+environment’s 3D configuration and material properties.
+This paper proposes a frequency embedding-based 3DGS algorithm for unified modeling of wideband
+RF radiation fields. Based on Huygens’ principle [ 24], we use 3D Gaussians to represent new
+wave sources formed when original EM waves encounter obstacles. The EM-related parameters of
+these Gaussian spheres, such as attenuation factor and signal intensity, are used to describe specific
+information about these new wave sources. We embed frequency features into the EM-related
+parameters of each 3D Gaussian to explore the complex relationship between these parameters and
+frequency. Specifically, we propose two modules, the attenuation network and the radiance network,
+to capture information on the attenuation and signal intensity of each 3D Gaussian under different
+frequencies and transmitter antenna positions. Once the entire model is adequately trained, it can
+interpret the RF channel information (e.g., power angular spectrum) across a wideband within a
+specified 3D environment. Given the position and operating frequency of a transmitting antenna, our
+frequency-embedded 3DGS model can determine the parameters of all Gaussian spheres, then use
+projection rendering and differential tile rasterization to generate the power angular spectrum (PAS)
+for a given receiving antenna.
+We employ the NVIDIA sionna simulator [25] to generate PAS datasets in six indoor environments,
+covering an ultra-wideband range from 1GHz to 100GHz. After training on the simulated wideband
+dataset, our model can successfully predict the PAS of the receiving antenna at different frequency
+points and transmitter antenna positions within a given environment. The predicted SSIM metric
+shows an average improvement of 17.8%over6different scenes, surpassing the current SOTA method
+trained on individual test frequencies. This indicates that unified modeling of wideband RF radiation
+fields, by fully leveraging cross-band information, can enhance the model’s understanding of EM
+wave propagation at specific frequencies in the current 3D environment. Additionally, our model
+demonstrates strong capability in estimating angle power spectra at unknown frequencies, with only
+a2.8%difference compared to trained frequencies. Extensive experiments verify that our model can
+implement unified modeling of RF radiation fields across wideband.
+Our contributions are summarized as follows:
+•We are the first to propose a unified RF radiance field modeling solution across wideband, in-
+troducing a frequency-embedded 3DGS model that can reconstruct power angular spectrum
+with any TX antenna position and frequency in a given 3D scene.
+•We design the attenuation and radiance network modules with frequency embeddings to
+learn the frequency-dependent attenuation factor and signal intensity of each 3D Gaussian.
+•We generate the novel wideband power angular spectrum dataset ( 1-100GHz, 6indoor
+environments, 50000 samples in total) and open-source the code and dataset.
+•Extensive experiments show that our model surpasses the current SOTA by 17.8%SSIM in
+PAS prediction and exhibits commendable predictive capability at untrained frequencies.
+2 Related Work
+Modeling visible light radiance fields is a hot research area as it supports various computer vision
+tasks [ 26]. However, RF radiance fields, with frequencies much lower than visible light, are more
+2(a) Complex propagation behav-
+iors of the EM waves
+(b) Reflection and transmission (re-
+fraction) at the obstacle face
+(c) Diffraction at the obstacle edge
+Figure 1: EM waves exhibit complex propagation behaviors that are closely influenced by factors
+such as materials, wavelengths, and the shapes of obstacles.
+complex to model due to their intricate propagation characteristics and multipath effects [ 27]. Recent
+studies have explored deep learning for RF radiance field modeling, employing neural networks to
+learn the complex wireless channel in the environment. Adita et al. [ 28] introduced a LSTM/GRU-
+based autoencoders to predict the wireless channel quality. Liu et al. [ 29] proposed FIRE, utilizing
+variational autoencoders (V AE) to estimate the downlink channel information from the uplink.
+Inspired by the NeRF [ 8], several studies have applied it to RF radiance field modeling [ 10,19,30].
+Orekondy et al. [ 30] presented a neural surrogate model based on NeRF to simulate EM propagation
+behaviors indoors. Zhao et al. [ 19] proposed NeRF2, a wireless radiance reconstruction method based
+on NeRF, to predict the power angular spectrum at receiver antennas with unmeasured transmitter
+antenna’s location using channel measurements collected from a real-world indoor environment for
+training. Lu et al. [ 10] proposed NeWRF to achieve wireless channel estimation of any unknown
+positions. However, NeRF-based methods often encounter challenges such as high computational
+complexity and slow synthesis speeds. Considering the advantages of 3DGS over NeRF, Wen et al.
+proposed WRF-GS [ 18], a method that substitutes the NeRF core in NeRF2 with 3DGS to enable fast
+training and rendering for the power angular spectrum reconstruction task. Zhang et al. presented
+RF-3DGS [ 19], which uses 3DGS to reconstruct dense wireless channel with limited measured
+receiving samples, given a specific 3D environment and a fixed transmitter antenna.
+Existing research mainly focuses on single-frequency scenarios, resulting in a gap in wideband RF
+radiance field modeling. This paper aims to address this gap. Next, we first explore the relation-
+ship between EM wave propagation and frequency within a specific 3D environment, grounded in
+fundamental physics. Then, we introduce a frequency-embedded 3DGS model to facilitate unified
+modeling and reconstruction of wideband RF radiance fields.
+3 Preliminary
+3.1 Primer on Electromagnetics
+RF radiation field reconstruction involves using sparse RF signal samples from a given environment
+to reconstruct the radiance field throughout the area. The reconstruction algorithm is required to
+understand various propagation behaviors such as reflection, transmission, refraction, diffraction, and
+absorption. Moreover, the multipath effect occurs when EM waves from the same transmitting (TX)
+antenna travel along multiple paths and combine at the receiving (RX) antenna; this effect can lead to
+signal enhancement or attenuation. The complex propagation behaviors, as shown in Fig. 1(a), make
+RF modeling more challenging than modeling visible light. In this section, we will methodically
+analyze these propagation behaviors and explore their correlation with frequencies.
+As EM waves travel through the air with a distance d, their path loss is influenced by the frequency ( f):
+pathloss = 20log104πd f
+c, where cis the speed of light. When encountering an obstacle, as shown
+in Fig. 1(b), waves may reflect, transmit, or be absorbed. This behavior is primarily determined by
+the material’s permittivity ( ϵm) and conductivity ( µm). Utilizing equivalent circuit models [ 31] and
+S-parameter formulas [ 32], we can derive reflection rate ( R) asR=|√ηm−√η0√ηm+√η0|2, transmission rate
+(T) as T=|2√η0√ηm+√η0|2, and absorption ( A) as:A= 1−R−T. Among them, ηm=µm
+ϵm,η0=µ0
+ϵ0,
+where ϵ0andµ0are the permittivity and conductivity of the air. We can derive the relationship
+between the angle of refraction (i.e., transmission in the obstacle) θtand the angle of incidence θi:
+3sin(θt)
+sin(θi)=q
+ϵmµm
+ϵ0µ0. It is important to note that these parameters, ϵandµ, of any material depend
+on frequency and can be represented as ϵ(f)andµ(f)[33]. Thus, we conclude that reflection,
+transmission (refraction), and absorption of EM waves when encountering obstacles are related to
+material’s frequency-dependent properties.
+When EM waves encounter the edges of an obstacle, diffraction occurs, as illustrated in Fig. 1(c).
+Using the Uniform Theory of Diffraction (UTD) [ 34], we can express the relationship between
+the diffracted EM field ( Ed) and the incident EM field ( Ei) in a simplified form: Ed=
+EiD(θi, θd, k, ϵ m, µm)F, where θiis the incident angel, θdis the diffracted angle, k is wavenumber:
+k=2πf
+c. The diffraction factor D(.)describes changes in an EM wave’s amplitude and phase as it
+passes an edge, and Frepresents a polarization factor. Thus, we can also conclude that diffraction
+when EM waves encounter obstacle’s edges is also strongly correlated with EM wave frequency.
+3.2 3D Gaussian Representation of EM Wave Propagation
+The 3DGS technique is extensively used in optical radiation field reconstruction. According to
+the Huygens-Fresnel principle [ 35], each point on a wavefront acts as a secondary source, with
+propagation being the superposition of these secondary sources. When EM waves encounter obstacles,
+their propagation changes significantly, creating new EM radiation sources with distinct properties.
+Therefore, 3DGS is highly suitable for RF radiation field, involves modeling each 3D point on an
+object’s surface or edge as a 3D Gaussian and capturing the new source characteristics when the
+EM waves meet that point. The 3D Gaussian encompasses not only position, rotation, and weight
+related to its spatial attributes but also EM-related characteristics such as the attenuation factor and
+RF signal radiance intensity. Specifically, the signal intensity refers to the EM energy produced when
+the Gaussian sphere acts as a secondary wave source. The attenuation factor describes each Gaussian
+sphere’s hierarchical influence on EM waves reaching the receiving antenna, reflecting its role in the
+overall wave superposition. Thus, the EM propagation behaviors at each 3D point can be directly
+modeled using specific parameters of the 3D Gaussian.
+3.3 Power Angular Spectrum
+Z
+Y90°
+X
+0180°Elevation ( 𝜽𝒓)Incident 
+Signal
+RX 
+Antenna 
+Array
+90°Azimuth ( 𝝓𝒓)
+Figure 2: An exmaple of the power
+angular spectrum.The RF radiation field describes the spatial distribution and
+propagation characteristics of EM waves. However, specific
+modeling often employs representations like wireless channels
+or power angular spectra (PAS) to characterize these fields. In
+this paper, we draw on NeRF2 [ 9] and WRF-GS [ 18] to design
+a PAS reconstruction task for assessing the model’s capability
+in RF radiation field modeling. Fig. 2 illustrates an example
+of a PAS, with the top part showing a 3D view centered on the
+receiving antenna array to depict the spatial angular distribution
+of EM waves; the bottom part is a 2D representation where
+thexandyaxes represent azimuth and elevation angles, and
+color indicates RF signal energy. In this work, we define the
+azimuth angle range as 0∼360◦and the elevation angle range
+as0−90◦for hemispherical radiation of the receiving antenna’s
+direction. Thus, the PAS image dimensions are 90×360, with
+each pixel representing energy information.
+4 Method Design
+4.1 Overview
+Modeling task: We first review the RF radiation field modeling tasks of existing works [ 9,18].
+Given a 3D scene with a pair of TX and RX antennas, the process of training dataset collection involves
+adjusting the position of the TX antenna, and recording the PAS at the RX antenna. Subsequently,
+the task is to utilize the measured PAS data to train a model with the capability to reconstruct the
+RX antenna’s PAS for any position of the TX antenna. However, these models are restricted to
+single-frequency point modeling.
+4Figure 3: Architecture of the frequency embedding-based 3D Gaussian Splatting model.
+To address this limitation, we propose a unified modeling task for wideband RF radiation fields.
+During the training data collection, when we move the TX to one position, we apply various TX
+antennas that operating across wideband to emit EM waves, and the corresponding various RX phased
+array antennas record the wideband PAS. Then, our task is to use these measured wideband PAS
+datasets to train a model that can that can reconstruct the RX antenna’s PAS for any TX antenna
+position and any RF frequency.
+Our approach: Our model is based on 3DGS technology and incorporates frequency embedding
+modules to learn the complex relationship between EM wave propagation behavior and frequency.
+As illustrated in Fig. 3, our proposed model consists of two parts: a 3DGS model for PAS synthesis
+and an EM feature network for learning the feature parameters related to EM propagation within the
+3D Gaussians.
+We initialize the positions of the 3D Gaussians based on point cloud information from the 3D scene,
+while other Gaussian properties are either randomly initialized or assigned default values. The EM
+feature network takes as input the position of the TX antenna, the frequency value, and the positions of
+the 3D Gaussians, and then outputs the frequency-embedded EM propagation-related parameters, i.e.,
+the attenuation factors and signal intensities, for all 3D Gaussians. By using a tile-based differentiable
+rasterizer, 3D Gaussians are splatted onto the projected RX view hemisphere to predict the PAS.
+During training, the loss gradient between the predicted PAS and the simulated ground truth PAS
+is propagated backwards to update the Gaussian properties and the parameters of the EM feature
+network.
+4.2 Frequency-embedding Modules
+In the visual rendering tasks, 3D Gaussians employ spherical harmonics (SH) to represent RGB
+features due to the fixed position of the light source and the varying camera poses. However, in our
+task, the position of the TX antenna changes during measurement, making SH function insufficient to
+accurately describe the complex EM wave propagation.
+Considering that each 3D Gaussian represents a part of the object (e.g., mesh or edge), when an
+incident EM wave excite a 3D Gaussian, its characteristics, such as attenuation ( δ) and signal
+intensity ( Sig), change according to the properties of the EM waves. Firstly, the position of the
+TX determines the incident direction of the EM waves, which influences reflection, diffraction, and
+other related directions. Secondly, the frequency-dependent nature of material properties, such as
+relative permittivity and conductivity, affects the ratios of reflection and transmission. As a result, the
+attenuation and signal intensity characteristics, referred to as EM propagation features, are influenced
+by both the position and the operational frequency of the transmitting antenna. Conversely, the
+spatial features of the Gaussians, such as position, scaling, and rotation, remain invariant. This
+stability enables the use of machine learning methods to effectively capture the dynamically changing,
+frequency-dependent EM feature parameters. Thus we design a EM feature network, and it can be
+5expressed as follows:
+FΘ: (P(G), P(TX), freq )→(δ(G), Sig(G)) (1)
+All the inputs, 3D Guassians’ positions, TX antenna’s position, and the frequency, are embedded
+into vectors by positional encoding, then fed into the two neural networks successively. The first
+is an attenuation network that inputs the Gaussians P(G), the TX position P(TX)and the signal
+frequency freq , and outputs the hidden EM propagation feature vectors h(G)and the Gaussian
+attenuation δ(G):
+FΘ1: (P(G), P(TX), freq )→(h(G), δ(G)) (2)
+The second module is a radiance network taking EM propagation features h(G)from the attenuation
+network and the embedded frequency freq as input to output the RF signal intensity Sig(G):
+FΘ2: (h(G), freq )→(Sig(G)) (3)
+The reason for using embedded frequency in both two modules is that during the learning process
+of Gaussian attenuation, h(G)may lose some frequency information. Therefore, concatenating the
+embedded frequency with h(G)again ensures that the radiance network can effectively utilize the
+frequency embedding. The detailed network structure design of these two modules is provided in the
+supplementary material.
+4.3 RX View Projection
+The PAS represents the received signal distribution of RX antenna array on a hemisphere, but the
+synthesis plane of 3DGS is the view projection plane of a camera. Therefore, a virtual camera
+imaging plane is constructed based on the RX position and orientation, then an indirect projection
+from the camera imaging plane onto the hemisphere of RX array is applied.
+Given a point P= (x, y, z )in the Cartesian coordinate ( z≥0), the target is to project it onto the
+spatial spectrum hemisphere, where the corresponding angle pixel is represented as p= (px, py). The
+azimuth angle ϕ∈[−π, π]and the zenith angle θ∈[0, π/2]can be obtained by ϕ=atan2(x, y) =
+sgn(y)arctan (y/x)andθ=arccos (z/r), where atan2(·)is the four-quadrant inverse tangent
+function, sgn(·)is the sign function, and r=p
+x2+y2+z2is the Euclidean distance between P
+and the Cartesian origin. Then the angles can be scaled and shifted into the spectrum resolution range
+withpx=ϕ+π
+πWandpy=θ
+π/2H, where W×His the spectrum resolution.
+4.4 Power Angular Spectrum Rendering
+After 3D Gaussians are projected onto the spectrum hemisphere as 2D Gaussians, these 2D Gaussians
+can be used to render the PAS, similar to the differentiable tile-based rasterization algorithm of the
+optical 3DGS model. Since each 2D Gaussian can affect multiple pixels, splitting the PAS into tiles
+containing adjacent pixels instead of fine-grained pixels for parallel rendering can speed up the PAS
+synthesis.
+Currently each Gaussian may cover multiple tiles while each tile contains multiple Gaussians. For
+each 2D Gaussian, if it covers ttiles, it will be instantiated for ttimes with a key combining its view
+depth and tile ID. Then these Gaussian instances are sorted by the key, creating a depth-increasing
+order corresponding to each tile.
+For each pixel within a tile, the value of EM signal is accumulated according to the Gaussians
+covering it. Assuming that a pixel contains NGaussians, the signal Sig(Gi)of a Gaussian Gishould
+be attenuated by its former Gaussians’ attenuation δ, which is between Giand the RX. Therefore, the
+value of the pixel pis:
+I(p) =NX
+i=1(i−1Y
+j=1δ(Gj))Sig(Gi) (4)
+4.5 Model Training
+Initiated from the scenario point clouds, the Gaussians adaptively control their density every few
+epochs to better reconstruct the objects in the space [ 36]. If a Gaussian’s positional gradients are
+6large, it means that this Gaussian is not well-reconstructed yet. Small Gaussians indicate under-
+reconstruction, so they are cloned and the cloned Gaussian is moved along the direction of positional
+gradients, while large Gaussians imply over-reconstruction, and they are split into two smaller ones
+sampled from the original Gaussian. If a Gaussian’s attenuation factor δis less than a threshold ϵδ,
+the Gaussian will be removed, as it is considered to make minimal contributions. In addition, the δ
+of each Gaussian is reset close to zero every few epochs as a strategy for adaptive density control
+and removal of useless Gaussians. The parameters of the 3D Gaussians and EM feature network are
+optimized by stochastic gradient descent (SGD) and the loss between predicted PAS and ground truth.
+The loss function is a combination of the L1loss and the structural similarity index measure (SSIM)
+loss, where λis set to 0.2:
+L= (1−λ)L1+λLSSIM (5)
+During model training, we found that directly using the output of the attenuation module to completely
+replace the attenuation factor of 3DGS often leads to non-convergence and poor performance. This
+may be due to a conflict between the adaptive density control and the network learning process.
+Therefore, we retain the attenuation characteristic δofor each Gaussian and use the output of the
+attenuation network as the residual correction term δf. Then, δo+δfis used as the final attenuation
+factor. This approach allows us to update the final attenuation factor in 3D Gaussians by learning
+the residual values, ensuring the model more stably and accurately reflects changes in attenuation
+characteristics. Thus, for the final PAS rendering and training processes, we modify Eq. 4 as follows:
+I(p) =NX
+i=1(i−1Y
+j=1(δo(Gj) +δf(Gj)))Sig(Gi) (6)
+5 Evaluation
+5.1 Dataset Description and Experiment Setup
+Currently, there is no dataset available that supports the task of PAS reconstruction across wideband.
+To address this, we construct a large-scale simulated wideband angle power spectrum dataset that
+spans the frequency range of 1-100GHz and includes 6different indoor scenarios. Specifically, in
+a3Denvironment, we utilize the NVIDIA sionna simulator [ 25] to model the propagation of EM
+waves emitted by the TX antenna, and employ the conventional beam forming (CBF [ 37]) method to
+generate PAS image at the location of the RX antennas. In the simulation settings, the RX is a 4×4
+antenna array with each antenna being directional, while the TX antenna is a single omnidirectional
+antenna. In each 3D scenario, we uniformly sample 900different TX positions and remove the
+inaccessible ones, allowing the RX to receive diverse signals from TX at various positions. For
+each TX position, we adjust the frequencies of the TX, the RX, and the materials’ permittivity and
+conductivity to simulate the propagation behavior of EM waves at different frequencies and generate
+the corresponding PAS data. In six different scenarios, we select 10common frequency points and
+generate the corresponding PAS datasets. Additionally, to study the impact of a larger number of
+frequency points on our model’s ability of the wideband RF radiance field modeling, we select one
+scenario and simulate 21frequency points that are uniformly distributed between 1and100GHz.
+For detailed information on the data generation process and the specific parameter settings of the
+sionna software, please refer to the supplementary material.
+For each 3D environment, we use wideband PAS images to train our proposed frequency-embedded
+3DGS model and reconstruct the RF radiance field. Specifically, we divide the PAS image dataset
+according to the TX positions, with 80% used for training and 20% for testing. This means all
+frequency points in the scenario share the same training/testing TX position. Additionally, we divided
+the frequencies into a training set and a testing set to validate our model’s reconstruction ability at
+previously unseen frequencies. We use the Structural Similarity Index (SSIM [ 38]) between the
+predicted PAS image and the simulated ground truth as a criterion for quantitatively evaluating the
+model’s performance.
+Our model is implemented in python, with both training and rendering conducted on an NVIDIA
+A800 GPU equipped with 80 GB of graphics memory. For access to the code, please refer to the
+supplementary material.
+7Table 1: Overall evaluation in 6scenes at 10frequencies
+Median SSIM at 10single frequencies
+Scene Model 1 2 .4 5 10 24 .25 37 47 60 77 94 Avg.
+1WRF-GS 0.72 0 .68 0 .66 0 .65 0 .64 0 .62 0 .64 0 .64 0 .65 0 .64 0 .651Ours 0.76 0.75 0.73 0.73 0.74 0.74 0.74 0.74 0.75 0.74 0.74
+2WRF-GS 0.54 0 .54 0 .50 0 .55 0 .54 0 .52 0 .51 0 .52 0 .51 0 .51 0 .522Ours 0.58 0.61 0.59 0.58 0.60 0.59 0.58 0.57 0.59 0.59 0.59
+3WRF-GS 0.53 0 .51 0 .50 0 .52 0 .50 0 .49 0 .47 0 .50 0 .53 0 .48 0 .503Ours 0.58 0.63 0.61 0.61 0.62 0.61 0.60 0.61 0.58 0.60 0.60
+4WRF-GS 0.60 0 .58 0 .54 0 .52 0 .54 0 .55 0 .54 0 .53 0 .51 0 .54 0 .554Ours 0.70 0.65 0.62 0.64 0.66 0.62 0.62 0.67 0.65 0.65 0.65
+5WRF-GS 0.56 0 .54 0 .53 0 .56 0 .54 0 .54 0 .53 0 .50 0 .54 0 .55 0 .545Ours 0.65 0.65 0.65 0.67 0.64 0.65 0.65 0.64 0.67 0.66 0.65
+6WRF-GS 0.64 0 .61 0 .60 0 .61 0 .58 0 .61 0 .57 0 .61 0 .60 0 .59 0 .606Ours 0.76 0.72 0.69 0.73 0.71 0.73 0.72 0.73 0.73 0.70 0.72
+Figure 4: Overall PAS visualization at diverse frequencies and different positions.
+5.2 Overall Evaluation
+To validate the performance of our system, we design a series of experiments to compare it with
+the current SOTA method, WRF-GS [ 18]. Since WRF-GS can only reconstruct PAS at a single
+frequency, we conduct experiments on datasets across 6scenarios and 10frequency bands. For each
+3D scenario, we train a specific WRF-GS model for each frequency and assessed its performance on
+the corresponding test set. In contrast, for each 3D scenario, we train our frequency-embedded 3DGS
+model using data from all 10frequency bands and then evaluated its performance using test sets from
+each individual frequency band.
+Tab. 1 presents the detailed results of the comparative experiments. Scenes 1and6are indoor rooms
+containing simple objects, whereas scenes 2,3,4, and5are more complex indoor environments with
+inner walls and open doors. For detailed 3D models, please refer to Fig. 5 in the appendix. As
+a result, the PAS prediction in scenes 2to5seems to be worse than in scenes 1and6. However,
+whether in simple or complex scenarios, it is exciting to find that our proposed wideband 3DGS model
+outperforms the existing SOTA across every 3D scenario and frequency band. Statistical analysis
+shows that our method achieves an average PAS prediction SSIM of 0.66across all frequencies,
+whereas the 10 specifically trained SOTA models have an average prediction SSIM of 0.56, resulting
+in an improvement of 17.8%. Fig. 4 presents partial visual results of PAS reconstruction. It is clear
+that our method not only surpasses the current SOTA in terms of the SSIM, but also visually appears
+closer to the GT than SOTA.
+To explore model performance across more frequency points, we conduct a comparison between our
+model and SOTA across 21frequencies in Scene 1. The experimental results, as shown in Fig. 7,
+indicate that our model achieves an average median SSIM of 0.72across 21frequencies, whereas
+the SOTA only achieves an average of 0.63. In every frequency, our model consistently outperforms
+the SOTA, with an average improvement of 14.3%. This confirms that our model continues to excel
+compared to the SOTA, even when predicting tasks involving 21frequencies from 1to100GHz.
+8Table 2: Cross-frequency prediction in
+6scenes at 10frequencies, with detailed
+combinations C1-C4 listed in Tab. 5
+Scene C1 C2 C3 C4
+1 0.75 0.74 0 .73 0 .70
+2 0.70 0.68 0 .67 0 .64
+3 0.67 0.66 0 .63 0 .58
+4 0.72 0.71 0 .70 0 .66
+5 0.70 0.69 0 .63 0 .63
+6 0.74 0.70 0 .69 0 .57Table 3: Ablation study of two modules, ✓/×denotes
+with/without frequency-embedding
+Module SSIM
+Attenuation
+freq. emb.Radiance
+freq. emb.All freq. Cross freq.
+✓ ✓ 0.72 0.73
+× ✓ 0.71 0 .71
+✓ × 0.71 0 .71
+× × 0.63 0 .53
+Based on the experimental results, we draw the following findings: (1) By designing a unified
+3DGS model, we can effectively model the RF radiance fields across different frequency bands;
+(2) Our frequency-embedded 3DGS model, trained on multi-frequency PAS data, outperforms
+single-frequency-trained SOTA 3DGS models. This phenomenon indicates that a model capable of
+understanding RF radiation fields across multiple frequency bands can achieve a deeper comprehen-
+sion of EM wave propagation behavior at a specific frequency in an entire 3D scene.
+5.3 Cross-frequency Prediction
+To explore our model’s ability to predict the PAS at unknown (i.e., untrained) frequencies, we
+conducted cross-frequency experiments across all 6 scenes, selecting several out of 10 frequencies as
+training frequencies, while the remaining frequencies were used for testing. The divisions between
+training and testing frequencies are detailed in Tab. 5. Note that in this experiment, we utilize all
+the TX positions for training in each scene. The results of the cross-frequency experiments are
+presented in Tab. 2. The findings indicate that (1) our model can accurately predict the PAS in a
+given environment at untrained frequency bands, and (2) using more training frequencies improves
+the performance and stability of our model.
+We also conduct a cross-frequency experiment on the dataset of 21 frequencies from Scene 1. The
+frequency combinations are listed in Tab. 6, and results are shown in Fig. 8. We find that training
+with 11 selected frequencies (see Combination D in Tab. 6) can achieve results close to which uses
+all frequencies for training. This insight suggests that when modeling a wideband RF radiance field
+for a scene, selecting key frequencies for data collection can be effective. Additionally, we discover
+that the 1GHz is particularly important for modeling, possibly due to its rich diffraction information.
+5.4 Ablation Study
+Our system incorporates frequency embeddings to learn the attenuation and signal radiance features
+of the 3D Gaussians. To evaluate the advantages of our proposed EM feature network with frequency
+embedding, we conduct another ablation studies across 21 frequencies in Scene 1, at all-frequency
+and cross-frequency of Combination D in Tab. 6, respectively. The results are summarized in Tab. 3,
+where we compare the performance of PAS reconstruction when predicting at unknown TX or
+unknown frequencies. It is indicated that using either the frequency-embedded attenuation network
+or signal radiance network can increase SSIM of 0.08 to 0.18 compared to SOTA in PAS prediction
+tasks. When both frequency embedding modules are used together, PAS prediction SSIM is further
+enhanced, with an additional improvement of 0.09 to 0.20. Each module can learn the mapping
+of parameters related to EM wave propagation with frequency in the 3D Gaussians, so using just
+one module significantly improves performance. Combining both modules for EM feature learning
+achieves more robust and superior performance.
+6 Discussion and Conclusion
+In this paper, we propose a novel frequency-embedded 3DGS model to efficiently model RF radiation
+fields across wideband. Our approach utilizes attenuation and radiation modules to learn frequency-
+dependent features within 3D Gaussians, capturing the complex relationship between the EM wave
+propagation and the frequency.
+9Acquiring wideband PAS data presents significant challenges, as it requires multiple models of
+transmitting antennas, as well as phased array receivers, signal sources, and spectrum analyzers
+that operate across different frequency bands. We utilize NVIDIA sionna simulator to generate a
+large-scale simulated wideband PAS dataset and conducte extensive experiments to validate our
+method’s effectiveness. Although there is a gap between simulated and real-world data [ 39], the
+sionna, based on rigorous physical formulas, can accurately simulate the differences in EM wave
+propagation behavior across different frequency bands [ 25,40–42]. Thus, our experimental results
+can affirm the feasibility of utilizing a unified model to represent wideband EM wave propagation
+behavior.
+10References
+[1]S.I. Khan, B.R. Ray, and N.C. Karmakar. Rfid localization in construction with iot and security
+integration. Automation in Construction , 159:105249, 2024.
+[2]H.W. Cho and K.G. Shin. Drew: Double-throughput emulated wifi. In Proceedings of the 30th
+Annual International Conference on Mobile Computing and Networking , pages 663–678. ACM,
+2024.
+[3]F. Ding, Z. Luo, P. Zhao, et al. Milliflow: Scene flow estimation on mmwave radar point cloud
+for human motion sensing. In European Conference on Computer Vision , pages 202–221, Cham,
+2024. Springer Nature Switzerland.
+[4]C. De Alwis, A. Kalla, Q.V . Pham, et al. Survey on 6g frontiers: Trends, applications, require-
+ments, technologies and future research. IEEE Open Journal of the Communications Society , 2:
+836–886, 2021.
+[5]Robert G Kouyoumjian and Prabhakar H Pathak. A uniform geometrical theory of diffraction
+for an edge in a perfectly conducting surface. Proceedings of the IEEE , 62(11):1448–1461,
+2005.
+[6]Han Na and Thomas F Eibert. A huygens’ principle based ray tracing method for diffraction
+calculation. In 2022 16th European Conference on Antennas and Propagation (EuCAP) , pages
+1–4. IEEE, 2022.
+[7]James Clerk Maxwell. A treatise on electricity and magnetism , volume 1. Clarendon press,
+1873.
+[8]Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik, Jonathan T Barron, Ravi Ramamoor-
+thi, and Ren Ng. Nerf: Representing scenes as neural radiance fields for view synthesis.
+Communications of the ACM , 65(1):99–106, 2021.
+[9]Xiaopeng Zhao, Zhenlin An, Qingrui Pan, and Lei Yang. Nerf2: Neural radio-frequency radiance
+fields. In Proceedings of the 29th Annual International Conference on Mobile Computing and
+Networking , pages 1–15, 2023.
+[10] Haofan Lu, Christopher Vattheuer, Baharan Mirzasoleiman, and Omid Abari. Newrf: A deep
+learning framework for wireless radiation field reconstruction and channel prediction. arXiv
+preprint arXiv:2403.03241 , 2024.
+[11] R. Ma, S. Zheng, H. Pan, et al. Automs: Automated service for mmwave coverage optimization
+using low-cost metasurfaces. In Proceedings of the 30th Annual International Conference on
+Mobile Computing and Networking , pages 62–76. ACM, 2024.
+[12] Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis. 3d gaussian
+splatting for real-time radiance field rendering. ACM Trans. Graph. , 42(4):139–1, 2023.
+[13] Z. Fan, K. Wang, K. Wen, et al. LightGaussian: Unbounded 3D Gaussian Compression
+with 15x Reduction and 200+ FPS. Advances in Neural Information Processing Systems , 37:
+140138–140158, 2024.
+[14] G. Fang and B. Wang. Mini-Splatting: Representing Scenes with a Constrained Number of
+Gaussians. In European Conference on Computer Vision , pages 165–181, Cham, 2024. Springer
+Nature Switzerland.
+[15] S. Girish, K. Gupta, and A. Shrivastava. Eagles: Efficient Accelerated 3D Gaussians with
+Lightweight Encodings. In European Conference on Computer Vision , pages 54–71, Cham,
+2024. Springer Nature Switzerland.
+[16] J. C. Lee, D. Rho, X. Sun, et al. Compact 3D Gaussian Representation for Radiance Field. In
+IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 21719–
+21728. IEEE, 2024.
+11[17] Michael Niemeyer, Fabian Manhardt, Marie-Julie Rakotosaona, Michael Oechsle, Daniel
+Duckworth, Rama Gosula, Keisuke Tateno, John Bates, Dominik Kaeser, and Federico Tombari.
+Radsplat: Radiance field-informed gaussian splatting for robust real-time rendering with 900+
+fps.arXiv preprint arXiv:2403.13806 , 2024.
+[18] Chaozheng Wen, Jingwen Tong, Yingdong Hu, Zehong Lin, and Jun Zhang. Wrf-gs: Wireless
+radiation field reconstruction with 3d gaussian splatting. arXiv preprint arXiv:2412.04832 ,
+2024.
+[19] Lihao Zhang, Haijian Sun, Samuel Berweger, Camillo Gentile, and Rose Qingyang Hu. Rf-3dgs:
+Wireless channel modeling with radio radiance field and 3d gaussian splatting. arXiv preprint
+arXiv:2411.19420 , 2024.
+[20] Xiaoyu Zhang, Weihong Pan, Chong Bao, Xiyu Zhang, Xiaojun Xiang, Hanqing Jiang, and
+Hujun Bao. Lookcloser: Frequency-aware radiance field for tiny-detail scene. arXiv preprint
+arXiv:2503.18513 , 2025.
+[21] Douglas Paul, Michel S Nakhla, Ramachandra Achar, and Andreas Weisshaar. Broadband
+modeling of high-frequency microwave devices. IEEE transactions on microwave theory and
+techniques , 57(2):361–373, 2009.
+[22] John Maxwell Cowley. Diffraction physics . Elsevier, 1995.
+[23] Akira Ishimaru. Electromagnetic wave propagation, radiation, and scattering: from fundamen-
+tals to applications . John Wiley & Sons, 2017.
+[24] Bevan B Baker and Edward Thomas Copson. The mathematical theory of Huygens’ principle ,
+volume 329. American Mathematical Soc., 2003.
+[25] Jakob Hoydis, Sebastian Cammerer, Fayçal Ait Aoudia, Avinash Vem, Nikolaus Binder,
+Guillermo Marcus, and Alexander Keller. Sionna: An open-source library for next-generation
+physical layer research. arXiv preprint arXiv:2203.11854 , 2022.
+[26] Kyle Gao, Yina Gao, Hongjie He, Dening Lu, Linlin Xu, and Jonathan Li. Nerf: Neural radiance
+field in 3d vision, a comprehensive review. arXiv preprint arXiv:2210.00379 , 2022.
+[27] Wen Jiang, Boshu Lei, and Kostas Daniilidis. Fisherrf: Active view selection and uncertainty
+quantification for radiance fields using fisher information. arXiv preprint arXiv:2311.17874 ,
+2023.
+[28] Adita Kulkarni, Anand Seetharam, Arti Ramesh, and J Dinal Herath. Deepchannel: Wireless
+channel quality prediction using deep learning. IEEE Transactions on Vehicular Technology , 69
+(1):443–456, 2019.
+[29] Zikun Liu, Gagandeep Singh, Chenren Xu, and Deepak Vasisht. Fire: enabling reciprocity for
+fdd mimo systems. In Proceedings of the 27th Annual International Conference on Mobile
+Computing and Networking , pages 628–641, 2021.
+[30] Tribhuvanesh Orekondy, Pratik Kumar, Shreya Kadambi, Hao Ye, Joseph Soriaga, and Arash
+Behboodi. Winert: Towards neural ray tracing for wireless channel modelling and differentiable
+simulations. In The Eleventh International Conference on Learning Representations , 2023.
+[31] Xiaosong Hu, Shengbo Li, and Huei Peng. A comparative study of equivalent circuit models
+for li-ion batteries. Journal of Power Sources , 198:359–367, 2012.
+[32] Fritz Caspers. Rf engineering basic concepts: S-parameters. arXiv preprint arXiv:1201.2346 ,
+2012.
+[33] David J. Griffiths. Introduction to Electrodynamics . Pearson, 3rd edition, 1999.
+[34] Nicolas Tsingos, Thomas Funkhouser, Addy Ngan, and Ingrid Carlbom. Modeling acoustics in
+virtual environments using the uniform theory of diffraction. In Proceedings of the 28th annual
+conference on Computer graphics and interactive techniques , pages 545–552, 2001.
+12[35] JR Mahan, NQ Vinh, VX Ho, and NB Munir. Monte carlo ray-trace diffraction based on the
+huygens–fresnel principle. Applied optics , 57(18):D56–D62, 2018.
+[36] G. Wu, T. Yi, J. Fang, et al. 4d gaussian splatting for real-time dynamic scene rendering. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages
+20310–20320. IEEE, 2024.
+[37] J. Benesty, J. Chen, and Y . Huang. Conventional Beamforming Techniques. In Microphone
+Array Signal Processing , pages 39–65. Springer, 2008.
+[38] Zhou Wang, Alan C Bovik, Hamid R Sheikh, et al. Image quality assessment: From error
+visibility to structural similarity. IEEE Transactions on Image Processing , 13(4):600–612, 2004.
+[39] Clement Ruah, Osvaldo Simeone, Jakob Hoydis, and Bashir Al-Hashimi. Calibrating wireless
+ray tracing for digital twinning using local phase error estimates. IEEE Transactions on Machine
+Learning in Communications and Networking , 2024.
+[40] Milica Ðor ¯devi´c, Nenad Jevti ´c, and Marija Malnar. Application of the sionna software for 5g/6g
+physical layer simulations. In 2024 32nd Telecommunications Forum (TELFOR) , pages 1–4.
+IEEE, 2024.
+[41] Jiechen Chen, Sangwoo Park, Petar Popovski, H Vincent Poor, and Osvaldo Simeone. Neu-
+romorphic split computing with wake-up radios: Architecture and design via digital twinning.
+IEEE Transactions on Signal Processing , 2024.
+[42] Roberto Pegurri, Francesco Linsalata, Eugenio Moro, Jakob Hoydis, and Umberto Spagnolini.
+Toward digital network twins: Integrating sionna rt in ns3 for 6g multi-rat networks simulations.
+arXiv preprint arXiv:2501.00372 , 2024.
+[43] wikipedia. 5G - Wikipedia — en.wikipedia.org. https://en.wikipedia.org/wiki/5G ,
+2025.
+13A Appendices
+A.1 Description of Six 3D Scenes
+Fig. 5 illustrates 6common indoor scenarios used in the experiments. Scenarios 1and6are sparsely
+arranged to simulate simplified indoor environments, while the remaining scenarios are more densely
+populated with objects, serving to evaluate the model’s performance on PAS prediction tasks under
+complex spatial conditions.
+(a) Scene 1
+ (b) Scene 2
+ (c) Scene 3
+(d) Scene 4
+ (e) Scene 5
+ (f) Scene 6
+Figure 5: 6scenes used in the experiments. The blue square indicates the position of RX.
+A.2 Selected Frequencies in Wideband
+We select 10commonly used wireless signal frequencies in the daily scenarios and their represen-
+tative applications. The specific frequency configurations employed in the experimental setup are
+determined based on this Tab. 4.
+Table 4: Commonly used radio frequencies and corresponding applications [1–3, 43]
+Freq. Band
+(GHz)Selected Freq.
+(GHz)Typical Applications
+0.9−1.0 1 .0 FM Radio, AM Radio
+2.4−2.5 2 .4 Wi-Fi (802.11b/g/n), Bluetooth, Zigbee, Microwave Ovens
+5.0−5.9 5 .0 Wi-Fi (802.11a/n/ac), 5G NR (New Radio), Short-Range Radar
+8.0−10.0 10 .0 Military Radar, Satellite Communication, Weather Radar
+24.25−27.5 24 .25 5G, Point-to-Point Communication
+37.0−40.0 37 .0 5G, Automotive Radar, Industrial Sensors
+47.0−50.0 47 .0 5G, Satellite Communication, Point-to-Point Links
+57.0−64.0 60 .0 WiGig (802.11ad), Short-Range Wireless Communication
+76.0−81.0 77 .0 Automotive Radar, 5G, Short-Range Communication
+92.0−95.0 94 .0 Radar Systems, High-Resolution Imaging, 5G
+A.3 Training Loss and Model Convergence
+Fig. 6 displays the training loss curves of the models trained across 6scenes. The yellow line in the
+figure represents the moving average of the training loss. Since each PAS sample is treated as an
+individual “epoch” and the loss varies significantly across different spectrogram, the raw loss curve
+exhibits noticeable fluctuations. To evaluate loss stabilization, we applied a moving average with a
+window size of 7500 as the primary metric. As shown in the figure, the smoothed loss curves across
+all scenarios eventually stabilize, confirming the convergence of our training process.
+14(a) Training loss in Scene 1
+ (b) Training loss in Scene 2
+ (c) Training loss in Scene 3
+(d) Training loss in Scene 4
+ (e) Training loss in Scene 5
+ (f) Training loss in Scene 6
+Figure 6: Visualization of training loss over epochs in 6scenes
+A.4 Overall Model Comparison with 21 Frequencies
+As seen in Fig. 7, our method achieves an average median SSIM of 0.72(±0.007) across all
+21test frequencies ( 1-100GHz) in Scene 1, outperforming the single-frequency SOTA baseline
+(0.63±0.016) by14.3%. Furthermore, we observe the following: (1) our model is a robust
+generalization to extreme mmWave bands ( 0.71SSIM at 70GHz vs. SOTA’s 0.61), (2) our model
+achieves maximum gain at 25GHz ( 0.73vs.0.65), demonstrating effective multi-frequency learning,
+and (3) our model achieves a lower variance ( 0.007vs.0.016) confirming our stable cross-band
+rendering. This validates the ability of our model to generalize across frequencies without the need
+for retraining.
+Figure 7: Overall evaluation at 21frequencies in Scene 1.
+A.5 Detailed Train/Test Frequency Combinations
+Tab. 5 systematically evaluates model generalization through four training-testing frequency splits
+spanning 1-100GHz. Combinations C1-C4 progressively reduce training frequencies (from 7to2
+frequencies) while expanding testing ranges (from 3to8frequencies), creating controlled scenarios to
+assess interpolation (e.g., C1’s 5GHz test between 2.4-10GHz trains) and extrapolation capabilities
+(e.g., C4’s 77GHz test beyond 94GHz trains). This hierarchy tests performance degradation under
+sparse supervision, covering both common wireless standards ( 2.4/5/24.25GHz) and mmWave
+extremes ( 37/47/60/77/94GHz).
+15Table 5: Combinations of 10frequencies
+Combination Training frequencies (GHz) Testing frequencies (GHz)
+C1 1,2.4,10,24.25,47,60,94 5 ,37,77
+C2 1,5,24.25,47,77 2 .4,10,37,60,94
+C3 1,24.25,77 2 .4,5,10,37,47,60,94
+C4 1,94 2 .4,5,10,24.25,37,47,60,77
+Tab. 6 presents the specific frequency combinations used for different experimental setups, along
+with the frequencies on which the testing was conducted. Combinations A, B, and C utilize data from
+20frequencies and are tested on a specific frequency to simulate the zero-shot capability of a model
+that has already been extensively trained on multiple frequencies for predictions on a novel frequency.
+Combinations D, E, F, G, and H involve progressively fewer frequencies to evaluate the impact of
+varying frequency combinations on the model’s generalization across frequencies. Combinations I,
+J, and K are trained exclusively on single-frequency data, and their predictions are tested across all
+remaining 20frequencies, serving as a baseline for assessing the model’s generalization performance
+on unseen frequencies.
+Table 6: Combinations of 21frequencies in Scene 1
+Combination Training frequencies (GHz) Testing frequencies (GHz)
+A5,10,15,20,25,30,35,40,45,50,
+55,60,65,70,75,80,85,90,95,1001
+B1,5,10,15,20,25,30,35,40,45,
+55,60,65,70,75,80,85,90,95,10050
+C1,5,10,15,20,25,30,35,40,45,
+50,55,60,65,70,75,80,85,90,95100
+D 1,10,20,30,40,50,60,70,80,90,100 5 ,15,25,35,45,55,65,75,85,95
+E 1,25,50,75,1005,10,15,20,30,35,40,45,
+55,60,65,70,80,85,90,95
+F 1,50,1005,10,15,20,25,30,35,40,45,
+55,60,65,70,75,80,85,90,95
+G 1,1005,10,15,20,25,30,35,40,45,50,
+55,60,65,70,75,80,85,90,95
+H 25,751,5,10,15,20,30,35,40,45,50,
+55,60,65,70,80,85,90,95,100
+I 1001,5,10,15,20,25,30,35,40,45,
+50,55,60,65,70,75,80,85,90,95
+J 501,5,10,15,20,25,30,35,40,45,
+55,60,65,70,75,80,85,90,95,100
+K 15,10,15,20,25,30,35,40,45,50,
+55,60,65,70,75,80,85,90,95,100
+A.6 Cross-frequency Experimental Results Involving 21 Frequencies
+Fig. 8 and Tab. 6 jointly characterize the model performance on combinations (A–K) of 21frequencies
+in Scene 1.
+Frequency combinations I, J, and K demonstrate the prediction results of models trained on a
+single frequency across all other frequencies, serving as the baseline for evaluating the model’s
+frequency generalization capability. It is observed that the model trained at 1GHz performs worst in
+predictions across the remaining 20frequencies. Analysis reveals this is due to the inverse relationship
+between wavelength and frequency: the significant wavelength discrepancy of 1GHz wireless signals
+compared to other frequencies leads to distinct propagation characteristics.
+Frequency combinations A, B, and C show predictions on a specific frequency using models trained
+on20frequencies, testing zero-shot capability for novel frequencies. The worst performance occurs
+16at1GHz (consistent with the above explanation), while predictions at 50GHz and 100GHz achieve
+average SSIM scores of 0.71. This represents only a marginal decline compared to the full-frequency
+model’s performance ( 0.73and0.72, respectively), demonstrating strong zero-shot capability for
+frequencies with propagation characteristics similar to the training set.
+Frequency combinations D-H evaluate generalization when trained on partial frequency subsets.
+When half of the 21frequencies are used (combination D), the average SSIM for unseen frequencies
+is0.70, a2.8%decrease compared to the full-frequency model’s 0.72. As fewer frequencies are
+included (combinations E-H), generalization gradually declines. However, all partial combinations
+significantly outperform the single-frequency baseline (combination H: 0.62with two frequencies vs.
+combination I: average SSIM 0.56), proving that multi-frequency training enhances cross-frequency
+generalization.
+Figure 8: Cross-frequency prediction of different combinations of 21frequencies in Scene 1. Std:
+nan indicates using only one testing frequency.
+17

@@ -1,0 +1,1826 @@
+arXiv:2505.20424v1  [cs.RO]  26 May 2025Robot Operation of Home Appliances
+by Reading User Manuals
+Jian Zhang, Hanbo Zhang, Anxing Xiao, David Hsu
+School of Computing & Smart System Institute
+National University of Singapore
+corresponding to zhang.jian@u.nus.edu
+Figure 1: ApBot enables robots to operate diverse ,novel household appliances from natural lan-
+guage instructions with manuals and visual observations in a zero-shot manner. It follows open-
+ended instructions to generate grounded multi-step actions for complex appliance operation.
+Abstract: Operating home appliances, among the most common tools in every
+household, is a critical capability for assistive home robots. This paper presents
+ApBot, a robot system that operates novel household appliances by “reading” their
+user manuals. ApBot faces multiple challenges: (i) infer goal-conditioned partial
+policies from their unstructured, textual descriptions in a user manual document,
+(ii) ground the policies to the appliance in the physical world, and (iii) execute
+the policies reliably over potentially many steps, despite compounding errors. To
+tackle these challenges, ApBot constructs a structured, symbolic model of an ap-
+pliance from its manual, with the help of a large vision-language model (VLM). It
+grounds the symbolic actions visually to control panel elements. Finally, ApBot
+closes the loop by updating the model based on visual feedback. Our experi-
+ments show that across a wide range of simulated and real-world appliances, Ap-
+Bot achieves consistent and statistically significant improvements in task success
+rate, compared with state-of-the-art large VLMs used directly as control policies.
+These results suggest that a structured internal representations plays an impor-
+tant role in robust robot operation of home appliances, especially, complex ones.
+Video link.
+Keywords: Home Appliance Operation; Structured Model for Decision Making;
+Foundation Models for Robotics
+1 Introduction
+Operating household appliances is a fundamental yet underexplored topic for assistive robots at
+home. It can dramatically extend the capabilities of robots in daily environments. Unlike passive
+tools, appliances encapsulate complex, high-level functionalities to change object states (e.g., cook-ing, cleaning, heating) that no direct manipulation skills can replicate. Ideally, robots are expected
+to perform general-purpose appliance operations automatically with the help of manuals. However,
+this task poses several crucial challenges to existing robotic systems. First, manuals are usually un-
+structured documents of text and symbols, making it difficult for robots to understand. Furthermore,
+appliances are designed to follow constrained workflows governed by operation modes, making
+them less error-tolerant. Therefore, we aim to answer the following question: How can we enable
+robots to generate visually grounded policies for novel appliance operation with user manuals?
+To this end, we propose ApBot, a generalizable open-world framework for appliance operation (see
+Figure 1). With the help of large vision-language models (LVLMs), ApBot constructs a symbolically
+structured model of novel appliances conditioned on user manuals for interpretable, controllable,
+and verifiable policy generation. ApBot constructs structured appliance models of novel appliances,
+i.e., state machines, using the user manual and visual observation. The model captures symbolic
+representations of executable actions, appliance states, and transition rules. Given a natural language
+task, the model generates an action sequence grounded in the panel layout, which is then executed
+by a low-level skill primitive. To account for the inherent ambiguity of the manuals and open-world
+issues [1] of novel appliances, ApBot iteratively updates the models based on execution outcomes
+to align the model with real world appliance behavior. As a result, ApBot can effectively operate
+novel, complex appliances robustly with language instructions without further training.
+Structured representation, along with online error correction, significantly improves robustness, es-
+pecially against complex home appliances. To evaluate ApBot, we constructed from the manuals
+[2, 3] a simulated benchmark containing 6 home appliance types and 30 interactive instances, includ-
+ingdehumidifier ,bottle washer ,rice cooker ,microwave oven ,bread maker , and washing machine .
+For each appliance, we design 10different natural language instructions. Since appliances vary in
+complexity, we standardize the number of variables (e.g., time andtemperature ) used in instructions
+for each type, ranging from easy to hard. We compare ApBot with methods purely based upon LLMs
+or VLMs [4, 5, 6]. Results demonstrate that our method significantly and consistently outperforms
+them with a clear margin, illustrating its effectiveness and robustness for complex home appliance
+operation. We also deploy our system in the real world with a Kinova Gen3 arm and demonstrate
+the effectiveness of our proposed method on multiple real-world appliances.
+In summary, our main contribution is a novel, symbolically structured representation for generaliz-
+able household appliance operation. It bridges gaps between unstructured inputs and policies, hence
+enabling robots to make controllable decisions and achieve reliable performance for the operation
+of novel appliances with visual input by reading user manuals.
+2 Related Work
+Robotic Appliance Operation Previous work related to robotic appliance operation falls into
+three categories: perception, low-level manipulation, and long-horizon plan generation. For per-
+ception, existing works mainly concentrate on button localization, by leveraging edge-based visual
+features [7, 8], RFID tags [9], or neural networks [10, 11, 12, 13]. For low-level skills, button ma-
+nipulation is important, hence, many works focus on physical interaction with diverse button types
+by specializing fingertips [14] or leveraging additional sensory feedback [15, 14]. Long-horizon
+appliance operation remains relatively underexplored. A recent work [12] uses handcrafted behav-
+iors to generate plans for home appliance operation, but lacks generalization to novel appliances or
+tasks. By contrast, our approach learns to model the appliances by reading the user manuals, hence
+enabling operation policy generation for new appliances and task instructions in a zero-shot manner.
+Foundation Models for Robotic Decision Making Foundation models have been widely applied
+to robotic decision-making [16]. Prompting large models to generate structured representations,
+such as logic frameworks [17, 18, 19, 20] and codes [21, 22, 23, 24, 25] enables integration with
+external solvers or executors, though often under strict syntax constraints. It has been shown to
+improve reasoning precision at the cost of generality, particularly for long-horizon tasks with hard
+constraints [26, 27, 28, 29]. Unstructured representations such as textual reasoning trees [30, 31,
+32, 33] or natural languages [34, 35, 36, 37, 38] offer flexibility and generality but suffer from
+2Figure 2: Overview of ApBot. The key of ApBot is the appliance model built from a textual manual,
+based on which we generate actions for novel appliance operation. To handle possible model errors,
+we calibrate the model with observable feedback during execution in a close-loop manner.
+ambiguity and lack correctness guarantees. Approaches such as syntax validation [39, 40], corrective
+feedback [41, 37], and prompt optimization [42] aim to take advantage of both by modular design.
+Particularly, domain-specific languages (DSLs) can enhance LVLM reliability and robustness via in-
+context learning [43, 44, 22, 45], offering key insights for our structured design for appliances. We
+adopt a DSL-based design tailored to appliance operation and generate it via in-context learning and
+syntax validation. To support numerical computation, we enable the invocation of external function
+calls similar to [21]. This ensures generalizability while maintaining correctness guarantees.
+Graphical User Interface Agents Graphical User Interface (GUI) agents [46, 47], similar but
+unlike appliance operation, operate devices through software interfaces. Recently, the prevailing
+approach involves fine-tuning VLMs on datasets of web or mobile interactions, such as clicking,
+typing, or tapping, to directly predict on-screen actions [48, 49, 50]. An alternative line of work
+uses visual prompting, where VLMs select actions based on overlaid marks (e.g., boxes or numbers)
+on GUI screenshots [51, 52, 53]. Yet, these methods often struggle with complex GUIs, especially
+when the documentation is incomplete or unstructured. Another line of related research is Retrieval-
+Augmented Generation (RAG) [54], which augments model input with information retrieval from
+external sources, such as online manuals or documents. Building on this idea, we introduce struc-
+turally grounded representations for appliance operation, which encode knowledge from user man-
+uals to enable robust plan generation.
+3 ApBot
+3.1 Problem Formulation
+We consider the task of household appliance operation based on parameterized natural language
+instructions and visual observations, with the help of textual information from user manuals. Given
+a natural language instruction (e.g., turn on the device and set the Cook Rice mode ), the system must
+interpret the goal state, reason about appliance constraints, and generate a sequence of executable
+low-level actions that complete the task.
+We formulate the appliance as a state machine [55] with tasks specified as a subset of goal states:
+M=⟨S, A,T, Sg⟩. Each state sinScomprises a list of variables for the appliance (e.g., on
+oroff,time ,laundry program ,temperature ). For action space A, we empirically find that
+most actions of operating a home appliance can be categorized into two classes: AgandAn. Any
+action in Agwill directly goto a pre-defined, specific state (e.g., “Menu” to enter menu mode),
+if the current state is in a specific subset of S(e.g. power on, child lock disabled). Any action
+inAn(e.g., “+” and “-”) will turn the state of a variable to a neighborhood value, subject to the
+current state. Accordingly, we have a deterministic transition model for each type s′=T(s, a),
+where T ∈ {T g,Tn}. Given the above formulation, we aim to find a shortest sequence of actions
+a∗= (a∗
+1, a∗
+2, ..., a∗
+T)to achieve an arbitrary goal state in Sg, a subset of S.
+3However, in practice, we cannot have access to the underlying true model M. Instead, we construct
+an approximated one M=⟨S,A,T,Sg⟩from the manual, upon which we generate the operation
+policy for the appliance. To construct M, we assume that robots can observe the home appliances
+visually, and have the corresponding manuals in raw text. We assume that the users will interact
+with robots in natural languages to specify tasks, which defines Sggiven S. We posit that LVLMs
+can read raw textual information in the manual and build a partially correct appliance model M
+accordingly, by proper design.
+We propose a system, ApBot, for natural language control of household appliances by combining
+user manuals and visual input. As shown in Figure 2, the system (1) constructs a symbolic model
+from manuals (Sec. 3.2), (2) grounds symbolic actions to visual control elements (Sec. 3.3), (3)
+models transitions as macro actions (Sec. 3.4), and (4) executes tasks with closed-loop updates
+based on real-time feedback (Sec. 3.5) to address errors of model construction.
+3.2 Construct Structured Appliance Model
+Modelling states, actions, transitions. To construct the symbolic model M=⟨S,A,T,Sg⟩,
+we sequentially generate the state space S, action space A, and transition function Twith the help
+of LVLM agents [6] using prompting [4]. Concretely, for each of them, we provide the manual,
+a predefined output format, and a complete list of valid options, and ask LVLMs to generate the
+appliance model accordingly. Model generation goes in an in-context way [56], where examples
+are provided in the input to improve robustness. Syntax checkers are then applied to ensure output
+validity, with up to three regeneration attempts if errors occur, e.g, violations of constraints. We
+provide a detailed example of appliance modeling in Appendix A, along with the corresponding
+prompts in Appendix I, and list the syntax checks used for validation in Appendix B.
+Extracting goals from instructions. To infer the goal state Sgfrom a natural language instruction,
+we prompt the LVLM agent to produce a partial assignment over symbolic variables that fulfills the
+task requirements. For example, given the instruction “set cooking power to high and cooking time
+to 2 minutes”, the inferred goal corresponds to a symbolic state where power ishigh andtime is2
+minutes , while all other variables remain unconstrained.
+3.3 Action Grounding
+To make actions physically executable, we need to ground the symbolic actions visually onto the ob-
+served control panel elements , which are interactive components of an appliance, such as buttons, di-
+als, and printed touch pads. Each grounded action ˆais a tuple ˆa= (a, b, σ ), where a∈Ais the sym-
+bolic action from the manual, bis a bounding box of the visual region, and σ∈ {press ,hold,turn}
+denotes the primitive robot skill required to execute the action. We demonstrate the pipeline of action
+grounding in Fig. 3.
+Control Element Detection. We assume the control panel elements can be clearly detected using
+existing object detectors. We prioritize high recall in detection to ensure all buttons are captured. To
+this end, we run three models in parallel. Segment Anything (SAM) [57] segments the image into
+regions of visually distinct entities. OWL-ViT2 [58] is queried with prompts of “button”, “dial”,
+and “switch” to detect control elements. An OCR model [59] extracts regions of visible text labels.
+We take the union to form a candidate set for all control elements. To remove false positives, we
+sort the bounding boxes in descending order of detection confidence. For each pair of boxes (bi, bj),
+if IoU (bi, bj)>0.85, we discard the box with lower detection confidence, as overlapping boxes
+likely refer to the same object. We further use LVLMs to check whether each remaining box likely
+contains a valid control panel element, following [60]. So far, we have a set of boxes B={bi}Nb
+i=1,
+where Nbis the number of boxes.
+Actions Grounding. To get the executable action ˆa= (a, b, σ ), we need to do visual grounding,
+i.e., an injection from symbolic actions Ato boxes B, and identify the manipulation type σfor each
+a∈A. To do so, we first query LVLMs to assign an action a∈Afor each b∈B, i.e., a mapping
+fromBtoA. Inversely, now, each amay: (1) have a unique box b; (2) have no box; (3) have a set
+of boxes Ba⊆B,|Ba|>1. For (1), it is ideal. For (2), we directly remove it from Asince it is no
+4longer executable, hence, all tasks involving this action will fail. For (3), we impose the following
+two heuristics by further prompting the LVLMs: 1. the box including clear physical boundaries is
+preferred; 2. the box with an icon-based label is preferred over text-only ones. Finally, we assign
+the manipulation type σdirectly based on the description of aalong with the assigned visual region
+b, forming ˆa= (a, b, σ ), which can be executed using the corresponding low-level primitive skill.
+3.4 Structured Transition Modeling with Macro Actions
+Figure 3: Overview of action grounding with
+visual observations.Perfectly modeling appliances with one shot is im-
+practical due to the inherent ambiguity of the manu-
+als (e.g., “adjust to desired level”) and inevitable er-
+rors of LVLMs (e.g., hallucinations), making plan-
+ning hard. Instead, we leverage two observations
+of common appliance designs: (1) variable adjust-
+ments often follow consistent action sequences, such
+as pressing “+” repeatedly or entering digits condi-
+tioned on an explicitly specified number string; and
+(2) user manuals often describe step-by-step tutori-
+als for common usages. We formalize user manu-
+als as macro actions Φ, a constructed version of the
+underlying ground truth set of macro actions Φ, for
+efficient and generalizable appliance modeling.
+Definition of Macro Actions. Macro action ϕ∈Φis a parameterized sequence of symbolic ac-
+tions that encapsulate a meaningful functionality (e.g., PowerOn ,SetCookingMenu ). Specifically,
+each macro action ϕconsists of a symbolic action sequence aϕ= (a1, a2, ...), where ai∈A. Be-
+sides, each macro action has a set of variables svon which it imposes effects and a macro transition
+describing these effects Γ(sv). Note that svis part of the full state s. Formally, ϕ= (sv,Γ(sv),aϕ).
+For example, the macro action ϕ=SetCookingMenu(LongGrain) may include two symbolic
+actions: a1=press menu anda2=turn dial , which will change the values of variables
+sv= (appliance mode ,cooking menu ), so as to (1) enter the cooking menu setting mode; and
+(2) set the cooking menu to LongGrain . Macro actions enable LVLMs to plan by specifying high-
+level subgoals, simplifying reasoning by substantially reducing the reasoning horizon.
+Modeling Macro Actions. The full list of macro actions, including the corresponding variables
+and target effects, is extracted by prompting LVLMs (see Appendix I). To fully model the macro
+actions, we need to generate a sequence of low-level actions aϕbased on the current variable svand
+target transition Γ(sv). Specifically, aϕcan be directly computed from two transition types: Tnfor
+Anactions like ”+” or ”-”, and Tgfor go-to actions in Ag. The computation invokes codes directly,
+similar to [21], based on the current and goal values. For actions in An, we compute the number of
+repeats based on its transition model (e.g., from 1 to 5 requires 4 presses of “+”). For actions in Ag,
+we translate the description in the manual directly to get the specific actions.
+3.5 Closed-loop Task Execution
+Automatic Execution from Macro Actions. To specify the executable actions for robots, ApBot
+generates a parameterized symbolic task policy π= [ϕ1, ϕ2, ..., ϕ T]conditioned on the inferred goal
+Sg, where each ϕi∈Φis a parameterized macro action, covering one or more variables specified in
+the goal state. To do so, we feed the list of applicable macro actions to LVLMs, along with the textual
+specification of Sg, and generate the policy πdirectly. Actions in each ϕiare determined via its
+transition rule Ti. The robot executes low-level actions sequentially through a set of parameterized
+primitive skills. Implementation details of the primitive skills used on the real robot are provided in
+Appendix G.
+State Estimation and Model Updates. To ensure robustness against inaccuracies in generated
+appliance models, we adopt closed-loop model calibration. After each macro action is executed,
+the system gets new observations and tracks the state to check whether the target state is achieved.
+In simulation, the environment returns a textual description (e.g., “ time is set to 30 min ”), while in
+5the real world, an image is captured as visual feedback. In both cases, the feedback is passed to
+LVLMs to infer the actual value of the corresponding variables. If the actual value fails to match the
+expected one by the transition, ApBot first traverses the full value range of the variable to observe
+how it responds to repeated actions. ApBot then utilizes the executed trace to update the transition
+T(e.g., step size, value bounds), based on which the action sequence in this macro action aϕwill be
+updated accordingly. With the updated macro actions, a new plan will be regenerated. For example,
+ifpress("+") produces a sequence like 0,min→10,min→ ··· → 60,min→0,min, the
+updated rule reflects a 10-minute step and a wraparound at 60 minutes. The details of state tracking
+and model updates are elaborated in Appendix C.
+4 Experiments
+We evaluate ApBot by answering three questions: (1) How does it compare to state-of-the-art LVLM
+agents for home appliance operation? (2) What are the main contributors of ApBot? (3) How does
+it perform on real-world appliances? For (1), we compared ApBot with leading LVLM agents using
+unstructured inputs and found that ApBot consistently achieves higher success rates with fewer steps
+in both simulation and real-world settings. For (2), ablations show that structured appliance models,
+structured reasoning, and closed-loop updates are all critical for robust operation. For (3), real-world
+deployments demonstrate the effectiveness of ApBot on unseen appliances and long-horizon tasks.
+4.1 Experimental Settings
+Evaluation Benchmark. Our evaluation aims to systematically assess the effectiveness and gener-
+alization of ApBot across varying appliances. We construct a simulated benchmark of 30 interactive
+appliances with their manuals across 6 categories. Task instructions are designed with varying num-
+bers of variables, from simple to hard. Each instruction specifies explicit target values for the ad-
+justable variables. In total, we evaluated each method on a set of 300 goal-directed natural language
+instructions, 10 per appliance instance. For automatic evaluation, each appliance in the benchmark
+is paired with a symbolic simulator that models true action effects and provides corresponding feed-
+back to the algorithms. Full dataset including appliances image, user manual and instructions, along
+with the simulator details, is provided in Appendix D. For real-world evaluation, the system is de-
+ployed on three appliances using a Kinova Gen3 robot, following the same structured pipeline but
+relying on realistic visual observations for feedback. Fig. 7 shows the experimental setup.
+Baselines. We compare ApBot with several baselines designed to ablate key components. LLM as
+policy w/ image uses LVLMs for all modules, including visual grounding [60] and reasoning based
+on unstructured, textual inputs. LLM as policy w/ grounded actions reasons over grounded actions
+from Sec. 3.3. We also conduct ablations as follows. ApBot w/o model does not build appliance
+model M. Instead, LVLMs (1) decide which action to execute directly; (2) if the LVLM deems that
+repeating steps is required, it invokes codes to get the required action sequences. ApBot w/o button
+policy builds a structured model M, and follows the macro actions in policy πstrictly, but relies on
+LVLMs for low-level action generation instead of leveraging the transition T.ApBot w/o close-loop
+update disables model updates from observation feedback and executes in open-loop. Besides, we
+compare our action grounding approach with Molmo , a state-of-the-art visual grounding method.
+We elaborate all model settings and baselines in Appendix E.
+Evaluation metrics. Success is defined as achieving all specified values correctly. For metrics,
+we evaluate (1) Success Rate within 25 reasoning steps, (2) Average Steps taken before success or
+termination, and (3) Success weighted by Path Length (SPL) to evaluate the weighted success rate
+considering the actual execution steps. Optimal steps are computed using oracle appliance models
+and task policies that specify the ground-truth action sequences.
+4.2 Simulation Results
+How does our framework compare to large-scale vision-language agents? The overall perfor-
+mance of ApBot is shown in Fig. 4. Compared to purely LVLM-based agents ( LLM as policy w/
+image andLLM as policy w/ grounded actions ), ApBot achieves significantly better performance
+6Figure 4: Overall performance of home appliance operation, including average task success rate
+(SR), average number of execution steps (Average Steps), and SPL (Success weighted by Path
+Length) across (a) baseline methods and (b) our ablations. Both performance and derivations are
+across appliance types.
+overall. Noticeably, comparing LLM as policy w/ image andLLM as policy w/ grounded actions , vi-
+sually grounded actions overall help for appliance operation tasks. This shows that current state-of-
+the-art LVLMs are not yet good at open-vocabulary detection or visual grounding tasks, especially
+those requiring fine-grained text recognition. Detailed performance by appliance types is listed in
+Table 4. Referring to the rightmost figure in Fig. 4, we can see that ApBot has shown robustness
+against appliance complexity (from left to right). ApBot does not suffer from severe performance
+drop when the number of involved variables increases. By contrast, both baselines suffer from sig-
+nificant performance degradation. We also conducted χ2tests for all method pairs. As shown in
+Fig. 5, performance differences are statistically significant for all pairs except ApBot w/o close-loop
+update andLLM as policy w/ image , indicating they are equally poor. Detailed analysis by appliance
+type is provided in Appendix F.
+Figure 5: p-value matrix of all
+method pairs by χ2-test.What are the main contributors of ApBot? We conduct
+ablations to evaluate the contributions of key components
+in ApBot. In summary, removing the structured appliance
+models ( ApBot w/o model ) significantly degrades perfor-
+mance, mainly due to skipped steps or prematurely ending
+execution, which somehow mirrors the behavior of LLM as
+policy w/ grounded actions . This is because LVLMs can-
+not handle reasoning tasks involving a long history of many
+variables or constraints. It often ignores or hallucinates some
+of them (e.g., deciding whether the appliance is in the cor-
+rect mode, proposing the required action to take), making
+the plan fail. Compared to ApBot w/o button policy , we can
+conclude that invoking code to compute required action sequences (Sec. 3.4) is crucial to ensure the
+correctness of generated policies. This is because LVLM agents struggle to assign variable values
+correctly when the variable range is large, when the transition Tis complex or when the variable
+value options are semantically similar. Finally, we find that closed-loop updates for home appli-
+ance models are critical. Performance of ApBot w/o close-loop update suffers a rapid, sharp drop
+as the complexity of appliances increases. It fails to recover from any model errors, like open-loop
+policies. It reveals that current state-of-the-art LVLMs still struggle with generating constrained
+structures correctly in one shot, like the models of home appliances. All these results illustrate
+the necessity of structured reasoning for robust appliance operation. We further provide qualitative
+examples in Appendix F and failure analysis in Appendix H.
+7Induction Cooker Instruction: Select the HotPot mode and adjust the power setting to 2000 W.
+Water Dispenser Instruction: Set temperature to 60 degrees and then pour water.
+Figure 7: Snapshots of our system operating an induction cooker and a water dispenser.
+What is the benefit of explicit action grounding? Our proposed method to ground actions
+can boost the overall performance of home appliance operation by 18% on average by compari-
+son with the performance between LLM as policy w/ image andLLM as policy w/ grounded ac-
+tions in Fig. 4, because LVLMs struggle with appliance button recognition. To further investi-
+gate the effectiveness of our action grounding methods, we tested and provided the visual ground-
+ing results for symbolic actions based on control panel images. The ground-truth labels of ex-
+ecutable action regions are manually labeled. The comparison results between our method and
+Molmo are shown in Fig. 6. Our method is statistically significantly better than Molmo across
+all appliances (with p-value less than 0.001). The performance gain primarily comes from com-
+bining the advantages of (1) explicit text recognition, (2) high-recall detection, and (3) seman-
+tic understanding of graphical button icons of LVLMs. By contrast, Molmo demonstrates rea-
+sonable text or symbol recognition ability, yet not robust enough as the specialist OCR models.
+Figure 6: Comparison of action ground-
+ing performance between our method
+and Molmo. Standard deviation is
+across different appliance types.4.3 Deployment on Real-Robot
+We deploy our method on a Kinova Gen3 arm and demon-
+strate its applicability to three household appliances: a
+blender, an induction cooker, and a water dispenser, each
+evaluated with semantically diverse instructions. The
+button-pressing policy is parameterized by a bounding
+box. To compute the target end-effector pose, we com-
+pute the point cloud of the button and extract its surface
+normal. The robot aligns its gripper tip with the normal at
+a slightly tilted angle and moves 0.1 cm beyond the sur-
+face to ensure successful activation. More details can be
+founded in Appendix G. Fig. 7 illustrates two example
+instructions carried out on the water dispenser and the in-
+duction cooker, each frame executing an action. With our method, the robot can reason about how to
+perform previously unseen, long-horizon operation tasks by referring to the user manual. Additional
+real-world demonstrations and results can be found in Appendix G and the accompanying video.
+5 Conclusion
+We presented ApBot, a generalizable method that enables zero-shot operation of novel household
+appliances by referencing the user manual. By leveraging the structured model of appliances, Ap-
+Bot demonstrates statistically significant robustness against diverse appliance types and language
+instructions. We built an evaluation suite including the benchmark of real-world appliances, manu-
+als, open-ended task instructions, and symbolic simulators to benchmark home appliance operation.
+Results demonstrate that ApBot is able to improve the success rate significantly when compared
+with all baselines. We also deployed and demonstrated our system on real-world robotic tasks. Re-
+sults show that ApBot can reliably finish language-specified tasks with only the manual and visual
+observation as the inputs autonomously.
+86 Failure Analysis & Limitations
+Failure Analysis. We analyzed 18 failed instructions and identified two major causes: action
+grounding errors (16.7%) and modeling errors (83.3%). Action grounding failures occur often when
+detectors misidentify soft-touch panels or icon-only buttons without physical boundaries. Modeling
+errors mainly arise from goal state ambiguity and consistent errors even after syntax checking. We
+demonstrate the details of failure cases in our experiments in Appendix H.
+Limitations. First, ApBot does not support touchscreens, which are becoming prevailing in recent
+years. In the future, we would like to integrate the material design of the manipulator to support
+such kinds of interface. Besides, button manipulation itself is a challenging task of robotics [14].
+Currently, ApBot does not incorporate subtle modeling or feedback of diverse buttons (e.g., the fric-
+tions, tactile feedbacks), which are absolutely important for robust button manipulation. We will
+take advantage of tactile sensing in the future to support more robust manipulation [61]. Also, the
+action grounding module is not fully reliable, especially for buttons without clear physical bound-
+aries or with icon-only symbols. In the future, we will try to specialize a button detector for robust
+button detection and grounding, or integrate a human-in-the-loop strategy [62]. Finally, ApBot does
+not consider complex manipulation skills for appliances, such as opening/closing doors, plugging,
+and putting in or removing items from the appliance container. We will leverage recent advances of
+manipulation policies in the future to support such kinds of sophisticated skills.
+References
+[1] Y . Jiang, N. Walker, J. Hart, and P. Stone. Open-world reasoning for service robots. In Pro-
+ceedings of the international conference on automated planning and scheduling , volume 29,
+pages 725–733, 2019.
+[2] ManualsLib. Manuals library. https://www.manualslib.com/ , 2025. Accessed April 22,
+2025.
+[3] Internet Archive. Digital library of free & borrowable texts, movies, music & wayback ma-
+chine. https://archive.org/ , 2025. Accessed April 22, 2025.
+[4] J. Wei, X. Wang, D. Schuurmans, M. Bosma, F. Xia, E. Chi, Q. V . Le, D. Zhou, et al. Chain-of-
+thought prompting elicits reasoning in large language models. Advances in neural information
+processing systems , 35:24824–24837, 2022.
+[5] M. Deitke, C. Clark, S. Lee, R. Tripathi, Y . Yang, J. S. Park, M. Salehi, N. Muennighoff,
+K. Lo, L. Soldaini, et al. Molmo and pixmo: Open weights and open data for state-of-the-art
+multimodal models. arXiv preprint arXiv:2409.17146 , 2024.
+[6] A. Hurst, A. Lerer, A. P. Goucher, A. Perelman, A. Ramesh, A. Clark, A. Ostrow, A. Welihinda,
+A. Hayes, A. Radford, et al. Gpt-4o system card. arXiv preprint arXiv:2410.21276 , 2024.
+[7] W.-J. Wang, C.-H. Huang, I.-H. Lai, and H.-C. Chen. A robot arm for pushing elevator buttons.
+InProceedings of SICE Annual Conference 2010 , pages 1844–1848. IEEE, 2010.
+[8] A. A. Abdulla, H. Liu, N. Stoll, and K. Thurow. A robust method for elevator operation in semi-
+outdoor environment for mobile robot transportation system in life science laboratories. In
+2016 IEEE 20th Jubilee International Conference on Intelligent Engineering Systems (INES) ,
+pages 45–50. IEEE, 2016.
+[9] H. Nguyen, T. Deyle, M. Reynolds, and C. Kemp. Pps-tags: Physical, perceptual and semantic
+tags for autonomous mobile manipulation. In Proceedings of the IROS Workshop on Semantic
+Perception for Mobile Manipulation , 2009.
+[10] D. Zhu, T. Li, D. Ho, T. Zhou, and M. Q. Meng. A novel ocr-rcnn for elevator button recog-
+nition. In 2018 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) ,
+pages 3626–3631. IEEE, 2018.
+9[11] J. Liu, Y . Fang, D. Zhu, N. Ma, J. Pan, and M. Q.-H. Meng. A large-scale dataset for bench-
+marking elevator button segmentation and character recognition. In 2021 IEEE International
+Conference on Robotics and Automation (ICRA) , pages 14018–14024. IEEE, 2021.
+[12] A. Yuguchi, T. Nakamura, M. Toyoda, M. Yamada, P. Tulathum, M. Aubert, G. A. Garcia Ri-
+cardez, J. Takamatsu, and T. Ogasawara. Toward robot-agnostic home appliance operation: a
+task execution framework using motion primitives, ontology, and gui. Advanced Robotics , 36
+(11):548–565, 2022.
+[13] N. Verzic, A. Chadaga, and J. Hart. Recovering missed detections in an elevator button seg-
+mentation task. In 2024 IEEE/RSJ International Conference on Intelligent Robots and Systems
+(IROS) , pages 13355–13362. IEEE, 2024.
+[14] F. Wang, G. Chen, and K. Hauser. Robot button pressing in human environments. In 2018
+IEEE international conference on robotics and automation (ICRA) , pages 7173–7180. IEEE,
+2018.
+[15] V . Sukhoy and A. Stoytchev. Learning to detect the functional components of doorbell buttons
+using active exploration and multimodal correlation. In 2010 10th IEEE-RAS International
+Conference on Humanoid Robots , pages 572–579. IEEE, 2010.
+[16] S. Yang, O. Nachum, Y . Du, J. Wei, P. Abbeel, and D. Schuurmans. Foundation models for
+decision making: Problems, methods, and opportunities. arXiv preprint arXiv:2303.04129 ,
+2023.
+[17] J. X. Liu, Z. Yang, B. Schornstein, S. Liang, I. Idrees, S. Tellex, and A. Shah. Lang2ltl:
+Translating natural language commands to temporal specification with large language models.
+InWorkshop on Language and Robotics at CoRL 2022 , 2022.
+[18] B. Liu, Y . Jiang, X. Zhang, Q. Liu, S. Zhang, J. Biswas, and P. Stone. Llm+ p: Empowering
+large language models with optimal planning proficiency. arXiv preprint arXiv:2304.11477 ,
+2023.
+[19] Y . Chen, J. Arkin, C. Dawson, Y . Zhang, N. Roy, and C. Fan. Autotamp: Autoregressive
+task and motion planning with llms as translators and checkers. In 2024 IEEE International
+conference on robotics and automation (ICRA) , pages 6695–6702. IEEE, 2024.
+[20] B. Vu, T. Migimatsu, and J. Bohg. Coast: Constraints and streams for task and motion plan-
+ning. arXiv preprint arXiv:2405.08572 , 2024.
+[21] J. Liang, W. Huang, F. Xia, P. Xu, K. Hausman, B. Ichter, P. Florence, and A. Zeng. Code
+as policies: Language model programs for embodied control. In 2023 IEEE International
+Conference on Robotics and Automation (ICRA) , pages 9493–9500. IEEE, 2023.
+[22] I. Singh, V . Blukis, A. Mousavian, A. Goyal, D. Xu, J. Tremblay, D. Fox, J. Thomason, and
+A. Garg. Progprompt: Generating situated robot task plans using large language models.
+In2023 IEEE International Conference on Robotics and Automation (ICRA) , pages 11523–
+11530. IEEE, 2023.
+[23] T. Schick, J. Dwivedi-Yu, R. Dess `ı, R. Raileanu, M. Lomeli, E. Hambro, L. Zettlemoyer,
+N. Cancedda, and T. Scialom. Toolformer: Language models can teach themselves to use
+tools. Advances in Neural Information Processing Systems , 36:68539–68551, 2023.
+[24] Y . Yin, Z. Wang, Y . Sharma, D. Niu, T. Darrell, and R. Herzig. In-context learning enables
+robot action prediction in llms. arXiv preprint arXiv:2410.12782 , 2024.
+[25] S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. Narasimhan, and Y . Cao. React: Synergizing
+reasoning and acting in language models. arXiv preprint arXiv:2210.03629 , 2022.
+10[26] S. Chen, A. Xiao, and D. Hsu. Llm-state: Expandable state representation for long-horizon
+task planning in the open world. CoRR , 2023.
+[27] N. Shinn, F. Cassano, A. Gopinath, K. Narasimhan, and S. Yao. Reflexion: Language agents
+with verbal reinforcement learning. Advances in Neural Information Processing Systems , 36:
+8634–8652, 2023.
+[28] C. H. Song, J. Wu, C. Washington, B. M. Sadler, W.-L. Chao, and Y . Su. Llm-planner: Few-
+shot grounded planning for embodied agents with large language models. In Proceedings of
+the IEEE/CVF international conference on computer vision , pages 2998–3009, 2023.
+[29] K. Nottingham, Y . Razeghi, K. Kim, J. Lanier, P. Baldi, R. Fox, and S. Singh. Selective per-
+ception: Optimizing state descriptions with reinforcement learning for language model actors.
+arXiv preprint arXiv:2307.11922 , 2023.
+[30] H. Jiang, B. Huang, R. Wu, Z. Li, S. Garg, H. Nayyeri, S. Wang, and Y . Li. Roboexp: Action-
+conditioned scene graph via interactive exploration for robotic manipulation. arXiv preprint
+arXiv:2402.15487 , 2024.
+[31] J. Ao, F. Wu, Y . Wu, A. Swikir, and S. Haddadin. Llm as bt-planner: Leveraging llms for
+behavior tree generation in robot task planning. arXiv preprint arXiv:2409.10444 , 2024.
+[32] H. Zhou, Y . Lin, L. Yan, J. Zhu, and H. Min. Llm-bt: Performing robotic adaptive tasks based
+on large language models and behavior trees. arXiv preprint arXiv:2404.05134 , 2024.
+[33] X. Chen, Y . Cai, Y . Mao, M. Li, W. Yang, W. Xu, and J. Wang. Integrating intent understanding
+and optimal behavior planning for behavior tree generation from human instructions. arXiv
+preprint arXiv:2405.07474 , 2024.
+[34] K. Rana, J. Haviland, S. Garg, J. Abou-Chakra, I. D. Reid, and N. Suenderhauf. Sayplan:
+Grounding large language models using 3d scene graphs for scalable task planning. CoRR ,
+2023.
+[35] M. Ahn, A. Brohan, N. Brown, Y . Chebotar, O. Cortes, B. David, C. Finn, C. Fu, K. Gopalakr-
+ishnan, K. Hausman, et al. Do as i can, not as i say: Grounding language in robotic affordances.
+arXiv preprint arXiv:2204.01691 , 2022.
+[36] W. Huang, F. Xia, T. Xiao, H. Chan, J. Liang, P. Florence, A. Zeng, J. Tompson, I. Mordatch,
+Y . Chebotar, et al. Inner monologue: Embodied reasoning through planning with language
+models. arXiv preprint arXiv:2207.05608 , 2022.
+[37] S. S. Raman, V . Cohen, I. Idrees, E. Rosen, R. Mooney, S. Tellex, and D. Paulius. Cape:
+Corrective actions from precondition errors using large language models. In 2024 IEEE Inter-
+national Conference on Robotics and Automation (ICRA) , pages 14070–14077. IEEE, 2024.
+[38] S. Wang, M. Han, Z. Jiao, Z. Zhang, Y . N. Wu, S.-C. Zhu, and H. Liu. Llmˆ 3: Large lan-
+guage model-based task and motion planning with motion failure reasoning. arXiv preprint
+arXiv:2403.11552 , 2024.
+[39] S. Lin, A. Grastien, and P. Bercher. Towards automated modeling assistance: An efficient
+approach for repairing flawed planning domains. In Proceedings of the AAAI Conference on
+Artificial Intelligence , volume 37, pages 12022–12031, 2023.
+[40] S. Lin, A. Grastien, and P. Bercher. Planning domain repair as a diagnosis problem. In 33rd
+International Workshop on Principle of Diagnosis–DX 2022 , 2022.
+[41] S. S. Raman, V . Cohen, E. Rosen, I. Idrees, D. Paulius, and S. Tellex. Planning with large lan-
+guage models via corrective re-prompting. In NeurIPS 2022 Foundation Models for Decision
+Making Workshop , 2022.
+11[42] W. Lu, R. K. Luu, and M. J. Buehler. Fine-tuning large language models for domain adaptation:
+Exploration of training strategies, scaling, model merging and synergistic capabilities. arXiv
+preprint arXiv:2409.03444 , 2024.
+[43] X. Zhang, Z. Altaweel, Y . Hayamizu, Y . Ding, S. Amiri, H. Yang, A. Kaminski, C. Esselink,
+and S. Zhang. Dkprompt: Domain knowledge prompting vision-language models for open-
+world planning. arXiv preprint arXiv:2406.17659 , 2024.
+[44] J. Zheng, H. Hong, X. Wang, J. Su, Y . Liang, and S. Wu. Fine-tuning large language models
+for domain-specific machine translation. arXiv preprint arXiv:2402.15061 , 2024.
+[45] B. Wang, Z. Wang, X. Wang, Y . Cao, R. A Saurous, and Y . Kim. Grammar prompting for
+domain-specific language generation with large language models. Advances in Neural Infor-
+mation Processing Systems , 36, 2024.
+[46] D. Nguyen, J. Chen, Y . Wang, G. Wu, N. Park, Z. Hu, H. Lyu, J. Wu, R. Aponte, Y . Xia, et al.
+Gui agents: A survey. arXiv preprint arXiv:2412.13501 , 2024.
+[47] S. Wang, W. Liu, J. Chen, Y . Zhou, W. Gan, X. Zeng, Y . Che, S. Yu, X. Hao, K. Shao, et al. Gui
+agents with foundation models: A comprehensive survey. arXiv preprint arXiv:2411.04890 ,
+2024.
+[48] K. Cheng, Q. Sun, Y . Chu, F. Xu, Y . Li, J. Zhang, and Z. Wu. Seeclick: Harnessing gui
+grounding for advanced visual gui agents. arXiv preprint arXiv:2401.10935 , 2024.
+[49] Z. Wu, Z. Wu, F. Xu, Y . Wang, Q. Sun, C. Jia, K. Cheng, Z. Ding, L. Chen, P. P. Liang, et al. Os-
+atlas: A foundation action model for generalist gui agents. arXiv preprint arXiv:2410.23218 ,
+2024.
+[50] B. Gou, R. Wang, B. Zheng, Y . Xie, C. Chang, Y . Shu, H. Sun, and Y . Su. Navigating
+the digital world as humans do: Universal visual grounding for gui agents. arXiv preprint
+arXiv:2410.05243 , 2024.
+[51] Y . Lu, J. Yang, Y . Shen, and A. Awadallah. Omniparser for pure vision based gui agent. arXiv
+preprint arXiv:2408.00203 , 2024.
+[52] H. He, W. Yao, K. Ma, W. Yu, Y . Dai, H. Zhang, Z. Lan, and D. Yu. Webvoyager: Building
+an end-to-end web agent with large multimodal models. In Proceedings of the 62nd Annual
+Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages
+6864–6890, 2024.
+[53] Y . Qin, Y . Ye, J. Fang, H. Wang, S. Liang, S. Tian, J. Zhang, J. Li, Y . Li, S. Huang, et al. Ui-tars:
+Pioneering automated gui interaction with native agents. arXiv preprint arXiv:2501.12326 ,
+2025.
+[54] P. Lewis, E. Perez, A. Piktus, F. Petroni, V . Karpukhin, N. Goyal, H. K ¨uttler, M. Lewis, W.-t.
+Yih, T. Rockt ¨aschel, et al. Retrieval-augmented generation for knowledge-intensive nlp tasks.
+Advances in neural information processing systems , 33:9459–9474, 2020.
+[55] D. Brand and P. Zafiropulo. On communicating finite-state machines. Journal of the ACM
+(JACM) , 30(2):323–342, 1983.
+[56] T. Brown, B. Mann, N. Ryder, M. Subbiah, J. D. Kaplan, P. Dhariwal, A. Neelakantan,
+P. Shyam, G. Sastry, A. Askell, et al. Language models are few-shot learners. Advances
+in neural information processing systems , 33:1877–1901, 2020.
+[57] A. Kirillov, E. Mintun, N. Ravi, H. Mao, C. Rolland, L. Gustafson, T. Xiao, S. Whitehead,
+A. C. Berg, W.-Y . Lo, et al. Segment anything. In Proceedings of the IEEE/CVF international
+conference on computer vision , pages 4015–4026, 2023.
+12[58] M. Minderer, A. Gritsenko, and N. Houlsby. Scaling open-vocabulary object detection. Ad-
+vances in Neural Information Processing Systems , 36:72983–73007, 2023.
+[59] JaidedAI. EasyOCR: Ready-to-use OCR with 80+ supported languages. https://github.
+com/JaidedAI/EasyOCR , 2020.
+[60] J. Yang, H. Zhang, F. Li, X. Zou, C. Li, and J. Gao. Set-of-mark prompting unleashes extraor-
+dinary visual grounding in gpt-4v. arXiv preprint arXiv:2310.11441 , 2023.
+[61] S. Yu, K. Lin, A. Xiao, J. Duan, and H. Soh. Octopi: Object property reasoning with large
+tactile-language models. In Robotics: Science and Systems (RSS) , 2024.
+[62] A. Xiao, N. Janaka, T. Hu, A. Gupta, K. Li, C. Yu, and D. Hsu. Robi butler: Remote multimodal
+interactions with household robot assistant. arXiv preprint arXiv:2409.20548 , 2024.
+13A Example of the Appliance Model and Simulation
+A.1 Structured Appliance Model Example
+Below is an example of the appliance model generated using ApBot for a dehumidifier . It includes a
+list of variables extracted from the manual, the macro actions, and transitions. During inference, we
+directly generate the model in the following format with the help of LVLM agents, based on which
+we further generate operation plans with Prompt 8. Note that the macro action , which is typically a
+concept in computer science, is phrased as feature in our prompts to match the commonly used term
+in most of the manuals. In practice, we group consecutive actions of adjusting the same variable in a
+macro action into a step, which empirically improves robustness and facilitates the syntax checking
+(Sec. B).
+# Variables of the appliance defined in the State
+variable_power_on_off = DiscreteVariable(value_range=["on", "off"],
+current_value="off") ,→
+variable_fan_speed = DiscreteVariable(value_range=["low", "mid",
+"high"], current_value="low") ,→
+...
+# Macro actions
+feature_list = {}
+feature_list["turn_on_off"] = [
+{"step": 1, "actions": ["press_power_button"], "variable":
+"variable_power_on_off", "step_size": 2} ,→
+]
+feature_list["adjust_fan_speed"] = [
+{"step": 1, "actions": ["press_speed_button"], "variable":
+"variable_fan_speed", "step_size": 3} ,→
+]
+...
+# Transitions
+simulator_feature = Feature(feature_list=feature_list,
+current_value=("empty", 1)) ,→
+class Simulator(Appliance):
+def reset(self):
+self.feature = simulator_feature
+self.variable_power_on_off = variable_power_on_off
+self.variable_fan_speed = variable_fan_speed
+...
+def press_power_button(self):
+self.feature.update_progress("press_power_button")
+self.execute_action_and_set_next("press_power_button")
+def press_speed_button(self):
+self.feature.update_progress("press_speed_button")
+self.execute_action_and_set_next("press_speed_button")
+...
+14B Details of the Syntax Checker
+To mitigate hallucination during appliance model generation, we implement a suite of syntax check-
+ers to further validate the generated models, mainly for the macro actions, transitions, and goal
+specifications. Additionally, all generated codes are verified to ensure that they fit the required out-
+put format, with the help of regular expressions . The detailed prompt can be found in Prompt 6. We
+list the syntax checkers here:
+1.Missing Variable: Every step should adjust some variables.
+2.Empty or Non-Existent Action: Each step should contain at least one valid action.
+3.Action Coverage: Every action in Ashould appear in some macro actions.
+4.Variable Coverage. Every variable defined in the state space Sshould appear in some
+macro actions.
+5.Duplicate Action Sequences: We check if there are possibly duplicate action sequences
+(e.g., set a variable to a specified value twice).
+6.Number-Pad Action Compatibility: Number-pad actions should not appear when mod-
+eling appliances without a number pad.
+7.Input String Reset: The appliance with a number pad should reset the input string of the
+number pad whenever it switches away.
+8.Action-Variable Consistency: Actions should only adjust associated variables.
+9.Goal Validity: Sgshould be fully specified, i.e., each variable should be assigned or inten-
+tionally ignored.
+C Details of State Estimation and Model Updates
+State Estimation. The robot estimates the appliance state using two feedback modalities. In sim-
+ulation, textual feedback directly provides ground truth values for state variables being tuned. In
+real-world scenarios, the robot captures an image of the appliance and uses LVLM agents to convert
+visual observations into textual state descriptions. After completing each macro action, the robot
+compares the predicted state resulting from the planned action with the observed state extracted
+from feedback. The result indicates whether the macro action successfully achieved its intended
+effect.
+Model Updates. The generated operation plan is executed in the minimal unit of a macro action.
+The robot does not track states or update appliance models during the execution of a macro action,
+but only after its completion. If the observed state does not match the predicted state, it indicates
+that some transitions in this macro action might be wrong. Hence, the robot initiates a sequence of
+exploration actions to explore and fix the possible errors. Empirically, we found that go-to transitions
+inTgare mostly correct. Therefore, for each action in An, the robot continuously executes it until
+a previously observed state is observed again. This exploration strategy is based on the observation
+that most actions in Anfor appliances are circular. Based on the observed state transitions, the robot
+updates the transition model regarding the corresponding action and regenerates all macro actions
+that depend on it.
+An Example of State Estimation and Model Updates. Below is an example illustrating how
+the appliance model is automatically updated using closed-loop feedback. Consider a task that re-
+quires turning on the fan and setting the fan speed to high . The robot begins by executing the
+press power button action under the macro action of turn onoff. Upon receiving feedback in-
+dicating power = on , it invokes Prompt 9 to confirm that the subgoal is achieved as expected, i.e.,
+the prediction matches the observation. Next, it proceeds to the macro action of adjust fanspeed .
+Assuming the current speed is low, the robot executes the action sequence in this macro action.
+Given a ground-truth cyclic variable range of {low,medium ,high}, assume that the current action
+sequence is wrong, for example, requiring 1 press of the speed button, which results in medium
+15Figure 8: Appliances in our benchmark. (a) Appliance Types. (b) All Instances of Bread Maker.
+Figure 9: An example user manual for the Bread Maker. (a) Control panel. (b) Unstructured step-
+by-step procedure for a macro action.
+speed. After executing the planned actions, the feedback again indicates speed = medium , sug-
+gesting the goal is not yet met. The robot continues pressing the speed button and observes the
+feedback sequence: medium →high→low→medium . The repeated value medium indicates
+the entire value range has been cycled. Using Prompt 10, the robot diagnoses that the transition of
+the action adjust fanspeed was incorrect. It then updates the model according to the diagnose.
+In detail, it sequentially updates the variable definition via Prompt 11, revises the appliance model
+using Prompt 12, and adjusts the goal state accordingly using Prompt 13. With the updated current
+value of medium , the robot re-plans the action sequence and presses the speed button once more.
+This time, the feedback confirms speed = high , and Prompt 9 verifies that the goal is satisfied.
+The task completes successfully.
+D Details of the Evaluation Benchmark
+D.1 Appliances Categories and Data Collection
+The benchmark covers six types of household appliances: dehumidifiers ,bottle washers ,rice cook-
+ers,microwave ovens ,bread makers , and washing machines . These categories were chosen for their
+differences in mechanism complexity and functional diversity. As shown in Figure 8, each category
+includes five distinct instances, resulting in 30 appliances in total.
+For each instance, we collect an image of the control panel from the Internet, including Amazon and
+eBay. We also collect the corresponding user manual from the product’s official website or support
+page. From each manual, we extract two key parts: (1) a control panel legend that links interface
+elements to their locations (see Fig. 9a), and (2) step-by-step instructions that describe how to
+operate specific features (see Fig. 9b). They are used to construct the structured symbolic model for
+each appliance. The appliances vary in interface layout and the number of adjustable variables. To
+ensure fair comparison, we assign a fixed number of target variables per appliance type, subject to
+16Table 1: Examples of Task Instructions for Different Appliances
+# Vars Appliance Sample Instruction Target Settings
+1 Dehumidifier “Set the humidity to 50%.” • Humidity = 50%
+2Bottle
+Washer“Power on the device and initiate a 45-minute automatic
+sterilization and drying cycle.”• Power = On • Drying Time = 45 min
+3Rice
+Cooker“Adjust the delay timer to 30 minutes, set the rice cooker
+to White Rice mode, and start the operation.”• Menu = White Rice
+• Start = On• Delay Timer = 30 min
+4Microwave
+Oven“Set the upper tube temperature to 150°C. Select the
+cooking function as ’upper and lower heating tube’. Then
+set the lower tube temperature to 150°C and adjust the
+cooking time to 20 minutes.”• Upper Temp = 150°C
+• Lower Temp = 150°C• Time = 20 min
+• Function = Upper / Lower Heating
+5Bread
+Maker“Bake a large, medium-crust French loaf using the French
+menu. Set a 2-hour delay timer, then start the bread
+maker.”• Menu = French
+• Crust = Medium
+• Start = On• Loaf Size = Large
+• Delay = 2 hrs
+6Washing
+Machine“Turn on the washing machine. Select the Normal
+program for everyday clothes, set the water level to 55 L,
+schedule it to finish in 4 hours, start the machine, and
+activate the child lock.”• Power = On
+• Water Level = 55 L
+• Start = On• Program = Normal
+• Preset = 4 hrs
+• Child Lock = On
+their inherent complexity. For example, dehumidifiers require adjusting one variable, while washing
+machines require six.
+D.2 Task Instructions
+We design 300 goal-directed natural language instructions, with 10 tasks per appliance instance.
+Each instruction specifies a clear goal by assigning specific target values to a set of variables. This
+ensures consistency across methods and focuses evaluation on symbolic reasoning and execution.
+Ground-truth values are manually labeled to support automatic evaluation. The number of variables
+involved in each task depends on the type of appliance, facilitating controllable comparison. For ex-
+ample, all instructions for dehumidifier involve only one variable. More complex ones, like washing
+machines, involve up to six variables. Details and samples of instructions are listed in Table 1.
+D.3 Simulators and Ground Truth Feedback
+Each appliance instance is paired with a symbolic simulator implemented in Python, providing a de-
+terministic testing environment. The simulator encodes adjustable variables and valid actions based
+on the appliance manual, preserving constraints defined by its manual. It also defines executable
+regions tied to control panel elements. Actions are input as a pair: a bounding box and an action
+type (e.g., press or turn). If the action is valid, the simulator updates the variable state and returns a
+textual message (e.g., temperature = 150 °C) indicating the resulting variable value.
+D.4 Metrics
+We mainly evaluate Success Rate ,Average Step , and Success weighted by Path Length . Besides, we
+also report the Execution Step in Appendix F.
+Success Rate: It is defined as the proportion of tasks completed successfully before exceeding
+25reasoning steps . The number of reasoning steps is defined as the total number of macro action,
+excluding the exploration steps. We define success as the achievement of variable values included
+in the specified goal state at the end of execution.
+Average Step: This metric indicates the average number of reasoning steps , i.e., the number of
+macro actions excluding the exploration, taken before either achieving success or reaching the maxi-
+mum number (25 in our experiments). This metric focuses on the reasoning efficiency of the system.
+Success weighted by Path Length (SPL): SPL evaluates success while considering the actual
+number of physical execution steps , i.e., symbolic actions in A. The optimal number of actions is
+manually labeled by a human oracle. Intuitively, this metric evaluates the efficiency considering
+both execution and exploration.
+17Table 2: Hyperparameters of Used Models.
+Component Parameter Name Explanation Value
+GPTmodel GPT model version.GPT-4o-
+2024-11-20
+temperature Controls output randomness. 1.0
+topp Nucleus sampling cutoff. 1
+OWLv2model OWLv2 model name.owlv2-large-
+patch14-ensemble
+boxthreshold Object detection threshold. 0.5
+EasyOCRtext threshold Text detection threshold. 0.5
+lowtext Includes blurry text. 0.4
+contrast ths Contrast enhancement threshold. 0.05
+Segment
+Anything
+Modeliou IoU threshold for masks. 0.1
+conf Mask confidence filter. 0.9
+Execution Step: It indicates the average number of symbolic actions in A, i.e., the number of ac-
+tions that the robot actually executes physically, including the exploration ones, taken before success
+or reaching the max reasoning steps. It evaluates the physical execution efficiency of algorithms.
+E Details of Experimental Settings
+E.1 Detailed Settings of LVLMs
+Table 2 lists non-default hyperparameters of all models used in our experiments. GPT-4o was used
+for both appliance model construction and action grounding. Claude-3.5, EasyOCR, and OWLv2
+were used only for action grounding. In real-world experiments, where control panels are simpler,
+only OWLv2 was used for control element detection to improve efficiency; EasyOCR and SAM
+were omitted.
+E.2 Baselines
+Table 3 summarizes the key components in each method. ✓indicates the component is present in
+the corresponding method; × indicates it is omitted or replaced directly by LVLM equivalents. The
+prompts used for all methods can be found in Appendix I.
+Grounded Action refers to whether the method reasons over symbolic actions, which are visually
+grounded to control panel elements via our action grounding method (see Sec. 3.3), or directly
+reasons over image regions without symbolic abstraction.
+Model Mindicates whether the method constructs and follows a symbolic appliance model ex-
+tracted from the user manual. If present, variable adjustments follow a fixed sequence specified by
+macro actions Φand the task policy π, instead of being chosen reactively by an LLM.
+Button Policy denotes whether action sequences for variable adjustment are computed using pre-
+defined transition functions T, rather than being generated by LLMs.
+Close-loop Update refers to whether the method incorporates execution feedback to update state
+estimation and re-generate action sequences. Methods without this component operate in an open-
+loop manner, executing fixed sequences or reasoning reactively without correcting for execution
+errors.
+18Table 3: Baseline methods and ablation of key components in ApBot. ✓indicates the component is
+used.
+Method Grounded Model M Button Close-loop
+Action Policy Update
+LLM as policy w/ image × × × ✓
+LLM as policy w/ grounded
+actions✓ × × ✓
+ApBot w/o model ✓ × ✓ ✓
+ApBot w/o button policy ✓ ✓ × ✓
+ApBot w/o close-loop update ✓ ✓ ✓ ×
+ApBot ✓ ✓ ✓ ✓
+19F Details of Performance
+Figure 10: Performance of home appliance operation by appliance type, including average task
+success rate (SR), average number of execution steps (Average Steps), and SPL (Success weighted
+by Path Length) on baseline methods.
+Figure 10 and Figure 11 shows the performance of ApBot on six appliance types. Each appliance
+type has a different number of variables to adjust, from 1 to 6 (top to bottom). As the number
+of variables increases, ApBot does not suffer a severe performance drop in terms of success rate
+(Figure 13). By contrast, baseline methods like LLM as policy w/ image andLLM as policy w/
+grounded actions drop significantly on tasks with more variables. This shows that structured models,
+structured reasoning, and closed-loop updates help in handling complex tasks. Another interesting
+observation is that SPL suffers from an obvious drop when increasing the complexity of appliances.
+The reason is that for complex appliances and tasks, there will always be more modeling errors,
+20Figure 11: Performance of home appliance operation by appliance type, including average task
+success rate (SR), average number of execution steps (Average Steps), and SPL (Success weighted
+by Path Length) on ablation methods.
+which require more exploration steps for model updates. This further demonstrates the necessity of
+appliance modeling and online updates.
+Figure 12 presents pairwise χ2-test p-values across six methods for each appliance type, with diago-
+nal entries marked as ”N/A”. Each subplot corresponds to an appliance type, ordered by the number
+of variables to adjust per user instruction. As the number of variables increases, the performance
+gap between ApBot and baseline methods such as LLM as policy w/ image andLLM as policy w/
+grounded actions becomes more statistically significant.
+Figure 14 compares action grounding performance between ApBot and Molmo across six appliance
+types, evaluated by precision, recall, and F1 score. ApBot consistently outperforms Molmo on all
+21Figure 12: p-value matrix of all method pairs by χ2-test on different appliance types.
+appliance types, particularly on appliances with symbolic, iconic, or multi-word text labels, where a
+structured grounding procedure performs better.
+We illustrate an online model update example triggered by a transition failure. An incorrect tran-
+sition rule for the microwave function dial extracted from the user manual led to a goal mismatch.
+Upon observing inconsistent state feedback, ApBot exhaustively explores the function dial’s state
+space and updates the macro action to reflect the correct transition mapping.
+Update Macro Action: Adjust Microwave Function
+Action Applied: (‘turn function dialclockwise’, 1)
+Feedback Received:
+• Fermentation
+Goal Comparison:
+22Figure 13: Average task success rate (SR) by increasing variable size conditioned on appliance type.
+Figure 14: Comparison of action grounding performance between our method and Molmo on preci-
+sion and recall across appliance types.
+•Expected: Lower & Upper Heater
+•Observed: Fermentation
+•Result: Values are semantically different. Goal not reached.
+Execution Trace:
+Action Observed Value
+(‘turn function dialclockwise’, 1) Fermentation
+(‘turn function dialclockwise’, 1) Lower heater
+(‘turn function dialclockwise’, 1) Upper heater
+(‘turn function dialclockwise’, 1) Lower & upper heater
+(‘turn function dialclockwise’, 1) Convection
+(‘turn function dialclockwise’, 1) Rotary
+(‘turn function dialclockwise’, 1) Off
+(‘turn function dialclockwise’, 1) Fermentation
+(‘turn function dialclockwise’, 1) Lower heater
+Inferred Variable Definition:
+•Name: variable function
+•Type: DiscreteVariable
+•Value Range:
+['Fermentation', 'Lower heater', 'Upper heater',
+'Lower & upper heater', 'Convection', 'Rotary', 'Off']
+•Current Value: ’Off’
+Generated Code:
+variable_function_knob = DiscreteVariable(
+value_range=[
+23Table 4: Detailed Performance of Success Rate / Average Steps by Appliance Types
+MethodDehumid-
+ifierBottle
+washerRice
+cookerMicrowave
+ovenBread
+makerWashing
+machine
+LLM as policy w/ image 0.80 / 5.34 0.46 / 4.64 0.40 / 10.46 0.22 / 7.12 0.22 / 12.88 0.32 / 13.46
+LLM as policy w/ grounded actions 0.96 / 5.48 0.74 / 6.94 0.74 / 7.88 0.32 / 9.22 0.34 / 13.02 0.52 / 15.36
+ApBot w/o button policy 0.84 / 3.28 0.80 / 4.58 0.46 / 5.22 0.32 / 6.98 0.46 / 8.18 0.22 / 8.04
+ApBot w/o model 0.98 / 5.32 0.88 / 7.22 0.72 / 7.80 0.76 / 10.38 0.58 / 11.92 0.56 / 11.44
+ApBot w/o close-loop update 0.84 / 2.82 0.74 / 3.82 0.26 / 4.34 0.32 / 4.00 0.00 / 5.34 0.00 / 5.62
+Ours 0.98 / 3.12 1.00 / 4.22 0.96 / 6.28 0.86 / 7.46 0.88 / 9.14 0.90 / 11.64
+'Fermentation', 'Lower heater', 'Upper heater',
+'Lower & upper heater', 'Convection', 'Rotary', 'Off'
+],
+current_value='Off'
+)
+24G Details of Real World System
+G.1 Real World System Design
+Figure 15: The real-world framework
+In our real-world robotic system, we implement a framework that enables a manipulator to interact
+with physical appliances by pressing buttons accurately and robustly, as illustrated in Figure 15. An
+RGB-D camera mounted near the robot’s end-effector captures both RGB images and depth data of
+the appliance interface. Given a press action parameterized by the bounding box of the target button,
+the button pose estimation module extracts the corresponding point cloud and computes the surface
+normal of the button region. This normal vector determines the correct approach angle for the robot
+to align its end-effector.
+Figure 16: The pressing details
+To reduce the contact area and improve precision, the robot aligns its gripper with the surface normal
+at a slight tilt. The pressing trajectory is generated in two stages: first, the end-effector moves to
+a position directly above the button; then, it advances 0.1 cm beyond the estimated button surface
+to ensure a firm press, as shown in Figure 16. This approach compensates for minor depth inaccu-
+racies and mechanical backlash, enhancing contact reliability. The generated trajectory is executed
+using workspace tracking control, allowing the end-effector to follow the desired pressing motion
+precisely. This framework generalizes well across various devices and button types, demonstrating
+robustness to differences in button size, orientation, and mechanical resistance.
+G.2 Real World Experiments Setting
+To evaluate the performance and generalization ability of our proposed system, we conducted a se-
+ries of real-world experiments involving common household appliances. Specifically, the robot was
+tasked with operating three distinct devices: a blender, an induction cooker, and a water dispenser, as
+shown in Fig. 17. These appliances were selected for their diversity in interface design and physical
+interaction requirements, representing different types of button layouts, activation mechanisms, and
+task objectives. For each appliance, we designed three task scenarios, resulting in a total of nine
+distinct interaction tasks. These tasks involve activating power buttons, selecting modes (e.g., milk
+mode or hot pot mode), or dispensing liquids, depending on the appliance. These tasks require the
+system to generalize based on visual input and prior knowledge for reasoning encoded in the user
+manual.
+25Figure 17: The real world setting
+Table 5: Detailed Performance of Success Rate / Execution Step / SPL by Appliance Types
+Method Blender Water Dispenser Induction Cooker Avg
+LLM as policy w/ image 1.0 / 3.50 / 0.29 1.0 / 5.70 / 0.59 0.5 / 17.70 / 0.13 0.83 / 8.97 / 0.34
+ApBot 1.0 / 1.0 / 1.0 0.7 / 8.4 / 0.31 1.0 / 16.5 / 0.38 0.9 / 8.63 / 0.56
+T1. Select the HotPot mode and set power to 2000 W.
+T2. Select the Milk mode.
+T3. Select the HotPot mode and set power to 1600 W.
+T4. Set the insulation temperature to 98°, then pour the water.
+T5. Set the insulation temperature to 85°, then pour the water.
+T6. Set the insulation temperature to 65°, then pour the water.
+T7. Hold at slow speed for 10 seconds.
+T8. Hold at slow speed for 15 seconds.
+T9. Hold at turbo speed for 10 seconds.
+G.3 More Real World Execution Visualization
+To evaluate the impact of parsing visual feedback from appliance displays, we built simulators for
+these three appliances, each using images of digital control panels to reflect state changes. For each
+appliance, 10 instructions were tested. LVLM agents were used to parsed the display after each
+action to infer the updated state, which was passed back as feedback to guide the next step. For
+LLM as policy w/ image, the image was directly given to LVLM agents. For ApBot, feedback
+parsing is done by guiding the LVLM to focus on the variable currently being adjusted (Prompt 18).
+We compare LLM as policy w/ image and ApBot in terms of success rate, execution steps, and
+SPL, as shown in Table 5. Due to the simplicity of these appliances, both methods show similar
+performance. For more visualization, please see Fig. 18.
+H Details of Failure Mode Analysis
+We categorize and analyze the main failure modes observed across different baseline methods as
+shown below.
+Failure due to Lack of Action Grounding This is defined as failures that occur due to incorrect
+grounding of actions to visual elements. For example, the model may select a neighboring button
+instead of the correct one because LVLMs struggle to associate OCR text labels with the correct
+control panel element. This highlights limitations in visual-text alignment within vision-language
+models. This failure mode is mainly applicable to: LLM as policy w/ image.
+Failure due to Lack of Structured Model This mainly include failures that occur due to (1)
+incorrect association between actions and effects due to lack of transition modeling; (2) repeated
+adjustment of the same variable due to lack of macro actions; (3) premature ending or wrongly
+parsed visual feedback due to lack of state estimation; (4) incorrect goal state specification due to
+26lack of structured goal states. This failure mode is mainly applicable to LLM as policy w/ image;
+LLM as policy w/ grounded actions; ApBot w/o model.
+Failure due to Incorrect Transition Model This mainly includes failures caused by incorrect
+interpretation of transition rules, especially when the variable exhibits irregular step sizes in its value
+space. This failure mode is mainly applicable to: ApBot w/o button policy; ApBot w/o close-loop
+update.
+Failure due to Hallucinated Model Details This includes failures caused by LLM hallucination
+during model construction, resulting in invalid transition rules that fail syntax checks. This failure
+mode is mainly applicable to: ApBot, ApBot w/o button policy, ApBot w/o model, ApBot w/o
+close-loop update.
+I Prompts
+In this section, we provide the detailed prompts for two baselines: LLM as policy w/ image (Prompt
+1) and LLM as policy w/ grounded actions (Prompt 2). The remaining ablation methods share the
+same prompts as ApBot.
+For ApBot, we provide prompts for three sections: (1) Build appliance models; (2) Update appliance
+models using closed-loop feedback; (3) Action grounding. To build appliance models, we need to (1)
+extract control panel element names (Prompt 3) and action names (Prompt 4); (2) extract variables
+(Prompt 5), macro actions (Prompt 6), and generate the appliance model with extracted information
+(Prompt 7); finally (3) Generate task policy and goal state based on the appliance model (Prompt
+8).
+To update the appliance model using close-loop feedback, the steps include: (1) After execution of
+each macro action and receives feedback, ApBot parses the feedback (Prompt 18) and compares the
+goal with the feedback (Prompt 9). If the goal is achieved, it proceeds to the next action. Otherwise,
+it executes exploration actions to collect a sequence of observations. Then, it uses them to diag-
+nose the incorrectly modeled variable (Prompt 10), updates the variable definition (Prompt 11), and
+updates the appliance model (Prompt 12) and goal state (Prompt 13) accordingly.
+To perform action grounding, we need to: (1) Use LVLMs to detect candidate bounding boxes for
+control panel elements, then remove false positives using LVLMs (Prompt 14). This step ensures
+only valid regions are kept before passing them for slower, more detailed grounding. (2) Map
+bounding boxes to control panel element names (Prompt 15). (3) Remove duplicate bounding boxes
+being mapped to the same control panel element (Prompt 16). And (4) Map each action name to a
+grounded control panel element name and an action type (Prompt 17).
+Prompt 1: LLM as policy w/ image Action Proposal
+You are given:
+• Two images:
+(1) A photo of the appliance contrl panel.
+(2) A version with indexed bounding boxes circling the control panel elements (buttons,
+dials).
+• A user command describing the target task.
+• User manual.
+• A set of allowed action types: press ,hold ,turn dial clockwise ,
+turn dial anti clockwise .
+• Optionally, display panel feedback in text after each action.
+Action Proposal Rules:
+• At the start of the task, assume initial appliance state is unknown. Execute an action to
+receive feedback. On subsequent steps, use observed display panel feedback to reason about
+current state, and propose the next action needed to complete the task.
+• Only one action is allowed per response, but you can execute it multiple times (e.g., set
+execution times = 2 .
+27•hold actions require specifying a duration. If not mentioned in manual, default to 10 sec-
+onds. hold can involve two buttons simultaneously and requires a duration . The other
+action types apply to a single button or dial.
+• If the task is completed or infeasible (e.g., display feedback remains wrong after repeated
+attempts failed), return an endaction to stop.
+Output Format: Return 5 Python variables in the following format:
+variable_reason = "<Your reasoning>"
+action_type = "press_button" # or other valid type
+bbox_index = 5 # int or [int, int] if pressing two
+buttons ,→
+execution_times = 1 # integer count
+duration = None # duration in seconds if hold,
+otherwise None ,→
+# to terminate a task:
+variable_reason = "Task is completed / unable to achieve."
+action_type = "end"
+bbox_index = None
+execution_times = None
+duration = None
+Example:
+# User instruction: Set the dial (index = 8) from \texttt{OFF} to
+\texttt{3}. ,→
+variable_reason = "Current power value is OFF. I will turn the dial
+clockwise 3 times to set it to 3." ,→
+action_type = "turn_dial_clockwise"
+bbox_index = 8
+execution_times = 3
+duration = None
+Prompt 2: LLM as policy w/ grounded actions Action Proposal
+You are given:
+• A user command describing the target task.
+• User manual.
+• A list of available executable actions.
+• Optionally, display panel feedback in text after each action.
+Action Proposal Rules:
+• At the start of the task, assume initial appliance state is unknown. Execute an action to
+receive feedback. On subsequent steps, use observed display panel feedback to reason about
+current state, and propose the next action needed to complete the task.
+• Use only the listed available actions. Each action should be returned as a Python function
+call. Provide a clear and concise reason using variable reason .
+• Only one action is allowed per response, but you can execute it multiple times (e.g., set
+execution times = 3 ).
+• If a hold action causes values to change too quickly, avoid using it. Use repeated press
+actions instead. hold actions require specifying a duration. If not mentioned in the manual,
+default to 10 seconds.
+• If the task is completed or infeasible (e.g., display feedback remains incorrect after repeated
+attempts), return an endaction to stop.
+Output Format: Return 2 Python variables in the following format:
+28variable_reason = "<Your reasoning>"
+variable_response_string = "run_action('action_name',
+execution_times=N)" ,→
+# Example of hold actions:
+variable_response_string = "run_action('hold_buttonX_and_buttonY',
+execution_times=1, duration=5)" # 5 seconds ,→
+# To terminate the task:
+variable_reason = "Task is completed / unable to achieve."
+variable_response_string = "end"
+Example:
+# User instruction: Set the dial from OFF to 3 by turning it
+clockwise. ,→
+variable_reason = "Current power value is OFF. I will turn the dial
+clockwise 3 times to set it to 3." ,→
+variable_response_string = "run_action('turn_dial_clockwise',
+execution_times=3)" ,→
+Prompt 3: Extract Control Panel Element Names
+You are given an appliance user manual and an image of its control panel. Identify all control panel
+elements , i.e., button anddial .
+Identification Guidelines:
+• Include elements mentioned in the manual or shown in the image if they clearly correspond
+to a described function.
+• Use one name per physical control. If it adjusts multiple settings, use a combined name
+(e.g., power timer dial , not power dial andtimer button ). If the manual names a
+button (e.g., function button ), use that name, even if the image shows only labels of its
+configurations like menu 1 ,menu 2 ,menu 3 .
+• List each distinct button separately, even if they adjust the same function. Exam-
+ples: airroast button ,airfrybutton ;increase button ,decrease button ;
+number 0button ,number 1button , ...
+Exclude:
+• Non-executable parts such as printed labels, static icons, light indicators, and digital displays.
+• Any component not on the control panel, such as power plugs or lids.
+Naming Conventions:
+• Use name type format (e.g., start stop button ,power level dial ).
+• Only lowercase letters, digits, and underscores are allowed. No spaces or special characters.
+Output Format:
+• Return a Python list named names list .
+• Each item must be a string with a Python comment describing its function, location, and any
+visible symbol (e.g., triangle, bottle, arrow).
+Example Output:
+names_list = [
+"start_stop_button", # starts/stops cooking; lower right;
+triangle icon ,→
+"number_1_button", # sets time; middle keypad; labeled '1'
+"increase_button", # increases value; top left; '+' symbol
+]
+29Prompt 4: Extract Action Names
+You are given an appliance user manual and a list of control panel element names. Your task is to
+identify all executable actions that are:
+(1)described in the user manual , and
+(2) Involve control panel elements listed above (e.g., buttons, dials).
+Carefully match each control element with relevant actions described in the manual.
+Valid Action Types:
+•press <element name>
+•hold <element name> #(duration = x seconds; use 3 if unspecified)
+•hold <element1> and<element2> #(duration = x seconds; use 3 if unspecified)
+•turn <element name> clockwise (only valid for dials)
+•turn <element name> anticlockwise (only valid for dials)
+Naming conventions:
+• Construct each action by selecting a valid action type from the list above and inserting a
+control element name from the provided list.
+• Use lowercase letters, digits, and underscores only. Do not include any special characters or
+symbols.
+Exclusions:
+• Do not include actions not mentioned in the manual.
+• Do not create duplicate or ambiguous actions.
+• Do not include duration in the action name. Write it as a comment on the same line.
+Output Format: List each valid action as a separate line of plain text.
+Example Output:
+press_kitchen_timer_button
+press_time_dial
+press_and_hold_stop_button #(duration = 5 seconds)
+press_and_hold_start_button_and_cancel_button #(duration = 3 seconds)
+turn_power_level_dial_clockwise
+turn_power_level_dial_anticlockwise
+Prompt 5: Extract Variables
+You are given an appliance user manual, a list of executable action names, a list of control panel
+element names, and a list of predefined variable classes in Python. Your task is to extract all appliance
+variables as instances of the predefined Python classes.
+Definition of Variable: An internal configuration state of the appliance that can be adjusted through
+actions (e.g., power level, temperature, time).
+How to Identify a Variable: User manuals often describe multiple features (i.e. high-level functions
+likeDefrost ,Grill ), each consisting of actions that configure internal appliance states. These states
+are the variables . For example, a microwave may include Defrost andGrill features, both of which
+adjust menu andtime , but assign different values depending on the feature. Here, Defrost andGrill
+are features. menu andtime are variables shared across features. Define a variable if:
+(1) It is explicitly described in the manual ,
+(2) It is adjusted via a listed control panel element name (e.g., button, dial), and
+(3) It is modified by an listed action action .
+Naming Convention: Use the format variable <variable name> . Use only lowercase letters and
+underscores.
+variable_power_on_off = ... # User manual: Press POWER to turn off.
+variable_child_lock = ...
+variable_start_pause = ...
+30Valid Variable Types: Used to define variable transition rules. Each variable type can be directly
+invoked via code. Each variable can have its value changed by .next() and.prev() or directly
+assigned by .set current value() .
+(1)DiscreteVariable : Categorical values. Value range consists of strings.
+variable_power = DiscreteVariable(value_range=["on", "off"],
+current_value="on") ,→
+variable_mode = DiscreteVariable(value_range=["eco", "turbo",
+"auto"], current_value="eco") ,→
+(2)ContinuousVariable : Numerical values. Supports piecewise ranges.
+variable_clock_setting_hour =
+ContinuousVariable(value_ranges_steps=[[0, 23, 1]],
+current_value=0) # value range: 0-23 hours, step size: 1
+hour,→
+,→
+,→
+variable_wash_time =
+ContinuousVariable(value_ranges_steps=[[0, 3, 3], [3, 15,
+1]], current_value=0) # value range: 0 or 3-15 minutes,→
+,→
+(3)TimeVariable . Supports ”hour-minute-second” format.
+variable_timer = TimeVariable(values_ranges_steps =
+[('00:00:00', '00:59:00', 60)], current_value='00:00:00')
+# value range: 0-59 minutes: step size: 1 min,→
+,→
+(4)InputString . Stores keypad input sequence.
+# User manual: Enter a 3-digit code using number pads to set
+the timer. ,→
+variable_input_string = InputString()
+Output Format: Executable python code that defines each variable. The current variable value should
+be initialised to the first value in the range if not otherwise specified by the manual.
+Example Output:
+variable_power = DiscreteVariable(value_range = ["on", "off],
+current_value = "on") ,→
+variable_temperature = ContinuousVariable(value_ranges_stpes = [[20,
+30, 1]], current_value = 20) ,→
+Special Cases:
+(1)Setting Adjustable via Different Features: If a setting can be adjusted in different fea-
+tures using different transition rules (i.e. how a variable’s value changes given an action),
+define a separate variable for each (e.g., cook time set via number pads vs. incremented by
+press start button ).
+31# User manual <normal cook>:
+# 1) Press "COOK" once;
+# ...
+# 4) Use the number pads to enter cooking time in MM:SS format
+(e.g., to set 6 minutes, press "6", "0", "0"); ,→
+# 5) Press "COOK" again to confirm.
+variable_normal_cook_time = ...
+# User manual <speedy cook>:
+# 1) Press "Start" to start cooking for 30 seconds. Each
+subsequent press adds time by 30 seconds. ,→
+variable_speedy_cook_time = ...
+(2)Setting Adjusted Across Different Feature Steps: If a setting is adjusted in multiple steps
+(e.g., hour and minute of a timer) in a feature, define one variable per step.
+# User manual <clock setting>:
+# 1) Press "CLOCK" once, the hour figure flashes.
+# 2) Press "up arrow" or "down arrow" to adjust the hour
+(0--23). ,→
+# 3) Press "CLOCK", the minute figure flashes.
+# 4) Press "up arrow" or "down arrow" to adjust the minute
+(0--59). ,→
+# 5) Press " CLOCK " to finish clock setting. ":" will flash,
+the "clock symbol" indicator will go out. The clock
+setting has been finished.,→
+,→
+variable_clock_setting_hour = ...
+variable_clock_setting_minute = ...
+(3)Setting Conditioned on Program Choice: If a setting’s value range depends on the selected
+program, (e.g. microwave menu, washing machine program), follow this structure.
+• Define a selector variable, e.g., variable program index , to store the chosen pro-
+gram.
+• Define a placeholder variable, e.g., variable program setting = None , which is
+dynamically assigned.
+• For each program, define a separate variable using the
+format variable <feature name> <program name> (e.g.,
+variable setprogram popcorn ).
+• Create a dictionary program setting dict to map each program to its respective
+setting variable.
+32# User manual:
+# Microwave program popcorn sets size (1 cup, 2 cup), pizza
+sets weight (250g, 350g, 450g), soup sets volume (200ml,
+300ml, 400ml).,→
+,→
+# Each time a new program is selected,
+variable_program_setting is updated using
+program_setting_dict.,→
+,→
+# variable A (selector)
+variable_program_index = DiscreteVariable(["popcorn", "pizza",
+"soup"], "popcorn") ,→
+# variable B (placeholder)
+variable_program_setting = None
+# program-specific variables
+variable_program_setting_popcorn = DiscreteVariable(["1 cup",
+"2 cup"], "1 cup") ,→
+variable_program_setting_pizza = DiscreteVariable(["250g",
+"350g", "450g"], "250g") ,→
+variable_program_setting_soup = DiscreteVariable(["200ml",
+"300ml", "400ml"], "200ml") ,→
+# mapping dictionary
+program_setting_dict = {
+"popcorn": variable_program_setting_popcorn,
+"pizza": variable_program_setting_pizza,
+"soup": variable_program_setting_soup
+}
+# Selecting a mode updates variable_menu_setting from this
+dictionary. ,→
+Prompt 6: Extract Features
+You are given the user manual of an appliance, a list of executable action names, a list of variables, and
+a predefined Feature() class in Python. Your task is to extract all appliance features as an instance
+of the predefined Feature() object.
+Definition of Feature: A high-level operation (e.g., clock setting ,cooking ) consisting of step-
+by-step procedures that adjust one or more variables using valid actions.
+Output Format: Define a dictionary feature list , where each item is a feature name and its value
+is a list of steps. Each step is a dictionary with:
+(1)step index (integer),
+(2)actions (list of action strings),
+(3) Optional variable adjusted in this step,
+(4) Optional comment describing fixed action effects or input string parsing requirements.
+If any actions or variables are unused, include them under the reserved feature "null" :
+feature_list["null"] = [{"step": 1, "actions": ["unused_action_1"],
+"missing_variables": ["variable_a"]}] ,→
+Conclude with:
+simulator_feature = Feature(feature_list=feature_list,
+current_value=("empty", 1)) ,→
+33Example Output:
+# User manual <clock setting>:
+# 1) Press "CLOCK" once, the hour figure flashes.
+# 2) Press "up arrow" or "down arrow" to adjust the hour (0--23).
+# 3) Press "CLOCK", the minute figure flashes.
+# 4) Press "up arrow" or "down arrow" to adjust the minute (0--59).
+# 5) Press " CLOCK " to finish clock setting. ":" will flash, the
+"clock symbol" indicator will go out. The clock setting has been
+finished.,→
+,→
+feature_list = {}
+feature_list["clock_setting"] = [
+{"step": 1, "actions": ["press_clock_button"]},
+{"step": 2, "actions": ["press_up_arrow_button",
+"press_down_arrow_button"], "variable":
+"variable_clock_setting_hour"},,→
+,→
+{"step": 3, "actions": ["press_clock_button"]},
+{"step": 4, "actions": ["press_up_arrow_button",
+"press_down_arrow_button"], "variable":
+"variable_clock_setting_minute"},,→
+,→
+{"step": 5, "actions": ["press_clock_button"]}
+]
+feature_list["null"] = [{"step": 1, "actions": [],
+"missing_variables": []}]
+simulator_feature = Feature(feature_list=feature_list,
+current_value=("empty", 1)) ,→
+Identification Guidelines:
+(1) Only model features with clear step-by-step instructions written in the user manual. Ignore
+features introduced only by naming buttons and dials without full procedures.
+(2) Exclude non-essential features like WiFi, app control, remote control, reset, cleaning, multi-
+stage cooking, sound/audio settings, memory, touchscreen feedback, or progress queries
+after operation starts. For hold <element> actions, ignore action effects that merely speed
+up changes. Only model a hold action if it toggles a function (e.g., child lock).
+(3) Split features into shorter, reusable units where possible. For consecutive steps in a fea-
+ture, if they adjust different variables, consider separating them into distinct features (e.g.
+start ,cancel ,power on). Ifconsecutive steps in a feature adjust the same variable (e.g.,
+lock /unlock ), merge them.
+(4) The feature that should stay merged is program settings, as the specific program setting is
+conditioned the program choice (e.g. pizza program requires setting cooking weight , but
+soup program requires setting soup volume (explained in extract variable ). Follow this
+structure:
+feature_list["set_program"] = [
+{"step": 1, "actions": ["press_program_button"], "variable":
+"variable_program_index"}, ,→
+{"step": 2, "actions": ["press_plus_button",
+"press_minus_button"], "variable":
+"variable_program_setting"},→
+,→
+]
+(5) If an action always sets a variable to a fixed value, remark in "comment" .
+feature_list["start_cooking"] = {"step": 1, "actions":
+["press_start_button"], "variable":
+"variable_start_cooking",,→
+,→
+"comment": "start always set to on"}
+34(6) If an action affects multiple variables, set the variable whose values will be assigned dynam-
+ically under variable and describe those with fixed target values in comment .
+# user manual <speedy cooking>:
+# press start button will immediately start cooking at 100%
+power for 30 seconds. Each subsequent press increases
+cooking time by 30 seconds.,→
+,→
+feature_list["start_cooking"] = {"step": 1, "actions":
+["press_start_button"], "variable":
+"variable_cooking_time",,→
+,→
+"comment": "variable_start set to on, variable_power set to
+100"} ,→
+(7)turn dial actions must match both direction and effect. If turn dial affects different
+variables in different directions, distinguish them (e.g., clockwise for time , anticlockwise
+forpower ).
+feature_list["adjust_time"] = [{"step": 1, "actions":
+["turn_dial_clockwise"], "variable": "variable_time"}] ,→
+feature_list["adjust_power"] = [{"step": 1, "actions":
+["turn_dial_anticlockwise"], "variable": "variable_power"}] ,→
+(8) To compactly describe appliance features that input values via number pads, you can use
+the given meata actions onnumbers to refer all the number pads, and track them with
+meta actions dict . Make a comment beside the variable whose value assignment re-
+quires parsing from input string.
+# Predefined
+meta_actions_on_number = [
+"press_number_0_button", "press_number_1_button", ...,
+"press_number_9_button" ,→
+]
+meta_actions_dict = {
+"0": "press_number_0_button",
+"1": "press_number_1_button",
+...
+}
+# Example usage
+feature["set_timer"] = [
+{"step": 1, "actions": ["press_timer_button"],},
+{"step": 2, "actions": meta_actions_on_numbers, "variable":
+"variable_timer", ,→
+"comment": "requires parsing from variable_input_string"}]
+Prompt 7: Extract Appliance Model
+You are given a user manual, a list of action names, variables, features, and a predefined Appliance()
+class in Python. Your task is to implement a Simulator() object as an instance of the predefined
+Appliance() object that models all action effects of the appliance.
+Definition: TheSimulator() object inherits from Appliance() and implements three components:
+(1)reset() method that assigns:
+•self.feature , initialized as simulator feature .
+•self.variable x, initialized from predefined variables.
+•self.variable input string ,self.meta actions dict , etc., if appliance in-
+cludes number pads.
+(2) Action functions that define effects on variables and features. Valid action effects include:
+35• Advance the current feature step or switch features by calling
+self.feature.update progress(action name) . Current feature and step
+index can be accessed by self.feature.current value .
+• Get active variable via self.get current variable(action name) .
+• Conditionally update variable value ranges or step size.
+• Update variable value with variable x.set current value() ,
+self.assign variable tonext(variable x), or
+self.assign variable toprev(variable x).
+def press_a_button(self):
+self.feature.update_progress("press_a_button")
+current_feature = self.feature.current_value[0]
+variable = self.get_current_variable(action_name)
+if current_feature == "feature_a":
+variable.set_current_value("on")
+elif current_feature in ["feature_b", "feature_c"]:
+self.assign_variable_to_next(variable)
+(3)runaction(action name, ...) is a wrapper that enforces global execution conditions
+before running an action. Specifically:
+• Prevents action execution when the appliance is locked or powered off, unless the ac-
+tion is to unlock or power on.
+• Clears the input buffer (i.e., self.variable input string ) if the action is unrelated
+to input via number pads.
+• After passing precondition checks, invokes the corresponding action method to per-
+form its effect.
+def run_action(self, action_name, execution_times=1, **kwargs):
+if action_name not in self.meta_actions_dict.values():
+self.variable_input_string.input_string = ""
+if self.variable_lock.get_current_value() == "locked" and
+"unlock" not in action_name: ,→
+self.display = "child lock: locked"
+return self.display
+return super().run_action(action_name, execution_times,
+**kwargs) ,→
+Example Output:
+class Simulator(Appliance):
+def reset(self):
+self.feature = simulator_feature
+self.variable_clock_setting_hour = variable_clock_setting_hour
+self.variable_clock_setting_minute =
+variable_clock_setting_minute ,→
+def press_clock_button(self):
+...
+def press_up_arrow_button(self):
+...
+def press_down_arrow_button(self):
+...
+def run_action(self, action_name, execution_times=1, **kwargs):
+...
+36Other Valid Action Function Formats:
+(1) For hold <element name> actions, the duration needs to be included.
+def press_and_hold_lock_button(self, duration=3):
+if duration >= 3:
+self.feature.update_progress("press_and_hold_lock_butt ⌋
+on") ,→
+...
+(2) If the action changes a program choice (e.g. microwave menu ,washing machine
+program ), sometimes the available program settings will change (e.g. pizza program
+requires setting cooking weight , but soup program requires setting soup volume (ex-
+plained in extract variable ). Update the variable program setting accordingly.
+def press_menu_button(self):
+...
+self.variable_program_setting = self.program_setting_dict[ ⌋
+self.variable_program_index.get_current_value()] ,→
+(3) If an action involves pressing number pads, follow this structure.
+• Define a press number button method to model number pad action effects. Use this
+method to instantiate specific number pad actions.
+# number pad action effects.
+def press_number_button(self, action_name, digit):
+self.feature.update_progress(action_name)
+self.variable_input_string.add_digit(digit)
+variable = self.get_current_variable(action_name)
+value = self.process_input_string(current_feature,
+variable_name) ,→
+variable.set_current_value(value)
+# instantiate specific number pad actions.
+def press_number_2_button(self):
+self.press_number_button("press_number_2_button", "2")
+• Define a process input string to convert inputs via number pads (e.g. "1","6",
+"0","0") to valid variable values (e.g. clock time of "16:00" ).
+# converts time inputs of minute:second format to
+hour:minute:second format ,→
+def process_input_string(self, feature, variable_name):
+raw_input = self.variable_input_string.input_string
+if feature == "clock_setting" and variable_name ==
+"variable_clock_time": ,→
+time_string = "00" + str(raw_input).zfill(4)
+return f"{time_string[:2]}:{time_string[2:4]}:{ti ⌋
+me_string[4:]}" ,→
+• Define a getoriginal input to convert target variable values (e.g. clock time of
+"16:00" ) to required inputs via number pads (e.g. "1","6","0","0").
+37# converts target time value of hour:minute:second format
+to required inputs of minute:second format ,→
+def get_original_input(self, goal, feature, variable_name):
+digits_only = ''.join(char for char in str(goal) if
+char.isdigit()) ,→
+if feature == "clock_setting" and variable_name ==
+"variable_clock_time": ,→
+return digits_only[2:].lstrip("0") or "0"
+• In reset() method, add the following content.
+def reset(self):
+... (the aforementioned variable assignments)
+self.variable_input_string = VariableInputString()
+self.meta_actions_dict = meta_actions_dict
+self.meta_actions_on_number =
+self.meta_actions_on_number ,→
+38Prompt 8: Generate Task Policy and Goal State
+You are given a user manual, a list of features, a list of variables, and a user instruction. Your task is to
+determine which features need to be executed and how variables should be set to fulfill the instruction.
+Output Formats
+(1) a Python list task policy which defines the minimal ordered list of features needed to
+fulfill the user instruction. Use the following rules:
+• Every selected feature must set at least one variable required in the user instruction.
+• Exclude features whose variables are all covered by previous features.
+• Include the feature to turn on the device and let it start running.
+(2) a string policy choice reason that explains why each feature was selected. If multiple
+features are needed, explain what each contributes.
+(3) a changing variables list that includes all variables in the feature sequence, in order of
+appearance. Only include listed variables.
+(4) a goal state = Simulator() object. For each variable in changing variables , assign
+its target value following this structure:
+• Use setcurrent value() for direct assignment.
+• Use setvalue range() orsetstep value() if the variable’s default configuration
+changes.
+• Do not modify variable names. Use the exact names from changing variables .
+• For ContinuousVariable andTimeVariable , add a Python comment indicating
+unit (e.g., seconds, minutes, hours).
+Example Output:
+# User Instruction: Defrost chicken meat for 5 minutes at 50% power
+in 3 hours time. ,→
+task_policy = ["cook", "preset", "start"]
+policy_choice_reason = "Firstly adjust cook settings then set preset
+hours." ,→
+changing_variables = ["variable_microwave_cooking_power",
+"variable_microwave_cooking_time", "variable_preset_time",
+"variable_start"],→
+,→
+goal_state = Simulator()
+goal_state.variable_microwave_cooking_power.set_current_value("P50")
+goal_state.variable_microwave_cooking_time.set_current_value("00:05:0 ⌋
+0") # 5
+minutes,→
+,→
+goal_state.variable_preset_time.set_current_value(3) # hour
+goal_state.variable_start.set_current_value("on")
+Handle Program Choices: An appliance may allow choosing different programs (e.g. microwave
+menu, washing machine program), and each program has different settings (e.g. pizza program re-
+quires setting cooking weight , but soup program requires setting soup volume (explained in ex-
+tract variable ). In this case, variable program setting will be initialized with None inreset() .
+Therefore in goal state , firstly assign it to an existing defined variable (e.g., from a mapping dictio-
+nary), and set its value accordingly.
+39# Given variables
+variable_program_index = DiscreteVariable(["popcorn", "pizza",
+"soup"], "popcorn"),
+variable_program_setting = None
+variable_program_setting_popcorn = DiscreteVariable(["1 cup",
+"2 cup"], "1 cup"),
+variable_program_setting_pizza = DiscreteVariable(["250g",
+"350g", "450g"], "250g"),
+variable_program_setting_soup = DiscreteVariable(["200ml",
+"300ml", "400ml"], "200ml"),
+program_setting_dict = {
+"popcorn": variable_program_setting_popcorn,
+"pizza": variable_program_setting_pizza,
+"soup": variable_program_setting_soup
+}
+# Given feature
+feature_list["set_program"] = [
+{"step": 1, "actions": ["press_program_button"], "variable":
+"variable_program_index"}, ,→
+{"step": 2, "actions": ["press_up_arrow_button",
+"press_down_arrow_button"], "variable":
+"variable_program_setting"},→
+,→
+]
+# User Instruction: Set the microwave to cook 1 cup of popcorn...
+task_policy = ["set_program"]
+policy_choice_reason = "This feature contains variable_program_index
+and variable_program_setting". ,→
+changing_variables = ["variable_program_index",
+"variable_program_setting"] ,→
+goal_state = Simulator()
+goal_state.variable_program_index.set_current_value("popcorn")
+goal_state.variable_program_setting = variable_program_setting_popcorn
+goal_state.variable_program_setting.set_current_value("1 cup")
+40Prompt 9: Compare Goal State with Feedback
+You are given the appliance model, together with two strings in the format variable name:
+variable value , representing the goal state and the real-world feedback, respectively. Your task
+is to determine whether the feedback indicates the goal is reached.
+Comparison Rules:
+(1) Allow equivalent variable-value meaning. E.g. variable menu = "Popcorn" vs.
+mode popcorn = "on" ⇒True ;variable power = "On" vs. variable onoff =
+"On"⇒True
+(2) If values contain both numbers and text, remove text and compare numbers. Ignore casing
+or formatting if numerically identical. E.g. "0g" vs."0"⇒True ;"100cm" vs."100"⇒
+True ;"1 cup" vs."1 serving" ⇒True
+(3) Ensure the match is the closest in the value range. E.g. program="wash" v.s
+program="wash, dry" , both values exist in value range ⇒False
+Output Format:
+•reason : a string explaining your judgment.
+•goal reached : either True orFalse .
+Example Output:
+# goal: popcorn setting = 100g;
+# feedback: popcorn: 100
+reason = "Both values represent 100g, ignoring unit suffix."
+goal_reached = True
+Prompt 10: Diagnose Incorrect Variable Definition
+You are given:
+• A list of defined variable names in the appliance model.
+• A variable name variable xsuspected to be incorrectly defined.
+• A full step-by-step execution record starting from the first observed change in that vari-
+able’s value. Each record includes the action taken and the observed result in the format:
+variable name = variable value .
+Your Tasks:
+(1)Identify the root variable:
+• Match the observed variable name to the closest name in the given variable list. If the
+mismatch is caused by this variable itself, return that name as variable name .
+• If the variable is conditioned on a program choice (e.g.,
+variable program setting ), and the mismatch is due to a sub-variable (e.g.,
+variable program setting popcorn ), return the name of the sub-variable.
+(2)Determine if the variable is continuous:
+• Return variable iscontinuous = True if the values are numeric and increase/de-
+crease regularly.
+• Else return variable iscontinuous = False .
+(3)Extract the variable values as a list:
+• Extract all values of the observed variable in order from the record.
+• Store them in record sequence .
+• Use int/float for continuous variables and strfor discrete ones.
+Output Format: Return the following Python variables:
+•variable name
+•variable iscontinuous
+•record sequence
+Example:
+41# inputs given
+defined_variables = [
+"variable_wash_time",
+"variable_spin_speed",
+"variable_temperature"
+]
+execution_record = [
+{step_index: 1, action: ("turn_dial", 1), observation: wash_time =
+6}, ,→
+{step_index: 2, action: ("turn_dial", 1), observation: wash_time =
+9}, ,→
+{step_index: 3, action: ("turn_dial", 1), observation: wash_time =
+12}, ,→
+...
+]
+# Expected Output
+variable_name = "variable_wash_time"
+variable_is_continuous = True
+record_sequence = [6, 9, 12, ...]
+Prompt 11: Update Variable Definition from Observed Values
+You are given the following inputs:
+•variable name : the variable that has been confirmed to be incorrectly defined.
+•variable iscontinuous : whether the variable is continuous or discrete.
+•record sequence : the list of observed values of the variable over time.
+• The current implementation of the variable.
+• The user manual and a guide for valid variable definitions.
+Your Task: Update the variable definition by modifying its current value, value range, step size, or
+value order to match all values in record sequence .
+Instructions:
+(1)Paste the reasoning trace: Insert the provided record sequence as Python comments to
+justify your updates.
+(2)Update the variable: Modify the definition of the chosen variable to match observed be-
+havior. Keep the same name. Valid modifications include:
+(a)Change variable type according to observation.
+(b)Change current value to match with the last observed value.
+(c)Adjust value range or step size if the record shows regular repetition. Use piecewise
+ranges if steps skip sections.
+(d)Change value order for discrete variables if observed cycling order differs.
+(3)Copy related data structures: If the variable is part of a program-conditioned setting (e.g.,
+variable program setting , explained in extract variables ), also update the program dic-
+tionary:
+program_setting_dict["menu_x"] = variable_x
+(4)Align with real-world units. For example, if feedback is in cm, don’t define value ranges
+inm. For continuous variables representing time or weight, indicate the unit in a Python
+comment (e.g., seconds, minutes, grams).
+Example Output:
+42# given inputs
+variable_name = "variable_program_setting_popcorn"
+variable_is_continuous = True
+record_sequence = [0, 100, 200, 300, 400, 0]
+# record_sequence = [0, 100, 200, 300, 400, 0]
+# Step size = 100; values loop back to 0
+# Range spans 0 to 400 with step 100
+variable_program_setting_popcorn = ContinuousVariable(
+value_ranges_steps=[(0, 400, 100)],
+current_value=0
+)# in grams
+program_setting_dict["popcorn"] = variable_program_setting_popcorn
+Prompt 12: Update Appliance Model After Updating Variable
+You are given:
+• The original simulator implementation.
+• The incorrect variable name, variable x.
+• The corrected variable definition.
+Your Task: Update the Simulator() class so that all references to variable xreflect its corrected
+definition.
+Instructions:
+(1) For Simulator() , edit only affected action methods. Keep unrelated parts of the simulator
+unchanged. Do not modify or omit the reset() method.
+(2) Exclude code outside Simulator() , such as class definitions ( Appliance() ,
+Variable() ), variables and simulator feature .
+Example Output:
+# variable_power was changed from ContinuousVariable to
+DiscreteVariable. The valid value ranges change from float (e.g.
+100) to string (e.g. "100").,→
+,→
+class Simulator(Appliance):
+def reset(self):
+...
+def press_start_button(self):
+self.feature.update_progress("press_start_button")
+current_feature = self.feature.current_value[0]
+if current_feature == "speed_cook":
+self.assign_variable_to_next(self.variable_cooking_time)
+# updated line
+self.variable_power.set_current_value("100")
+Prompt 13: Update Goal Value After Variable Definition Change
+You are given a user instruction, an appliance model, a goal state object
+• a user instruction.
+• the implemented appliance model, i.e., a Simulator() object.
+• Agoal state = Simulator() object specifying target variable values that achieves the
+instruction.
+• The updated variable name, variable x.
+• A goal-setting guide for reference.
+43Your Task: Update the goal value of variable xin the goal state to match the new definition.
+Instructions:
+(1) Ensure the new value assignment aligns with both the the updated definition variable x
+and the user instruction.
+(2) Do not rename variable x. Do not modify any other variables in the goal state.
+(3) Do not return any other content (e.g., comments, reasoning, variable definitions, or unrelated
+goal assignments).
+Output Format: A single line of valid Python code that updates goal state.variable xto the
+correct value.
+Example Output:
+# updated timer to ContinuousVariable, previously was DiscreteVariable
+goal_state.variable_microwave_timer.set_current_value(3) # minutes
+Prompt 14: Check if Bounding Box Contains Control Panel Element
+Task: Given an image labeled with a bounding box, determine whether the bounding box contains a
+control panel element.
+Definition of Control Panel Element: Control panel elements include:
+• Physical components: buttons, dials.
+• Soft pads: labels printed directly on the control surface that respond to touch input. These
+labels might include printed symbols and icons, such as: ”+”, ”-”, ”start”, ”on/off”, and
+numeric digits.
+Instructions:
+(1) Review the region circled by the bounding box.
+(2) If the bounding box contains any of the valid elements listed above, reply with "Yes" . Oth-
+erwise reply with "No" .
+(3) In both cases, provide a reason by naming the object being circled by the red bounding box.
+Output Format:
+Yes
+Reason: The red box surrounds the "+" symbol on the soft pad region.
+Prompt 15: Map Bounding boxes to Control Panel Element Names
+You are given:
+• A list of control panel element names including buttons, dials, and soft-labeled pads.
+• Three images:
+(1) Full view of the control panel.
+(2) Zoomed-in region with a red bounding box and several green bounding boxes.
+(3) Same zoomed-in region without bounding boxes.
+• Abounding boxindex referring to the red box.
+Your Task:
+(1) Determine whether the red bounding box encloses a listed control element. Be lenient: if the
+red box contains any label, symbol, or visible control region, attempt to match. If multiple
+names match the red box, include them all.
+• For dials : Only bounding boxes covering the knob are valid. Ignore labels around the
+dial.
+• For buttons : Only bounding boxes that cover the physical, pressable area are valid.
+Boxes that only enclose external labels are invalid.
+• For soft-labeled pads : If the label itself is the interactive surface (i.e., no visible border
+or physical button), bounding boxes over the label region are valid.
+(2) If (1) is true, check if the red box is a better match than any green box for the same element.
+44• It is okay for red box to partially enclose the object.
+• If red box is clearer or more precise than all green boxes, accept it as the match.
+Output Format:
+• If both conditions are met, output the matched control element(s) in format below. Use exact
+names from the provided list.
+<control_element_name> : <index>
+<control_element_name> : <index>
+...
+• If no valid match is found, output None .
+Example Output:
+temperature dial : 1
+power dial: 2
+None
+temperature dial: 3
+power dial: 3
+Prompt 16: Remove Duplicate Bounding Boxes for Control Panel Ele-
+ments
+You are given an appliance type , which contains a control panel element name . Control panel
+elements are components responsible for operating the appliance, such as buttons, dials and soft touch
+pads. You are given:
+• A photo of the appliance to identify control panel element name .
+• A sequence of images showing bounding box options around potential regions for
+control panel element name . Each box has a visible index at its bottom-right corner.
+Your Task: Select onebounding box index that best matches the control panel element name . If
+none of the bounding boxes is valid, return response index = -1 .
+Selection Criteria:
+•Dial: Choose the bounding box that covers the knob . Ignore boxes that only include labeling
+or surrounding text.
+•Button:
+–If the label is printed directly on the button, a box selecting either the full button or
+label area is valid, even if the coverage is partial.
+–If the label is outside a physical button, select the bounding box around the physical
+(extruded) button, not just the label.
+•Soft Pad: When the label text or icon isthe button (i.e., not physically extruded), select the
+box that covers any part of that label or symbol.
+Output Format: Return two variables in Python format:
+response_index = 3
+response_reason = "The bounding box covers the soft pad label text of
+the button." ,→
+If no bounding box fits the criteria:
+response_index = -1
+response_reason = "None of the boxes select the physical button or
+label. The target is a circular dial knob near the bottom left
+corner.",→
+,→
+45Prompt 17: Ground Actions
+You are given a list of action names and a list of control panel element names. Your task is to ground
+each action to a control panel element name and a valid action type. Valid action types include press ,
+hold ,turn dial clockwise ,turn dial anti clockwise .
+Output Format: Return a Python list of dictionaries. Each dictionary contains a grounded action,
+with the following keys:
+(1)"action" : a string from the given action list (e.g., "press maxcrisp button" ).
+(2)"bbox label" : a list of strings from the given control element names.
+• For standard actions, this is a single-element list (e.g., ["max crisp button"] ).
+• For simultaneous actions (e.g., hold wash button andrinse button ), include
+both elements (e.g., ["wash button", "rinse button"] ).
+(3)"action type" : inferred from the action name string using the following rules:
+• Contains "hold"⇒"hold button"
+• Contains "press" ⇒"press"
+• Contains "turn dial clockwise" ⇒"turn dial clockwise"
+• Contains "turn dial anti clockwise" ⇒"turn dial anti clockwise"
+Example Output:
+[
+{
+"action": "press_max_crisp_button",
+"bbox_label": ["max_crisp_button"],
+"action_type": "press_button"
+},
+{
+"action": "press_and_hold_cancel_button_and_stop_button",
+"bbox_label": ["cancel_button", "stop_button"],
+"action_type": "press_and_hold_button"
+}
+]
+Prompt 18: Visual Feedback Parsing
+You are given:
+• A user command describing the task.
+• The most recent action applied and the target variable being adjusted.
+• The valid value range of the target variable.
+• An image of the appliance control panel after the action.
+• Relevant user manual text describing the display panel.
+Your Task:
+• Interpret the display image to infer the current appliance state, especially the value of the
+target variable.
+• Use the user manual to explain display symbols if needed.
+Output Format:
+variable_description = "<Concise interpretation of the current state,
+focusing on the target variable.>" ,→
+Example:
+46# Task: Set temperature to 98 °C. Action: 'press_temp_clean_button'.
+# Display shows a triangle under 85 °C.
+variable_description = "The triangle under '85 °C' indicates the
+current selection. variable_temperature = 85." ,→
+47Select the HotPot mode and set power to 2000 W.
+Select the Milk mode.
+Select the HotPot mode and set power to 1600 W.
+Set the insulation temperature to 98°, then pour the water.
+Set the insulation temperature to 85°, then pour the water.
+Set the insulation temperature to 65°, then pour the water.
+Hold at slow speed for 10 seconds.
+Hold at slow speed for 15 seconds.
+Hold at turbo speed for 10 seconds.
+Figure 18: Snapshots of our system performing various tasks on real appliances. Each row shows
+execution steps for one task.
+48

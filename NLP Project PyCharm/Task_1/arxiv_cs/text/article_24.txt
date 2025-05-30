@@ -1,0 +1,2416 @@
+arXiv:2505.21393v1  [cs.LG]  27 May 2025Leveraging the Power of Conversations: Optimal Key Term
+Selection in Conversational Contextual Bandits
+Maoli Liu
+The Chinese University of Hong Kong
+Hong Kong, China
+mlliu@cse.cuhk.edu.hkZhuohua Li∗†
+Guangzhou Institute of Technology, Xidian University
+Guangzhou, Guangdong, China
+zhli@cse.cuhk.edu.hk
+Xiangxiang Dai
+The Chinese University of Hong Kong
+Hong Kong, China
+xxdai23@cse.cuhk.edu.hkJohn C.S. Lui
+The Chinese University of Hong Kong
+Hong Kong, China
+cslui@cse.cuhk.edu.hk
+Abstract
+Conversational recommender systems proactively query users with
+relevant “ key terms ” and leverage the feedback to elicit users’ pref-
+erences for personalized recommendations. Conversational con-
+textual bandits, a prevalent approach in this domain, aim to op-
+timize preference learning by balancing exploitation and explo-
+ration. However, several limitations hinder their effectiveness in
+real-world scenarios. First, existing algorithms employ key term
+selection strategies with insufficient exploration, often failing to
+thoroughly probe users’ preferences and resulting in suboptimal
+preference estimation. Second, current algorithms typically rely
+on deterministic rules to initiate conversations, causing unneces-
+sary interactions when preferences are well-understood and missed
+opportunities when preferences are uncertain. To address these
+limitations, we propose three novel algorithms: CLiSK, CLiME,
+and CLiSK-ME. CLiSK introduces smoothed key term contexts to
+enhance exploration in preference learning, CLiME adaptively initi-
+ates conversations based on preference uncertainty, and CLiSK-ME
+integrates both techniques. We theoretically prove that all three
+algorithms achieve a tighter regret upper bound of O(√︁
+𝑑𝑇log𝑇)
+with respect to the time horizon 𝑇, improving upon existing meth-
+ods. Additionally, we provide a matching lower bound Ω(√
+𝑑𝑇)
+for conversational bandits, demonstrating that our algorithms are
+nearly minimax optimal. Extensive evaluations on both synthetic
+and real-world datasets show that our approaches achieve at least
+a 14.6% improvement in cumulative regret.
+CCS Concepts
+•Information systems →Recommender systems ;•Theory of
+computation→Online learning algorithms ;Online learning
+theory .
+∗Zhuohua Li is the corresponding author.
+†Also with The Chinese University of Hong Kong.
+This work is licensed under a Creative Commons Attribution 4.0 International License.
+KDD ’25, Toronto, ON, Canada
+©2025 Copyright held by the owner/author(s).
+ACM ISBN 979-8-4007-1454-2/2025/08
+https://doi.org/10.1145/3711896.3737025Keywords
+Conversational Recommendation, Preference Learning, Contextual
+Bandits, Online Learning
+ACM Reference Format:
+Maoli Liu, Zhuohua Li, Xiangxiang Dai, and John C.S. Lui. 2025. Leveraging
+the Power of Conversations: Optimal Key Term Selection in Conversational
+Contextual Bandits. In Proceedings of the 31st ACM SIGKDD Conference
+on Knowledge Discovery and Data Mining V.2 (KDD ’25), August 3–7, 2025,
+Toronto, ON, Canada. ACM, New York, NY, USA, 17 pages. https://doi.org/
+10.1145/3711896.3737025
+KDD Availability Link:
+The source code of this paper has been made publicly available at https:
+//doi.org/10.5281/zenodo.15490021.
+1 Introduction
+Recommender systems play a crucial role in applications like movie
+recommendations, online advertising, and personalized news feeds,
+where providing relevant and engaging content is essential for user
+satisfaction. To cater to diverse user interests, recommender sys-
+tems are designed to interact with users and continuously learn
+from their feedback. For instance, in product and news recommen-
+dations, the system can monitor users’ real-time click rates and
+accordingly refine its recommendations. Modern recommender sys-
+tems incorporate advanced online learning techniques to adapt in
+real time and uncover previously unknown user preferences.
+A fundamental challenge in recommender systems is the trade-
+off between exploration (i.e., recommending new items to uncover
+users’ unknown preferences) and exploitation (i.e., recommending
+items that align with users’ historical preferences). Contextual ban-
+dits [ 15] address this trade-off by enabling the system to learn from
+user interactions continuously while optimizing recommendations
+without compromising the user experience. In this framework, each
+item to be recommended is treated as an “ arm”, represented by a fea-
+ture vector. At each round, the agent (i.e., the recommender system)
+recommends an arm to the user based on historical interactions and
+the context of each arm, and then receives feedback/rewards (e.g.,
+clicks). The objective of the algorithm executed by the agent is to
+design an arm recommendation strategy that maximizes cumulative
+reward (or equivalently, minimizes cumulative regret) over time.
+Another major challenge in recommender systems is the “ cold
+start” problem, where the system initially lacks sufficient data aboutKDD ’25, August 3–7, 2025, Toronto, ON, Canada Maoli Liu, Zhuohua Li, Xiangxiang Dai, and John C.S. Lui
+def phase_elimination(num_arms, num_rounds, 
+arms_means):
+    remaining_arms = list(range(num_arms))
+    rounds_per_phase = num_rounds // 
+               int(np.log2(num_rounds))
+    for phase in range(int(np.log2(num_rounds))):
+        for arm in remaining_arms:
+    . . .
+    return remaining_arms[0]
+    . . .
+print(f"The best arm identified is: {best_arm}")python
+class PhaseElimination:
+    def _ _init_ _(self, num_arms, num_rounds, 
+arms_means):
+     . . .
+          self.remaining_arms = list(range(num_arms))
+    def run(self):
+           rounds_per_phase = self.num_rounds //                                                                
+int(np.log2(self.num_rounds))
+    . . .
+           return self.remaining_arms[0]
+    . . .
+print(f"The best arm identified is: {best_arm}")python
+Response 1
+Phase elimination algorithm is implemented as a function:
+Response 2
+Phase elimination algorithm is implemented as a class:Which response do you prefer?
+Your choice will help make ChatGPT better.
+Figure 1: Illustration of conversational recommendation by
+ChatGPT, where users select their preferred response from
+presented options.
+new users’ preferences, making accurate recommendations difficult.
+Conversational recommender systems (CRSs) [ 5,11,23,30] have
+emerged as a promising solution. Unlike traditional systems that
+rely solely on feedback from recommended items, CRSs can actively
+initiate queries with users to collect richer feedback and quickly
+infer their preferences. For example, as shown in Figure 1, platforms
+like ChatGPT occasionally present users with multiple response
+options and allow them to select their preferred one. Through these
+interactions, ChatGPT can refine its understanding and improve fu-
+ture responses to better align with user preferences. To model these
+interactions, conversational contextual bandits [ 29] are proposed
+as a natural extension of contextual bandits. In this framework,
+besides recommending items (arms) and observing arm-level feed-
+back, the agent can proactively prompt users with questions about
+key terms and receive key term-level feedback. The key terms are
+related to a subset of arms, providing valuable insights into users’
+preferences and improving recommendation quality.
+Despite recent advances in conversational contextual bandits [ 25,
+27, 28], existing approaches still face the following limitations:
+•Insufficient Exploration in Key Term Selection : Existing
+studies about conversational bandits fail to sufficiently explore
+key terms, limiting their effectiveness in preference learning.
+Zhang et al . [29] introduce the ConUCB algorithm with a re-
+gret upper bound of O(𝑑√
+𝑇log𝑇), where𝑑is the dimension
+and𝑇is the number of rounds. However, despite incorporating
+additional queries about key terms, the method does not yield
+substantial improvement over non-conversational approaches.
+Since then, improving regret through conversational interactions
+has remained an open problem in the field. Wang et al . [25] and
+Yang et al . [28] introduce an additional assumption that the key
+term set spans R𝑑and propose the ConLinUCB-BS and ConDuel
+algorithms, respectively. The two algorithms reduce a√︁
+log𝑇
+term in the regret, but worsen the dependence on 𝑑(as discussed
+in Section 4.4), resulting in a suboptimal regret bound. To achieve
+optimal regret, more explorative key term selection strategies
+are needed to efficiently gather informative user feedback and
+improve learning efficiency.
+•Inflexible Conversation Mechanism : Existing conversational
+bandit algorithms [ 27,29] often use a deterministic function tocontrol the frequency of conversations. Specifically, the agent
+can only initiate 𝑄conversations at once per 𝑃rounds, where 𝑃
+and𝑄are fixed integers. However, this rigid approach is imprac-
+tical and insufficient in real-world scenarios. For example, in a
+music streaming service, a fixed-frequency approach may cause
+unnecessary interactions when users’ preferences are already
+well-understood, disrupting the listening experience. Conversely,
+it may fail to collect feedback when the uncertainty is high, lead-
+ing to suboptimal recommendations. To address these limitations,
+a more adaptive conversation mechanism is needed to adjust the
+interaction frequency based on the preference uncertainty.
+Motivated by these observations, we develop three algorithms
+aimed at improving conversational contextual bandits. To start, we
+introduce the concept of “ smoothed key term contexts ”, inspired by
+the smoothed analysis for contextual bandits [ 13], and propose
+theConversational LinUCB with Smoothed Key terms (CLiSK)
+algorithm. Specifically, CLiSK launches conversations at a fixed
+frequency, similar to Zhang et al . [29] , but greedily selects key
+terms that are slightly perturbed by Gaussian noise. For example, in
+movie recommendations, instead of asking directly about a genre
+like “comedy” or “drama”, CLiSK blends elements of related genres,
+such as “comedy-drama” or “dark comedy”. This approach helps
+the system explore users’ preferences in a more nuanced manner.
+We will show that these small perturbations have strong theoretical
+implications , allowing the agent to explore the feature space more
+effectively and speed up the learning process.
+We next develop the Conversational LinUCB with Minimum
+Eigenvalues (CLiME) algorithm, which introduces an adaptive con-
+versational mechanism driven by preference uncertainty. Unlike
+the fixed-frequency approach of Wang et al . [25] , Zhang et al . [29] ,
+CLiME assesses preference uncertainty and initiates conversations
+only when the uncertainty is high, thereby maximizing information
+gain while avoiding unnecessary interactions. When a conversa-
+tion is triggered, CLiME selects key terms that target the areas
+of highest uncertainty within the feature space, rapidly refining
+user preferences. This adaptive approach not only ensures that
+conversations are timely and relevant, but also improves the user
+experience. Additionally, we design a family of uncertainty check-
+ing functions to determine when to assess the uncertainty, offering
+greater flexibility and better alignment with diverse applications.
+The smoothed key term contexts approach in CLiSK and the
+adaptive conversation technique in CLiME are orthogonal, allow-
+ing them to be applied independently or in combination. Therefore,
+we further propose the CLiSK-ME algorithm, which integrates both
+techniques to maximize exploration efficiency and adaptively ad-
+just user interactions. By leveraging the strengths of both methods,
+CLiSK-ME enhances exploration efficiency and optimizes user in-
+teractions for improved preference learning.
+Our algorithms introduce advanced key term selection strategies,
+significantly enhancing the efficiency of conversational contextual
+bandits. Theoretically, we prove that CLiSK achieves a regret upper
+bound ofO(√︁
+𝑑𝑇log𝑇+𝑑), while CLiME and CLiSK-ME achieve a
+regret upper bound of O(√︁
+𝑑𝑇log𝑇). Notably, all three algorithms
+reduce the dependence on 𝑇by a factor of√
+𝑑compared to prior
+studies. To the best of our knowledge, our work is the first to
+achieve the eO(√
+𝑑𝑇)regret in the conversational bandit literature. InLeveraging the Power of Conversations: Optimal Key Term Selection in Conversational Contextual Bandits KDD ’25, August 3–7, 2025, Toronto, ON, Canada
+addition, we establish a matching lower bound of Ω(√
+𝑑𝑇), showing
+that our algorithms are minimax optimal up to logarithmic factors.
+In summary, our contributions are listed as follows.
+•We propose three novel conversational bandit algorithms: CLiSK
+with smoothed key term contexts, CLiME with an adaptive con-
+versation mechanism, and CLiSK-ME, which integrates both for
+improved preference learning.
+•We establish the minimax optimality of our algorithms by prov-
+ing regret upper bounds of O(√︁
+𝑑𝑇log𝑇+𝑑)for CLiSK and
+O(√︁
+𝑑𝑇log𝑇)for CLiME and CLiSK-ME, along with a matching
+lower bound of Ω(√
+𝑑𝑇). These results underscore the theoretical
+advancements achieved by our methods.
+•We conduct extensive evaluations on both synthetic and real-
+world datasets, showing that our algorithms reduce regret by
+over 14.6% compared to baselines.
+2 Problem Formulation
+In conversational contextual bandits, an agent interacts with a user
+over𝑇∈N+rounds. The user’s preferences are represented by
+a fixed but unknown vector 𝜽∗∈R𝑑, where𝑑is the dimension.
+The agent’s goal is to learn 𝜽∗to recommend items that align with
+the user’s preferences. There exists a finite arm set denoted by A,
+where each arm 𝑎∈A represents an item and is associated with
+a feature vector 𝒙𝑎∈R𝑑. We denote[𝑇]={1,2,...,𝑇}. At each
+round𝑡∈[𝑇], the agent is given a subset of arms A𝑡⊆A . The
+agent then selects an arm 𝑎𝑡∈A𝑡and receives a reward 𝑟𝑎𝑡,𝑡. The
+reward is assumed to be linearly related to the preference vector
+and the feature vector of the arm, i.e., 𝑟𝑎𝑡,𝑡=𝒙⊤𝑎𝑡𝜽∗+𝜂𝑡, where𝜂𝑡
+is a random noise term.
+Let𝑎∗
+𝑡be the optimal arm at round 𝑡, i.e.,𝑎∗
+𝑡=arg max𝑎∈A𝑡𝒙⊤𝑎𝜽∗.
+The agent’s objective is to minimize the cumulative regret, which is
+defined as the total difference between the rewards of the optimal
+arms and the rewards obtained by the agent, i.e.,
+R(𝑇)=𝑇∑︁
+𝑡=1
+𝒙⊤
+𝑎∗
+𝑡𝜽∗−𝒙⊤
+𝑎𝑡𝜽∗
+.
+Beyond observing the user’s preference information through
+arm recommendations, the agent can gather additional feedback
+by launching conversations involving key terms. Specifically, a
+“key term” represents a category or keyword associated with a
+subset of arms. For example, in movie recommendations, key terms
+might include genres like “comedy” or “thriller”, and themes such as
+“romance” or “sci-fi”. Let Kdenote the finite set of key terms, where
+each key term 𝑘∈K corresponds to a context vector ˜𝒙𝑘∈R𝑑.
+At round𝑡, if a conversation is initiated, the agent selects a key
+term𝑘∈K, queries the user, and receives key-term level feedback
+˜𝑟𝑘,𝑡. We follow the formulation of Wang et al . [25] that the user’s
+preference vector 𝜽∗remains consistent across both arms and key
+terms. The relationship between key terms and the user’s preference
+is also linear, i.e., ˜𝑟𝑘,𝑡=˜𝒙⊤
+𝑘𝜽∗+˜𝜂𝑡, where ˜𝜂𝑡is a random noise term.
+We list and explain our assumptions as follows. Both Assump-
+tions 1 and 2 are consistent with previous works on conversational
+contextual bandits [25, 29] and linear contextual bandits [1, 15].
+Assumption 1. We assume that the feature vectors for both arms
+and key terms are normalized, i.e., ∥𝒙𝑎∥2=1and∥˜𝒙𝑘∥2=1for all𝑎∈A and𝑘∈K. We also assume the unknown preference vector
+𝜽∗is bounded, i.e.,∥𝜽∗∥2≤1.
+Assumption 2. We assume the noise terms 𝜂𝑡,˜𝜂𝑡are conditionally
+independent and 1-sub-Gaussian across 𝑇rounds.
+3 Algorithm Design
+In this section, we introduce our proposed algorithms, outlining
+their key components and implementation details.
+3.1 CLiSK Algorithm
+To enhance the exploration of users’ preferences, we introduce the
+smoothed key term contexts and propose the CLiSK algorithm, de-
+tailed in Algorithm 1. The algorithm consists of two main modules:
+key term selection (Lines 4 to 10) and arm selection (Lines 11 to 16).
+Specifically, in each round 𝑡, the agent first determines whether to
+initiate a conversation based on a predefined query budget (Lines 2
+and 3). If a conversation is initiated, the agent selects a key term
+𝑘(Line 5) and queries the user about it. Subsequently, the agent
+updates its estimate of the preference vector 𝜽𝑡(Line 11) and selects
+an arm𝑎𝑡for recommendation (Line 12). The strategies for key
+term selection and arm selection are elaborated as follows.
+Algorithm 1: CLiSK
+Input:A,K,𝑏(𝑡),𝜆,{𝛼𝑡}𝑡>0
+Initialization: 𝑴1=𝜆𝑰𝑑,𝒃1=0𝑑
+1for𝑡=1,...,𝑇 do
+2𝑞𝑡=⌊𝑏(𝑡)⌋−⌊𝑏(𝑡−1)⌋
+3 while𝑞𝑡>0do
+4 Smooth the key term contexts to get {˜˜𝒙𝑘}𝑘∈K
+5 Select a key term 𝑘=arg max𝑘∈K˜˜𝒙⊤
+𝑘𝜽𝑡
+6 Query the user’s feedback for 𝑘
+7 Receive the key term-level feedback ˜𝑟𝑘,𝑡
+8 𝑴𝑡=𝑴𝑡+˜˜𝒙𝑘,𝑡˜˜𝒙⊤
+𝑘,𝑡
+9 𝒃𝑡=𝒃𝑡+˜𝑟𝑘,𝑡˜˜𝒙𝑘,𝑡
+10𝑞𝑡=𝑞𝑡−1
+11 𝜽𝑡=𝑴−1
+𝑡𝒃𝑡
+12 Select𝑎𝑡=arg max𝑎∈A𝑡𝒙⊤𝑎𝜽𝑡+𝛼𝑡∥𝒙𝑎∥𝑀−1
+𝑡
+13 Ask the user’s preference for arm 𝑎𝑡
+14 Observe the reward 𝑟𝑎𝑡,𝑡
+15 𝑴𝑡+1=𝑴𝑡+𝒙𝑎𝑡𝒙⊤𝑎𝑡
+16 𝒃𝑡+1=𝒃𝑡+𝑟𝑎𝑡,𝑡𝒙𝑎𝑡
+3.1.1 Intuition Overview. Building on insights from Kannan et al .
+[13]and Raghavan et al . [20] , we add small perturbations to the key
+term contexts to deepen the exploration of users’ preferences. These
+perturbations increase data diversity and help uncover preferences
+that might be overlooked when selecting key terms directly. For
+instance, instead of using “comedy” alone, variations like “romantic
+comedy” or “dark comedy” can reveal more specific preferences.
+Below is the formal definition of smoothed key term contexts,
+where the perturbations are modeled as Gaussian noise.KDD ’25, August 3–7, 2025, Toronto, ON, Canada Maoli Liu, Zhuohua Li, Xiangxiang Dai, and John C.S. Lui
+Definition 1 (Smoothed Key Term Contexts) .Given a key term set
+K, the smoothed key term contexts are defined as {˜˜𝒙𝑘}𝑘∈K, where
+˜˜𝒙𝑘=˜𝒙𝑘+𝜺𝑘for each𝑘∈K. The noise vector 𝜺𝑘is independently
+drawn from a truncated multivariate Gaussian distribution N(0,𝜌2·
+𝑰𝑑), where 𝑰𝑑is the𝑑-dimensional identity matrix and 𝜌2controls
+the level of perturbations. Each dimension of 𝜺𝑘is truncated within
+[−𝑅,𝑅]for some𝑅>0, i.e.,|(𝜺𝑘)𝑗|≤𝑅,∀𝑗∈[𝑑].
+3.1.2 Key Term Selection. When initiating conversations, the agent
+no longer selects key terms directly based on their original contexts.
+Instead, the agent applies a small random perturbation to each key
+term’s context, as defined in Definition 1 (Line 4). It then greedily
+selects the key term with the highest value under the perturbed
+contexts, i.e., 𝑘=arg max𝑘∈K˜˜𝒙⊤
+𝑘𝜽𝑡(Line 5).
+Remark 1.Note that the smoothed key term contexts are re-generated
+foreach conversation . For notational consistency, we use the same
+notation{˜˜𝒙𝑘}𝑘∈Kto represent the smoothed key term contexts
+across different conversations.
+3.1.3 Conversation Frequency. Following Zhang et al . [29] , CLiSK
+uses a deterministic function 𝑏(𝑡)to regulate the frequency of con-
+versation initiation. The function 𝑏(𝑡)is monotonically increasing
+regarding𝑡and satisfies 𝑏(0)=0. At round𝑡, the agent initiates
+𝑞(𝑡)=⌊𝑏(𝑡)⌋−⌊𝑏(𝑡−1)⌋conversations if 𝑞(𝑡)>0; otherwise, no
+conversation is conducted.
+3.1.4 Arm Selection. CLiSK uses the Upper Confidence Bound
+(UCB) strategy for arm selection, a prevalent method in linear ban-
+dits. At round 𝑡, the agent updates its estimated preference vector
+𝜽𝑡based on both arm-level and key term-level feedback. This esti-
+mation follows a ridge regression framework with regularization
+parameter𝜆, i.e., 𝜽𝑡=𝑴−1
+𝑡𝒃𝑡, with 𝑴𝑡and𝒃𝑡defined as
+𝑴𝑡=𝑡−1∑︁
+𝑠=1𝒙𝑎𝑠𝒙⊤
+𝑎𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘+𝜆𝑰𝑑,
+𝒃𝑡=𝑡−1∑︁
+𝑠=1𝑟𝑎𝑠,𝑠𝒙𝑎𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜𝑟𝑘,𝑠˜˜𝒙𝑘,
+whereK𝑠is the set of key terms selected at round 𝑠.𝑴𝑡is commonly
+referred to as the covariance matrix.
+After the update, the agent selects the arm with the highest
+UCB value, i.e., 𝑎𝑡=arg max𝑎∈A𝑡𝒙⊤𝑎𝜽𝑡+𝛼𝑡∥𝒙𝑎∥𝑴−1
+𝑡, where∥𝒙∥𝑴
+denotes the Mahalanobis norm√
+𝒙⊤𝑴𝒙and{𝛼𝑡}𝑡>0are parameters
+designed to balance the exploration-exploitation trade-off.
+3.2 CLiME Algorithm
+To enable more adaptive and flexible conversation initiation, we in-
+troduce the CLiME algorithm, detailed in Algorithm 2. The CLiME
+adopts the same arm selection strategy as CLiSK, but it introduces
+key innovations in determining when to initiate conversations and
+which key terms to select. Unlike CLiSK, which follows a determin-
+istic function 𝑏(𝑡)for scheduling conversations, CLiME adaptively
+determines when to conduct a conversation based on the uncer-
+tainty in the preference estimation.Algorithm 2: CLiME
+Input:A,K,𝜆,𝛼,{𝛼𝑡}𝑡>0
+Initialization: 𝑴1=𝜆𝑰𝑑,𝒃1=0𝑑
+1for𝑡=1,...,𝑇 do
+2 ifUncertaintyChecking( 𝑡)then
+3 Diagonalize 𝑴𝑡=Í𝑑
+𝑖=1𝜆𝒗𝑖𝒗𝑖𝒗𝑖⊤
+4 foreach𝜆𝒗𝑖<𝛼𝑡do
+5 𝑘=arg max𝑘∈K|˜𝒙⊤
+𝑘𝒗𝑖|
+6 𝑛𝑘=⌈(𝛼𝑡−𝜆𝒗𝑖)/𝑐2
+0⌉
+7 Schedule𝑛𝑘conversations about the key term 𝑘
+before next uncertainty checking
+8 Update 𝑴𝑡and𝒃𝑡accordingly
+9 𝜽𝑡=𝑴−1
+𝑡𝒃𝑡
+10 Select𝑎𝑡=arg max𝑎∈A𝑡𝒙⊤𝑎𝜽𝑡+𝛼𝑡∥𝒙𝑎∥𝑀−1
+𝑡
+11 Ask the user’s preference for arm 𝑎𝑡
+12 Observe the reward 𝑟𝑎𝑡,𝑡
+13 𝑴𝑡+1=𝑴𝑡+𝒙𝑎𝑡𝒙⊤𝑎𝑡
+14 𝒃𝑡+1=𝒃𝑡+𝑟𝑎𝑡,𝑡𝒙𝑎𝑡
+3.2.1 Intuition Overview. The main idea behind CLiME is to adap-
+tively initiate conversations based on the current level of uncer-
+tainty in the estimated preference and use key terms to explore
+the uncertain directions effectively. Specifically, the covariance ma-
+trix𝑴𝑡encodes information about the feature space, where its
+eigenvectors represent the principal directions within the space,
+and the corresponding eigenvalues indicate the level of uncertainty
+along these directions. A smaller eigenvalue indicates a higher
+uncertainty in the associated direction. Therefore, by guiding the
+agent to explore such high-uncertainty directions, the agent can
+reduce uncertainty and improve learning efficiency. If the minimum
+eigenvalue of 𝑴𝑡remains above a certain value, the agent ensures
+sufficient exploration of the feature space. To facilitate exploration,
+we introduce the following assumption.
+Assumption 3. We assume that the elements in the key term set K
+are sufficiently rich and diverse, such that for any 𝒙∈R𝑑satisfying
+∥𝒙∥2=1, there exists a key term 𝑘∈K such that|˜𝒙⊤
+𝑘𝒙|≥𝑐0,
+where𝑐0is some constant close to 1.
+This mild assumption ensures that the key term set Kis com-
+prehensive enough to cover all relevant directions in the feature
+space. In other words, for any direction 𝒙that the agent might need
+to explore, there exists a key term 𝑘∈K whose context ˜𝒙𝑘aligns
+sufficiently well with 𝒙. This diversity allows the agent to effec-
+tively reduce uncertainty by exploring underrepresented directions,
+thereby improving preference learning.
+3.2.2 Conversation Initiation and Key Term Selection. In CLiME,
+conversation initiation and key term selection are designed to max-
+imize the information gained from user interactions. As shown
+in Algorithm 2, the agent first evaluates the eigenvalues of the
+covariance matrix 𝑴𝑡(Line 3). If any eigenvalue 𝜆𝒗𝑖falls below a
+certain threshold (derived from Section 4.2), i.e., 𝜆𝒗𝑖<𝛼𝑡(Line 4),
+the agent prompts 𝑛𝑘=⌈(𝛼𝑡−𝜆𝒗𝑖)/𝑐2
+0⌉conversations by selectingLeveraging the Power of Conversations: Optimal Key Term Selection in Conversational Contextual Bandits KDD ’25, August 3–7, 2025, Toronto, ON, Canada
+key terms that most closely align with the corresponding eigen-
+vector 𝒗𝑖(Lines 5 to 7). Here, 𝛼∈(0,𝑐2
+0)is an exploration control
+parameter that regulates the exploration level. Note that the agent
+can distribute these 𝑛𝑘conversations across multiple rounds before
+re-evaluating the eigenvalues of the covariance matrix.
+To further enhance flexibility and accommodate diverse real-
+world applications, we design an uncertainty checking function
+UncertaintyChecking( 𝑡)(Line 2). This function determines when
+to assess uncertainty and potentially trigger conversations. Exam-
+ples of such checking functions are given as follows.
+•Continuous Checking : The agent assesses uncertainty at every
+round and initiates conversations as needed.
+•Fixed Interval Checking : The agent assesses uncertainty every
+𝑃rounds, where 𝑃is a fixed integer.
+•Exponential Phase Checking : The agent evaluates uncertainty
+at exponentially increasing intervals of 2𝑖, where𝑖=1,2,....
+Remark 2.The uncertainty checking functions in CLiME differ
+fundamentally from the frequency function 𝑏(𝑡)in ConUCB [ 29].
+Specifically, these checking functions regulate how often uncer-
+tainty is assessed but do not directly dictate conversation initiation.
+In contrast, 𝑏(𝑡)deterministically controls both the timing and
+number of conversations. CLiME and ConUCB also differ in how
+they select key terms, further distinguishing the two approaches.
+Remark 3.It is worth noting that the smoothed key term contexts
+approach in CLiSK and the adaptive conversation technique in
+CLiME are orthogonal. The two strategies can operate indepen-
+dently or be integrated to enhance learning efficiency further. To
+this end, we introduce the CLiSK-ME algorithm, detailed in Ap-
+pendix A.1, which integrates both approaches to leverage their
+complementary strengths.
+4 Theoretical Analysis
+This section presents the theoretical results of our algorithms,
+which employ analytical techniques that differ from standard linear
+bandit methods. Detailed proofs of all lemmas and theorems are
+provided in the Appendices.
+4.1 Regret Analysis of CLiSK Algorithm
+Following Zhang et al . [29] and Wang et al . [25] , we assume 𝑏(𝑡)=
+𝑏𝑡for some𝑏∈(0,1). We start with Lemma 1, which bounds the
+difference between the estimated and true rewards for each arm.
+Lemma 1. Under Assumptions 1 and 2, for CLiSK, for any round
+𝑡∈[𝑇]and any arm 𝑎∈A, with probability at least 1−𝛿for some
+𝛿∈(0,1), we have
+𝒙⊤
+𝑎𝜽𝑡−𝒙⊤
+𝑎𝜽∗≤𝛼𝑡∥𝒙𝑎∥𝑴−1
+𝑡,
+where𝛼𝑡=vt
+2 log(1
+𝛿)+𝑑log 
+1+𝑡+
+1+√
+𝑑𝑅
+𝑏𝑡
+𝜆𝑑!
++√
+𝜆.
+Next, we examine the smoothed key term contexts and their
+impact on exploring the feature space.
+Lemma 2. For any round 𝑡∈ [𝑇], with the smoothed key term
+contexts in Definition 1, CLiSK has the following lower bound on theminimum eigenvalue of the matrix E[˜˜𝒙𝑘˜˜𝒙⊤
+𝑘]for any𝑘∈K𝑡, i.e.,
+𝜆min
+E[˜˜𝒙𝑘˜˜𝒙⊤
+𝑘]
+≥𝑐1𝜌2
+log|K|≜𝜆K,
+where𝑐1∈(0,1)is some constant.
+Lemma 2 provides a lower bound on the minimum eigenvalue of
+the expected outer product of the selected key term. Intuitively, this
+implies that under smoothed contexts, the selected key terms exhibit
+sufficient diversity in the feature space, ensuring that each query
+contributes meaningful information about the user’s preferences.
+Lemma 3. For CLiSK, with probability at least 1−𝛿for some𝛿∈
+(0,1), if𝑡≥𝑇0≜8(1+√
+𝑑𝑅)2
+𝑏𝜆Klog
+𝑑
+𝛿
+, we have
+𝜆min©­
+«𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘ª®
+¬≥𝜆K𝑏𝑡
+2.
+Lemma 3 establishes a lower bound on the minimum eigenvalue
+of the Gram matrix that grows linearly with time 𝑡. This guarantees
+that CLiSK accumulates enough statistical information to effectively
+estimate the user’s preference vector through ridge regression. Fol-
+lowing these results, we bound ∥𝒙𝑎∥𝑴−1
+𝑡in Lemma 4 and derive a
+high-probability regret upper bound for CLiSK in Theorem 1.
+Lemma 4. For CLiSK, for any 𝑎∈A, if𝑡≥𝑇0≜8(1+√
+𝑑𝑅)2
+𝑏𝜆Klog
+𝑑
+𝛿
+,
+with probability at least 1−𝛿for some𝛿∈(0,1),∥𝒙𝑎∥𝑴−1
+𝑡≤√︃
+2
+𝜆K𝑏𝑡.
+Theorem 1 (Regret of CLiSK) .With probability at least 1−𝛿for
+some𝛿∈(0,1), the regret upper bound of CLiSK satisfies
+R(𝑇)≤8(1+√
+𝑑𝑅)2log(|K|)
+𝑐1𝜌2𝑏log𝑑
+𝛿
++4√︄
+2𝑐1𝜌2𝑇
+𝑏log(|K|)·
+©­­­
+«vuuuut
+2 log1
+𝛿
++𝑑log©­­
+«1+𝑇+
+1+√
+𝑑𝑅
+𝑏𝑇
+𝜆𝑑ª®®
+¬+√
+𝜆ª®®®
+¬
+=O(√︁
+𝑑𝑇log(𝑇)+𝑑),
+where𝑅and𝜌2are constants in Definition 1.
+4.2 Regret Analysis of CLiME Algorithm
+We begin with Lemma 5, which closely parallels Lemma 1.
+Lemma 5. Let𝜽𝑡be the estimated preference vector at round 𝑡and
+𝜽∗be the true preference vector. Under Assumptions 1, 2 and 3, for
+CLiME, at round 𝑡, for any arm 𝑎∈A, with probability at least 1−𝛿
+(𝛿∈(0,1)), we have𝒙⊤
+𝑎𝜽𝑡−𝒙⊤
+𝑎𝜽∗≤𝛼𝑡∥𝒙𝑎∥𝑴−1
+𝑡,
+where𝛼𝑡=√︄
+2 log(1
+𝛿)+𝑑log
+1+𝑡+𝛼𝑑𝑡
+𝜆𝑑𝑐2
+0
++√
+𝜆,𝛼is an exploration
+control factor in Algorithm 2, and 𝑐0is a constant in Assumption 3.
+Since conversations are initiated adaptively in CLiME, the num-
+ber of conversations conducted up to each round 𝑡is not determin-
+istic. A key challenge to prove Lemma 5 is to bound this quantity.
+Then, we present Lemma 6, which bounds ∥𝒙𝑎∥𝑴−1
+𝑡.KDD ’25, August 3–7, 2025, Toronto, ON, Canada Maoli Liu, Zhuohua Li, Xiangxiang Dai, and John C.S. Lui
+Lemma 6. For CLiME, for any arm 𝑎∈A, with probability at least
+1−𝛿for some𝛿∈(0,1), at round𝑡≥2𝑃, we have∥𝒙𝑎∥𝑴−1
+𝑡≤√︃
+2
+𝛼𝑡,
+where𝑃is a fixed integer.
+The proof of Lemma 6 relies on establishing a lower bound on the
+minimum eigenvalue of 𝑴𝑡, i.e.,𝜆min(𝑴𝑡)≥𝛼𝑡, which involves a
+delicate analysis of covariance matrix eigenvalues. The condition
+𝑡≥2𝑃is introduced to generalize all three checking functions.
+Building on this, we derive the following theorem for CLiME.
+Theorem 2 (Regret of CLiME) .With probability at least 1−𝛿for
+some𝛿∈(0,1), the regret upper bound of CLiME satisfies
+R(𝑇)≤4√︂
+2𝑇
+𝛼©­
+«vut
+2 log(1
+𝛿)+𝑑log 
+1+𝑇+𝛼𝑑𝑇
+𝜆𝑑𝑐2
+0!
++√
+𝜆ª®
+¬+2𝑃
+=O√︁
+𝑑𝑇log(𝑇)
+.
+Remark 4.Note that Theorem 2 applies to all three uncertainty
+checking functions discussed in CLiME algorithm, which under-
+scores the generality of our methods.
+CLiSK-ME combines the advantages of both smoothed key term
+contexts and adaptive conversation techniques, ensuring efficient
+exploration while adaptively adjusting conversation frequency
+based on uncertainty. As a result, we derive the following corollary.
+Corollary 1. With probability at least 1−𝛿for some𝛿∈(0,1), the
+regret upper bound of CLiSK-ME satisfies R(𝑇)=O(√︁
+𝑑𝑇log(𝑇)).
+4.3 Lower Bound for Conversational Bandits
+We establish a regret lower bound for conversational bandits with
+finite andtime-varying arm sets. Our result is novel because the well-
+known lower bound Ω(√
+𝑑𝑇)by Chu et al . [6] does not consider
+conversational information and thus cannot be directly applied to
+our setting. Additionally, the existing lower bound for federated
+conversational bandits [ 19] is also inapplicable, as it assumes a fixed
+arm set. The detailed proof is given in Appendix A.11.
+Theorem 3 (Regret lower bound) .For any policy that chooses
+at most one key term per time step, there exists an instance of the
+conversational bandit problem such that the expected regret is at least
+Ω(√
+𝑑𝑇). Furthermore, for any 𝑇=2𝑚with𝑚∈[𝑑], the regret is at
+leastΩ(√︁
+𝑑𝑇log(𝑇)).
+4.4 Discussion on Optimality
+To the best of our knowledge, we are the first to propose algorithms
+for conversational contextual bandits that achieve the optimal regret
+bound of order eO(√
+𝑑𝑇). We summarize the regret bounds of our
+proposed algorithms and related algorithms in Table 1 and discuss
+the theoretical improvements over existing methods.
+The regret upper bound of LinUCB [ 1] isO(𝑑√
+𝑇log𝑇), which
+serves as a standard benchmark in contextual linear bandits. The
+first algorithm for conversational bandits, ConUCB [ 29], offers the
+same regret upper bound as LinUCB, indicating that it does not offer
+a substantial theoretical improvement over the non-conversational
+algorithms. Since then, improving regret through conversational
+interactions has remained an open problem in the field. UnderTable 1: Comparison of theoretical regret bounds.
+Algorithm Conversational Regret
+LinUCB [1] ✗ O(𝑑√
+𝑇log𝑇)
+ConUCB [29], ConLinUCB-MCR [25] ✓ O(𝑑√
+𝑇log𝑇)
+ConLinUCB-BS [25] ✓ At leastO(𝑑√︁
+𝑇log𝑇)*
+CLiSK (Ours, Theorem 1) ✓ O(√︁
+𝑑𝑇log𝑇+𝑑)
+CLiME (Ours, Theorem 2) ✓ O(√︁
+𝑑𝑇log𝑇)
+CLiSK-ME (Ours, Corollary 1) ✓ O(√︁
+𝑑𝑇log𝑇)
+*The original paper claims a regret of O(√︁
+𝑑𝑇log𝑇)but its analysis is flawed.
+the assumption that the key term set Kspans R𝑑, ConLinUCB-
+BS [25] achieves a regret upper bound of O(1√
+𝜆B√︁
+𝑑𝑇log𝑇), where
+𝜆B≔𝜆min
+E𝑘∈unif(B)h
+˜𝒙𝑘˜𝒙⊤
+𝑘i
+andBis the barycentric spanner of
+K. The authors assume 𝜆Bis a constant, leading to a regret bound of
+O(√︁
+𝑑𝑇log𝑇). However, this assumption is incorrect as 𝜆Bdepends
+on the dimension 𝑑and is not a constant. Specifically, denoting
+𝑿≔E𝑘∈unif(B)h
+˜𝒙𝑘˜𝒙⊤
+𝑘i
+and{𝜆𝑖}𝑑
+𝑖=1as its eigenvalues, we use the
+fact that∥˜𝒙𝑘∥=1and obtain Tr(𝑿)=E𝑘∈unif(B)h
+Tr
+˜𝒙𝑘˜𝒙⊤
+𝑘i
+=1,
+thus𝜆B≤Í𝑑
+𝑖=1𝜆𝑖
+𝑑=Tr(𝑿)
+𝑑=1
+𝑑. Consequently, by plugging
+this result back into the regret expression, the regret bound of
+ConLinUCB-BS cannot be better than O(𝑑√︁
+𝑇log𝑇). These previ-
+ous attempts underscore the significance of our work. In contrast,
+with the smoothed key term context technique and with the adap-
+tive conversation technique, our algorithms achieve a better regret
+bound ofO(√︁
+𝑑𝑇log𝑇+𝑑)andO(√︁
+𝑑𝑇log𝑇), respectively. These
+improvements successfully match the lower bound (Theorem 3) up
+to logarithmic factors in their dependence on the time horizon 𝑇.
+5 Evaluation
+In this section, we evaluate the performance of our algorithms on
+both synthetic and real-world datasets. All the experiments were
+conducted on a machine equipped with a 3.70 GHz Intel Xeon
+E5-1630 v4 CPU and 32GB RAM.
+5.1 Experiment Setups
+5.1.1 Datasets. Consistent with existing studies, we generate a
+synthetic dataset and use three real-world datasets: MovieLens-
+25M [12], Last.fm [4], and Yelp1.
+For the synthetic dataset, we set the dimension 𝑑=50, the
+number of users 𝑁=200, the number of arms |A|=5,000,
+and the number of key terms |K|=1,000. We generate it fol-
+lowing Zhang et al . [29] . First, for each key term 𝑘∈K, we sample
+a pseudo feature vector ¤𝒙𝑘with each dimension drawn from a
+uniform distribution U(− 1,1). For each arm 𝑖∈A, we randomly
+select an integer 𝑛𝑖∈{1,2,..., 5}and uniformly sample a subset
+of key termsK𝑖⊂K with|K𝑖|=𝑛𝑖. The weight is defined as
+𝑤𝑖,𝑘=1/𝑛𝑖for each𝑘∈K𝑖. For each arm 𝑖, the feature vector
+𝒙𝑖is drawn from a multivariate Gaussian N(Í
+𝑗∈K𝑖¤𝒙𝑗/𝑛𝑖,𝑰). The
+feature vector for each key term 𝑘, denoted by ˜𝒙𝑘, is computed
+as˜𝒙𝑘=Í
+𝑖∈A𝑤𝑖,𝑘Í
+𝑗∈A𝑤𝑗,𝑘𝒙𝑖. Finally, each user’s preference vector
+1https://www.yelp.com/datasetLeveraging the Power of Conversations: Optimal Key Term Selection in Conversational Contextual Bandits KDD ’25, August 3–7, 2025, Toronto, ON, Canada
+𝜽𝑢∈R𝑑is generated by sampling each dimension from U(− 1,1)
+and normalizing it to unit length.
+For the real-world datasets, we regard movies/artists/businesses
+as arms. To exclude unrepresentative or insufficiently informative
+data (such as users who have not submitted any reviews or movies
+with only a few reviews), we extract a subset of |A|=5,000arms
+with the highest number of user-assigned ratings/tags, and a subset
+of𝑁=200users who have assigned the most ratings/tags. Key
+terms are identified by using the associated movie genres, busi-
+ness categories, or tag IDs in the MovieLens, Yelp, and Last.fm
+datasets, respectively. For example, each movie is associated with a
+list of genres, such as “action” or “comedy”, and each business (e.g.,
+restaurant) is categorized by terms such as “Mexican” or “Burgers”.
+Using the data extracted above, we create a feedback matrix 𝑹of
+size𝑁×|A| , where each element 𝑹𝑖,𝑗represents the user 𝑖’s feed-
+back to arm 𝑗. We assume that the user’s feedback is binary. For the
+MovieLens and Yelp datasets, a user’s feedback for a movie/business
+is 1 if the user’s rating is higher than 3; otherwise, the feedback is 0.
+For the Last.fm dataset, a user’s feedback for an artist is 1 if the user
+assigns a tag to the artist. Next, we generate the feature vectors for
+arms 𝒙𝑖and the preference vectors for users 𝜽𝑢. Following existing
+works, we decompose the feedback matrix 𝑹using truncated Sin-
+gular Value Decomposition (SVD) as 𝑹≈𝚯𝑺𝑨⊤, where 𝚯∈R𝑁×𝑑
+and𝑨∈R|A|×𝑑contain the top- 𝑑left and right singular vectors,
+and𝑺∈R𝑑×𝑑is a diagonal matrix with the corresponding top- 𝑑
+singular values. Then each 𝜽⊤𝑢corresponds to the 𝑢-th row of 𝚯𝑺
+for all𝑢∈[𝑁], and each 𝒙⊤
+𝑖corresponds to the 𝑖-th row of 𝑨for
+all𝑖∈A. The feature vectors for key terms are generated similarly
+to those in the synthetic dataset, by assigning equal weights for all
+key terms corresponding to each arm.
+5.1.2 Baseline Algorithms. We select the following baseline algo-
+rithms from existing studies: (1) LinUCB [ 1]: The standard linear
+contextual bandit algorithm, which does not consider the conversa-
+tional setting and only has arm-level feedback. (2) Arm-Con [ 5]: An
+extension of LinUCB that initiates conversations directly from arm
+sets. (3) ConUCB [ 29]: The first algorithm proposed for conversa-
+tional contextual bandits that queries key terms when conversations
+are allowed. (4) ConLinUCB [ 25]: It consists of three algorithms
+with different key term selection strategies. ConLinUCB-BS com-
+putes the barycentric spanner of key terms as an exploration basis.
+ConLinUCB-MCR selects key terms with the largest confidence
+radius. ConLinUCB-UCB chooses key terms with the largest upper
+confidence bounds. Since ConLinUCB-BS and ConLinUCB-MCR
+demonstrate superior performance, we focus our comparisons on
+these two variants.
+5.2 Evaluation Results
+5.2.1 Cumulative Regret. First, we compare our algorithms against
+all baseline algorithms in terms of cumulative regret over 𝑇=6,000
+rounds. In each round, we randomly select |A|=200arms from
+each dataset. For the baseline algorithms, we adopt the conver-
+sation frequency function 𝑏(𝑡)=5⌊log(𝑇)⌋, as specified in their
+original papers. We present the results for all three checking func-
+tions “Continuous”, “Fixed Interval”, and "Exponential Phase”, for
+both CLiME and CLiSK-ME. For the “Fixed Interval” function,
+UncertaintyChecking is triggered every 100 rounds, whereas forthe "Exponential Phase” it is triggered whenever 𝑡is a power of
+2. For CLiSK, both the perturbation level 𝜌2and the truncation
+limit𝑅are set to 1. The results are averaged over 20 trials, and the
+resulting confidence intervals are included in the figures. Under
+the “Continuous Checking” function, as shown in Figure 2, our
+three algorithms consistently achieve the best performance (low-
+est regret) with an improvement of over 14.6% compared to the
+best baseline. Similar performance trends hold under the other two
+checking functions, as illustrated in Figures 3 and 4. These results
+confirm the validity of our theoretical advancements.
+0 2000 4000 6000
+Round
+(a) Synthetic dataset0.00.51.01.5Regret1e3
+0 2000 4000 6000
+Round
+(b) MovieLens dataset0.00.51.01.5Regret1e3
+0 2000 4000 6000
+Round
+(c) Yelp dataset012Regret1e3
+0 2000 4000 6000
+Round
+(d) Last.fm dataset024Regret1e3
+CLiSK-ME
+CLiMECLiSK
+ConUCBLinUCB
+Arm-ConConLinUCB-MCR
+ConLinUCB-BS
+Figure 2: Comparison of cumulative regret where CLiME and
+CLiSK-ME use the “Continuous Checking” function.
+0 2000 4000 6000
+Round
+(a) Synthetic dataset0.00.51.01.5Regret1e3
+0 2000 4000 6000
+Round
+(b) MovieLens dataset0.00.51.01.5Regret1e3
+0 2000 4000 6000
+Round
+(c) Yelp dataset012Regret1e3
+0 2000 4000 6000
+Round
+(d) Last.fm dataset024Regret1e3
+CLiSK-ME
+CLiMECLiSK
+ConUCBLinUCB
+Arm-ConConLinUCB-MCR
+ConLinUCB-BS
+Figure 3: Comparison of cumulative regret where CLiME and
+CLiSK-ME use the “Fixed Interval” function.KDD ’25, August 3–7, 2025, Toronto, ON, Canada Maoli Liu, Zhuohua Li, Xiangxiang Dai, and John C.S. Lui
+0 2000 4000 6000
+Round
+(a) Synthetic dataset0.00.51.01.5Regret1e3
+0 2000 4000 6000
+Round
+(b) MovieLens dataset0.00.51.01.5Regret1e3
+0 2000 4000 6000
+Round
+(c) Yelp dataset012Regret1e3
+0 2000 4000 6000
+Round
+(d) Last.fm dataset024Regret1e3
+CLiSK-ME
+CLiMECLiSK
+ConUCBLinUCB
+Arm-ConConLinUCB-MCR
+ConLinUCB-BS
+Figure 4: Comparison of cumulative regret where CLiME and
+CLiSK-ME use the “Exponential Phase” function.
+5.2.2 Precision of Estimated Preference Vectors. To assess how ac-
+curately each algorithm learns the user’s preferences over time,
+we measure the average distance between the estimated vector
+b𝜽𝑡and the ground truth 𝜽∗for all algorithms over 1000 rounds.
+We present the results for the “Continuous Checking” function of
+CLiME and CLiSK-ME, with results for other functions provided
+in Appendix A.2. As shown in Figure 5, all algorithms exhibit a de-
+creasing estimation error over time. However, our three algorithms
+consistently achieve the lowest estimation error in all datasets. This
+is because they leverage our novel conversational mechanism to
+gather more informative feedback, significantly accelerating the
+reduction of estimation error. As a result, our algorithms estimate
+the user’s preference vector more quickly and accurately than the
+baseline methods.
+5.2.3 Number of Conversations. Next, we evaluate the number of
+conversations initiated by CLiME. Since CLiSK and all baseline
+algorithms initiate conversations based on a deterministic function
+𝑏(𝑡), their results are consistent across all datasets. Therefore, we
+plots the scenarios for 𝑏(𝑡)=5⌊log(𝑡)⌋and𝑏(𝑡)=⌊𝑡/50⌋as in
+prior studies. It is also important to note that although some exist-
+ing studies employ a logarithmic 𝑏(𝑡)in their experiments, their
+theoretical results require a linear 𝑏(𝑡)to hold. In contrast to the
+baselines, our algorithm CLiME adaptively initiates conversations
+depending on the current uncertainty of user preferences, providing
+greater flexibility and enhancing the user experience. We plot the
+number of conversations initiated by CLiME with different uncer-
+tainty checking functions across 4 datasets. As shown in Figure 6,
+the number of conversations increases only logarithmically with
+the number of rounds.
+5.2.4 Running Time. To evaluate the computational efficiency, we
+compare the running times of our algorithms with other conver-
+sational methods using the MovieLens dataset across 𝑇=6,000
+rounds. We separately report the total running times, as well as the
+100 300 500 700 900 1100
+Round
+(a) Synthetic dataset0.000.050.100.150.20k^µt¡µ¤k2
+100 300 500 700 900 1100
+Round
+(b) MovieLens dataset0.00.10.20.3k^µt¡µ¤k2
+100 300 500 700 900 1100
+Round
+(c) Yelp dataset0.000.050.100.150.20k^µt¡µ¤k2
+100 300 500 700 900 1100
+Round
+(d) Last.fm dataset0.00.10.20.3k^µt¡µ¤k2
+CLiSK-ME
+CLiMECLiSK
+ConUCBLinUCB
+Arm-ConConLinUCB-MCR
+ConLinUCB-BSFigure 5: Comparison of estimation precision where CLiME
+and CLiSK-ME use the “Continuous Checking” function.
+(a) Continuous Checking (every round)
+02550
+(b) Fixed Interval Checking (every 100 rounds)
+02550
+0 1000 2000 3000 4000 5000 6000(c) Exponential Phase Checking (when t is a power of 2)
+02550
+RoundNumber of Conversations
+Synthetic
+MovieLensYelp
+Last.fm5blog(t)c
+bt=50c
+Figure 6: Number of conversations initiated by deterministic
+approaches and our adaptive approach CLiME with different
+uncertainty checking functions.
+times for picking arms and key terms. The results are averaged over
+20 runs. As shown in Table 2, our three algorithms show substan-
+tial improvements compared to ConUCB and exhibit performance
+comparable to the ConLinUCB family of algorithms. For CLiME
+and CLiSK-ME, while matrix operations and eigenvalue compu-
+tation introduce slight overhead, the algorithms remain efficient,
+particularly with interval and exponential checking strategies.Leveraging the Power of Conversations: Optimal Key Term Selection in Conversational Contextual Bandits KDD ’25, August 3–7, 2025, Toronto, ON, Canada
+Table 2: Comparison of Running Times for Conversational
+Bandit Algorithms Using the Movielens dataset.
+AlgorithmsRunning Time (s)
+Key terms Arms Total
+CLiSK-MEContinuous 1.169 3.443 4.651
+Interval 0.332 3.361 3.723
+Exponential 0.352 3.344 3.724
+CLiMEContinuous 0.803 3.371 4.205
+Interval 0.021 3.341 3.390
+Exponential 0.014 3.334 3.375
+CLiSK 0.490 3.339 3.857
+ConUCB 0.011 8.362 8.403
+ConLinUCBUCB 0.009 3.354 3.392
+MCR 0.007 3.337 3.371
+BS 0.006 3.334 3.366
+5.2.5 Ablation Study. We conduct an ablation study evaluating
+the effect of the truncation limit 𝑅. Specifically, we analyze how
+different values of 𝑅affect algorithm performance by comparing
+the cumulative regrets at round 6,000 across all datasets, as shown
+in Figure 7. The results indicate that increasing 𝑅from 0.1 to 3.1
+leads to a decrease in regret, with performance stabilizing when
+𝑅>2. For the perturbation level 𝜌2, we observe that varying it
+from 0.1 to 3 results in no significant change in regret. Therefore,
+we do not include a separate figure for this parameter.
+0.10.30.50.70.91.11.31.51.71.92.12.32.52.72.93.1
+Truncation Limit R
+(a) Synthetic dataset0.000.250.500.751.00Regret1e3
+0.10.30.50.70.91.11.31.51.71.92.12.32.52.72.93.1
+Truncation Limit R
+(b) MovieLens dataset0.000.250.500.751.001.25Regret1e3
+0.10.30.50.70.91.11.31.51.71.92.12.32.52.72.93.1
+Truncation Limit R
+(c) Yelp dataset0.00.51.01.5Regret1e3
+0.10.30.50.70.91.11.31.51.71.92.12.32.52.72.93.1
+Truncation Limit R
+(d) Last.fm dataset0.00.51.01.52.02.5Regret1e3
+Figure 7: Effect of the truncation limit 𝑅.
+6 Related Work
+Our research is closely aligned with studies on conversational con-
+textual bandits, particularly focusing on the problem of key term
+selection within this framework.
+Contextual bandits serve as a fundamental framework for online
+sequential decision-making problems, covering applications likerecommender systems [ 6,15] and computer networking [ 10]. Con-
+textual bandit algorithms aim to maximize the cumulative reward
+in the long run while making the trade-off between exploitation
+and exploration. Prominent algorithms include LinUCB [ 1] and
+Thompson Sampling (TS) [2].
+To address the cold start problem, conversational recommender
+systems (CRSs) [ 5,23,30] are proposed to engage users in con-
+versations to learn their preferences more effectively. Zhang et al .
+[29] extend the standard contextual bandits to model conversa-
+tional interactions, and the pioneering ConUCB algorithm with a
+regret upper bound O(𝑑√
+𝑇log𝑇). Following the foundational work
+of Zhang et al . [29] , a branch of research has advanced this field. Li
+et al. [16] design the first TS-type algorithm ConTS. Wu et al . [26]
+propose a clustering-based algorithm to automatically generate key
+terms. Zuo et al . [32] propose Hier-UCB and Hier-LinUCB, leverag-
+ing the hierarchical structures between key terms and items. Xie
+et al. [27] introduce a comparison-based conversation framework
+and propose RelativeConUCB. Zhao et al . [31] integrate knowl-
+edge graphs into conversational bandits. Li et al . [19] investigate
+federated conversational bandits. Dai et al . [7,8]study the conver-
+sational bandits with misspecified/corrupted models. To enhance
+learning efficiency, Dai et al . [9]consider multi-agent LLM response
+identification with a fixed arm set. Wang et al . [25] and Yang et al .
+[28] investigate the key term selection strategies and propose the
+ConLinUCB-BS and ConDuel algorithms, respectively. Both algo-
+rithms uniformly select key terms from the barycentric spanner of
+the key term set.
+The smoothed analysis for contextual bandits has been widely
+studied recently [ 13,17,18,20–22]. The smoothed setting bridges
+i.i.d. distributional and adversarial contexts. Kannan et al . [13] first
+introduce the smoothed analysis for linear contextual bandits, show-
+ing that small perturbations can lead to sublinear regret with a
+greedy algorithm. Raghavan et al . [21] and Raghavan et al . [20]
+show that the greedy algorithm achieves the best possible Bayesian
+regret in this setting. Sivakumar et al . [22] extend the smoothed
+analysis to structured linear bandits. Building on these insights, we
+apply the smoothed key term contexts in conversational contextual
+bandits.
+7 Conclusion
+In this paper, we studied key term selection strategies for conversa-
+tional contextual bandits and introduced three novel algorithms:
+CLiSK, CLiME, and CLiSK-ME. CLiSK leverages smoothed key term
+contexts to enhance exploration, while CLiME adaptively initiates
+conversations with key terms that minimize uncertainty in the
+feature space. CLiSK-ME integrates both techniques, further im-
+proving learning efficiency. We proved that all three algorithms
+achieve tighter regret bounds than prior studies. Extensive evalua-
+tions showed that our algorithms outperform other conversational
+bandit algorithms.
+Acknowledgments
+The work of John C.S. Lui was supported in part by the RGC GRF-
+14202923.KDD ’25, August 3–7, 2025, Toronto, ON, Canada Maoli Liu, Zhuohua Li, Xiangxiang Dai, and John C.S. Lui
+References
+[1]Yasin Abbasi-Yadkori, Dávid Pál, and Csaba Szepesvári. 2011. Improved algo-
+rithms for linear stochastic bandits. Advances in neural information processing
+systems 24 (2011).
+[2]Shipra Agrawal and Navin Goyal. 2012. Analysis of thompson sampling for the
+multi-armed bandit problem. In Conference on learning theory . JMLR Workshop
+and Conference Proceedings, 39–1.
+[3]J. Bretagnolle and C. Huber. 1978. Estimation des densités : Risque minimax.
+InSéminaire de Probabilités XII , C. Dellacherie, P. A. Meyer, and M. Weil (Eds.).
+Springer Berlin Heidelberg, Berlin, Heidelberg, 342–363.
+[4]Ivan Cantador, Peter Brusilovsky, and Tsvi Kuflik. 2011. Second Workshop on
+Information Heterogeneity and Fusion in Recommender Systems (HetRec2011).
+InProceedings of the Fifth ACM Conference on Recommender Systems (RecSys ’11) .
+387–388.
+[5]Konstantina Christakopoulou, Filip Radlinski, and Katja Hofmann. 2016. Towards
+conversational recommender systems. In Proceedings of the 22nd ACM SIGKDD
+international conference on knowledge discovery and data mining . 815–824.
+[6]Wei Chu, Lihong Li, Lev Reyzin, and Robert Schapire. 2011. Contextual bandits
+with linear payoff functions. In Proceedings of the Fourteenth International Con-
+ference on Artificial Intelligence and Statistics . JMLR Workshop and Conference
+Proceedings, 208–214.
+[7]Xiangxiang Dai, Zhiyong Wang, Jize Xie, Xutong Liu, and John CS Lui. 2024.
+Conversational Recommendation with Online Learning and Clustering on Mis-
+specified Users. IEEE Transactions on Knowledge and Data Engineering 36, 12
+(2024), 7825–7838.
+[8]Xiangxiang Dai, Zhiyong Wang, Jize Xie, Tong Yu, and John CS Lui. 2024. Online
+Learning and Detecting Corrupted Users for Conversational Recommendation
+Systems. IEEE Transactions on Knowledge and Data Engineering 36, 12 (2024),
+8939–8953.
+[9]Xiangxiang Dai, Yuejin Xie, Maoli Liu, Xuchuang Wang, Zhuohua Li, Huanyu
+Wang, and John C. S. Lui. 2025. Multi-Agent Conversational Online Learning for
+Adaptive LLM Response Identification. arXiv:2501.01849 [cs.HC]
+[10] Yi Gai, Bhaskar Krishnamachari, and Rahul Jain. 2012. Combinatorial network
+optimization with unknown variables: Multi-armed bandits with linear rewards
+and individual observations. IEEE/ACM Transactions on Networking 20, 5 (2012),
+1466–1478.
+[11] Chongming Gao, Wenqiang Lei, Xiangnan He, Maarten de Rijke, and Tat-Seng
+Chua. 2021. Advances and challenges in conversational recommender systems:
+A survey. AI open 2 (2021), 100–126.
+[12] F. Maxwell Harper and Joseph A. Konstan. 2015. The MovieLens Datasets: History
+and Context. ACM Trans. Interact. Intell. Syst. 5, 4, Article 19 (dec 2015), 19 pages.
+[13] Sampath Kannan, Jamie H Morgenstern, Aaron Roth, Bo Waggoner, and Zhi-
+wei Steven Wu. 2018. A smoothed analysis of the greedy algorithm for the linear
+contextual bandit problem. Advances in neural information processing systems 31
+(2018).
+[14] Tor Lattimore and Csaba Szepesvári. 2020. Bandit Algorithms . Cambridge Uni-
+versity Press.
+[15] Lihong Li, Wei Chu, John Langford, and Robert E Schapire. 2010. A contextual-
+bandit approach to personalized news article recommendation. In Proceedings of
+the 19th international conference on World wide web . 661–670.
+[16] Shijun Li, Wenqiang Lei, Qingyun Wu, Xiangnan He, Peng Jiang, and Tat-Seng
+Chua. 2021. Seamlessly unifying attributes and items: Conversational recommen-
+dation for cold-start users. ACM Transactions on Information Systems (TOIS) 39, 4
+(2021), 1–29.
+[17] Zhuohua Li, Maoli Liu, Xiangxiang Dai, and John C.S. Lui. 2025. Demystify-
+ing Online Clustering of Bandits: Enhanced Exploration Under Stochastic and
+Smoothed Adversarial Contexts. In The Thirteenth International Conference on
+Learning Representations .
+[18] Zhuohua Li, Maoli Liu, Xiangxiang Dai, and John C.S. Lui. 2025. Towards Efficient
+Conversational Recommendations: Expected Value of Information Meets Bandit
+Learning. In Proceedings of the ACM on Web Conference 2025 (Sydney NSW,
+Australia) (WWW ’25) . 4226–4238.
+[19] Zhuohua Li, Maoli Liu, and John C. S. Lui. 2024. FedConPE: Efficient Federated
+Conversational Bandits with Heterogeneous Clients. In Proceedings of the Thirty-
+Third International Joint Conference on Artificial Intelligence, IJCAI-24 . 4533–4541.
+[20] Manish Raghavan, Aleksandrs Slivkins, Jennifer Wortman Vaughan, and Zhi-
+wei Steven Wu. 2023. Greedy algorithm almost dominates in smoothed contextual
+bandits. SIAM J. Comput. 52, 2 (2023), 487–524.
+[21] Manish Raghavan, Aleksandrs Slivkins, Jennifer Vaughan Wortman, and Zhi-
+wei Steven Wu. 2018. The externalities of exploration and how data diversity
+helps exploitation. In Conference on Learning Theory . PMLR, 1724–1738.
+[22] Vidyashankar Sivakumar, Steven Wu, and Arindam Banerjee. 2020. Structured lin-
+ear contextual bandits: A sharp and geometric smoothed analysis. In International
+Conference on Machine Learning . PMLR, 9026–9035.
+[23] Yueming Sun and Yi Zhang. 2018. Conversational recommender system. In The
+41st international acm sigir conference on research & development in information
+retrieval . 235–244.[24] Joel A. Tropp. 2011. User-Friendly Tail Bounds for Sums of Random Matrices.
+Foundations of Computational Mathematics 12, 4 (Aug. 2011), 389–434.
+[25] Zhiyong Wang, Xutong Liu, Shuai Li, and John CS Lui. 2023. Efficient explorative
+key-term selection strategies for conversational contextual bandits. In Proceedings
+of the AAAI Conference on Artificial Intelligence , Vol. 37. 10288–10295.
+[26] Junda Wu, Canzhe Zhao, Tong Yu, Jingyang Li, and Shuai Li. 2021. Clustering
+of conversational bandits for user preference learning and elicitation. In Pro-
+ceedings of the 30th ACM International Conference on Information & Knowledge
+Management . 2129–2139.
+[27] Zhihui Xie, Tong Yu, Canzhe Zhao, and Shuai Li. 2021. Comparison-based
+conversational recommender system with relative bandit feedback. In Proceedings
+of the 44th International ACM SIGIR Conference on Research and Development in
+Information Retrieval . 1400–1409.
+[28] Shuhua Yang, Hui Yuan, Xiaoying Zhang, Mengdi Wang, Hong Zhang, and
+Huazheng Wang. 2024. Conversational Dueling Bandits in Generalized Linear
+Models. arXiv preprint arXiv:2407.18488 (2024).
+[29] Xiaoying Zhang, Hong Xie, Hang Li, and John CS Lui. 2020. Conversational
+contextual bandit: Algorithm and application. In Proceedings of the web conference
+2020. 662–672.
+[30] Yongfeng Zhang, Xu Chen, Qingyao Ai, Liu Yang, and W Bruce Croft. 2018.
+Towards conversational search and recommendation: System ask, user respond. In
+Proceedings of the 27th acm international conference on information and knowledge
+management . 177–186.
+[31] Canzhe Zhao, Tong Yu, Zhihui Xie, and Shuai Li. 2022. Knowledge-aware conver-
+sational preference elicitation with bandit feedback. In Proceedings of the ACM
+Web Conference 2022 . 483–492.
+[32] Jinhang Zuo, Songwen Hu, Tong Yu, Shuai Li, Handong Zhao, and Carlee Joe-
+Wong. 2022. Hierarchical conversational preference elicitation with bandit feed-
+back. In Proceedings of the 31st ACM International Conference on Information &
+Knowledge Management . 2827–2836.
+A Appendix
+A.1 CLiSK-ME Algorithm
+In this section, we present the details of the CLiSK-ME algorithm
+(Algorithm 3), which integrates the smoothed key term contexts
+and the adaptive conversation technique.
+Algorithm 3: CLiSK-ME
+Input:A,K,𝑏(𝑡),𝜆,{𝛼𝑡}𝑡>0
+Initialization: 𝑴1=𝜆𝑰𝑑,𝒃1=0𝑑
+1for𝑡=1,...,𝑇 do
+2 ifUncertaintyChecking( 𝑡)then
+3 Diagonalize 𝑴𝑡=Í𝑑
+𝑖=1𝜆𝒗𝑖𝒗𝑖𝒗𝑖⊤
+4 foreach𝜆𝒗𝑖<𝛼𝑡do
+5 𝑛𝒗𝑖=⌈(𝛼𝑡−𝜆𝒗𝑖)/𝑐2
+0⌉
+6 for𝑛𝒗𝑖>0do
+7 Smooth the key term contexts to get
+{˜˜𝒙𝑘}𝑘∈K
+8 𝑘=arg max𝑘∈K|˜˜𝒙⊤
+𝑘𝒗𝑖|
+9 Receive the key term-level feedback ˜𝑟𝑘,𝑡
+10 𝑴𝑡=𝑴𝑡+˜˜𝒙𝑘,𝑡˜˜𝒙⊤
+𝑘,𝑡
+11 𝒃𝑡=𝒃𝑡+˜𝑟𝑘,𝑡˜˜𝒙𝑘,𝑡
+12 𝑛𝒗𝑖=𝑛𝒗𝑖−1
+13 𝜽𝑡=𝑴−1
+𝑡𝒃𝑡
+14 Select𝑎𝑡=arg max𝑎∈A𝑡𝒙⊤𝑎𝜽𝑡+𝛼𝑡∥𝒙𝑎∥𝑀−1
+𝑡
+15 Ask the user’s preference for arm 𝑎𝑡
+16 Observe the reward 𝑟𝑎𝑡,𝑡
+17 𝑴𝑡+1=𝑴𝑡+𝒙𝑎𝑡𝒙⊤𝑎𝑡
+18 𝒃𝑡+1=𝒃𝑡+𝑟𝑎𝑡,𝑡𝒙𝑎𝑡Leveraging the Power of Conversations: Optimal Key Term Selection in Conversational Contextual Bandits KDD ’25, August 3–7, 2025, Toronto, ON, Canada
+A.2 Supplementary Experiment Results
+We compare the estimation precision for the “Fixed Interval” and
+“Exponential Phase” uncertainty checking functions of CLiME in
+Figures 8 and 9. In the former, UncertaintyChecking is triggered
+every 100 rounds while in the latter it is triggered when 𝑡is a
+power of 2. Combined with the results presented in the evaluation
+results section, the experiments demonstrate that our algorithms
+consistently outperform the baselines.
+100 300 500 700 900 1100
+Round
+(a) Synthetic dataset0.000.050.100.150.20k^µt¡µ¤k2
+100 300 500 700 900 1100
+Round
+(b) MovieLens dataset0.00.10.20.3k^µt¡µ¤k2
+100 300 500 700 900 1100
+Round
+(c) Yelp dataset0.000.050.100.150.20k^µt¡µ¤k2
+100 300 500 700 900 1100
+Round
+(d) Last.fm dataset0.00.10.20.3k^µt¡µ¤k2
+CLiSK-ME
+CLiMECLiSK
+ConUCBLinUCB
+Arm-ConConLinUCB-MCR
+ConLinUCB-BS
+Figure 8: Comparison of estimation precision where CLiME
+and CLiSK-ME use the “Fixed Interval” function.
+100 300 500 700 900 1100
+Round
+(a) Synthetic dataset0.000.050.100.150.20k^µt¡µ¤k2
+100 300 500 700 900 1100
+Round
+(b) MovieLens dataset0.00.10.20.3k^µt¡µ¤k2
+100 300 500 700 900 1100
+Round
+(c) Yelp dataset0.000.050.100.150.20k^µt¡µ¤k2
+100 300 500 700 900 1100
+Round
+(d) Last.fm dataset0.00.10.20.3k^µt¡µ¤k2
+CLiSK-ME
+CLiMECLiSK
+ConUCBLinUCB
+Arm-ConConLinUCB-MCR
+ConLinUCB-BS
+Figure 9: Comparison of estimation precision where CLiME
+and CLiSK-ME use the “Exponential Phase” function.
+A.3 Proof of Lemma 1
+Lemma 1. Under Assumptions 1 and 2, for CLiSK, for any round
+𝑡∈[𝑇]and any arm 𝑎∈A, with probability at least 1−𝛿for some𝛿∈(0,1), we have𝒙⊤
+𝑎𝜽𝑡−𝒙⊤
+𝑎𝜽∗≤𝛼𝑡∥𝒙𝑎∥𝑴−1
+𝑡,
+where𝛼𝑡=vt
+2 log(1
+𝛿)+𝑑log 
+1+𝑡+
+1+√
+𝑑𝑅
+𝑏𝑡
+𝜆𝑑!
++√
+𝜆.
+Proof. For any arm 𝑎∈A, from the definition of 𝑴𝑡and𝒃𝑡,
+and𝜽𝑡=𝑴−1
+𝑡𝒃𝑡, we have
+𝒙⊤
+𝑎 𝜽𝑡−𝜽∗=𝒙⊤
+𝑎
+𝑴−1
+𝑡𝒃𝑡−𝜽∗
+=𝒙⊤
+𝑎©­
+«𝑴−1
+𝑡©­
+«𝑡−1∑︁
+𝑠=1𝑟𝑎𝑠,𝑠𝒙𝑎𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜𝑟𝑘,𝑠˜˜𝒙𝑘ª®
+¬−𝜽∗ª®
+¬
+=𝒙⊤
+𝑎©­
+«𝑴−1
+𝑡©­
+«𝑡−1∑︁
+𝑠=1𝒙𝑎𝑠
+𝒙⊤
+𝑎𝑠𝜽∗+𝜂𝑠
++𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘
+˜˜𝒙⊤
+𝑘𝜽∗+˜𝜂𝑠ª®
+¬−𝜽∗ª®
+¬
+=𝒙⊤
+𝑎©­
+«𝑴−1
+𝑡©­
+«𝑡−1∑︁
+𝑠=1𝒙𝑎𝑠𝒙⊤
+𝑎𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘+𝜆𝑰𝑑−𝜆𝑰𝑑ª®
+¬𝜽∗−𝜽∗ª®
+¬
++𝒙⊤
+𝑎©­
+«𝑴−1
+𝑡©­
+«𝑡−1∑︁
+𝑠=1𝒙𝑎𝑠𝜂𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜𝜂𝑠ª®
+¬ª®
+¬
+=𝜆𝒙⊤
+𝑎𝑴−1
+𝑡𝜽∗+𝒙⊤
+𝑎©­
+«𝑴−1
+𝑡©­
+«𝑡−1∑︁
+𝑠=1𝒙𝑎𝑠𝜂𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜𝜂𝑠ª®
+¬ª®
+¬.
+By the Cauchy-Schwarz inequality, we have𝒙⊤
+𝑎 𝜽𝑡−𝜽∗≤𝜆∥𝒙𝑎∥𝑴−1
+𝑡∥𝜽∗∥𝑴−1
+𝑡
++∥𝒙𝑎∥𝑴−1
+𝑡𝑡−1∑︁
+𝑠=1𝒙𝑎𝑠𝜂𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜𝜂𝑠𝑴−1
+𝑡.(1)
+For the first term, by the fact that 𝜆min(𝑴𝑡)≥𝜆, and by the
+property of the Rayleigh quotient, we have
+∥𝜽∗∥2
+𝑴−1
+𝑡
+∥𝜽∗∥2
+2=𝜽∗⊤𝑴−1
+𝑡𝜽∗
+𝜽∗⊤𝜽∗≤𝜆max(𝑴−1
+𝑡)≤1
+𝜆min(𝑴𝑡)≤1
+𝜆.
+Therefore, we have
+𝜆∥𝒙𝑎∥𝑴−1
+𝑡𝜽∗𝑴−1
+𝑡≤𝜆∥𝒙𝑎∥𝑴−1
+𝑡𝜽∗2
+≤𝜆∥𝒙𝑎∥𝑴−1
+𝑡√︂
+1
+𝜆=√
+𝜆∥𝒙𝑎∥𝑴−1
+𝑡. (2)
+For the second term, from Theorem 1 in Abbasi-Yadkori et al .
+[1], for any𝛿∈(0,1), with probability at least 1−𝛿, for all𝑡≥1,
+we have𝑡−1∑︁
+𝑠=1𝒙𝑎𝑠𝜂𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜𝜂𝑠𝑴−1
+𝑡≤vut
+2 log 
+det(𝑴𝑡)1
+2det(𝜆𝑰𝑑)−1
+2
+𝛿!
+.
+(3)
+By adopting the determinant-trace inequality (Lemma 12), we
+have
+Tr(𝑴𝑡)≤𝑑𝜆+𝑡−1∑︁
+𝑠=1Tr(𝒙𝑎𝑠𝒙⊤
+𝑎𝑠)+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠Tr(˜˜𝒙𝑘˜˜𝒙⊤
+𝑘)KDD ’25, August 3–7, 2025, Toronto, ON, Canada Maoli Liu, Zhuohua Li, Xiangxiang Dai, and John C.S. Lui
+≤𝑑𝜆+𝑡+
+1+√
+𝑑𝑅
+𝑏𝑡,
+which is obtained because there are at most 𝑏𝑡key terms selected
+by round𝑡and∥˜˜𝒙𝑘∥≤1+√
+𝑑𝑅for all𝑘∈K, and therefore,
+det(𝑴𝑡)≤Tr(𝑴𝑡)
+𝑑𝑑
+≤©­­
+«𝑑𝜆+𝑡+
+1+√
+𝑑𝑅
+𝑏𝑡
+𝑑ª®®
+¬𝑑
+, (4)
+where Tr(𝑿)denotes the trace of matrix 𝑿.
+By substituting Equation (4) into Equation (3), we have𝑡−1∑︁
+𝑠=1𝒙𝑎𝑠𝜂𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜𝜂𝑠𝑴−1
+𝑡≤√︄
+2 log1
+𝛿
++logdet(𝑴𝑡)
+det(𝜆𝑰𝑑)
+≤vuuuut
+2 log1
+𝛿
++𝑑log©­­
+«1+𝑡+
+1+√
+𝑑𝑅
+𝑏𝑡
+𝜆𝑑ª®®
+¬. (5)
+Plugging Equation (2) and Equation (5) into Equation (1), we
+have𝒙⊤
+𝑎 𝜽𝑡−𝜽∗
+≤∥𝒙𝑎∥𝑴−1
+𝑡©­
+«√
+𝜆+vut
+2 log1
+𝛿
++log 
+1+𝑡+(1+√
+𝑑𝑅)𝑏𝑡
+𝜆𝑑!
+ª®
+¬.(6)
+which completes the proof. □
+A.4 Proof of Lemma 2
+Lemma 2. For any round 𝑡∈ [𝑇], with the smoothed key term
+contexts in Definition 1, CLiSK has the following lower bound on the
+minimum eigenvalue of the matrix E[˜˜𝒙𝑘˜˜𝒙⊤
+𝑘]for any𝑘∈K𝑡, i.e.,
+𝜆min
+E[˜˜𝒙𝑘˜˜𝒙⊤
+𝑘]
+≥𝑐1𝜌2
+log|K|≜𝜆K,
+where𝑐1∈(0,1)is some constant.
+Proof. Fix a time𝑡, and denote the key term selected at this
+time as𝑘𝑡. Although multiple key terms may be selected at each
+time step, they all satisfy the properties of this lemma. Therefore,
+we do not distinguish between them and use only a single subscript
+𝑡. Let 𝑸be a unitary matrix that rotates the estimated preference
+vector 𝜽𝑡to align it with the 𝑥-axis, maintaining its length but
+zeroing out all components except the first component, i.e., 𝑸𝜽𝑡=
+(∥𝜽𝑡∥,0,0,..., 0). Note that such 𝑸always exists because it just
+rotates the space. According to CLiSK’s key term selection strategy
+˜˜𝒙𝑘𝑡=arg max𝑘∈K𝜽⊤
+𝑡˜˜𝒙𝑘, we have
+𝜆min
+Eh
+˜˜𝒙𝑘𝑡˜˜𝒙⊤
+𝑘𝑡i
+=𝜆min 
+E"
+𝒙𝒙⊤𝒙=arg max
+𝑘∈K𝜽⊤
+𝑡˜˜𝒙𝑘#!
+=min
+𝒘:∥𝒘∥=1𝒘⊤E"
+𝒙𝒙⊤𝒙=arg max
+𝑘∈K𝜽⊤
+𝑡˜˜𝒙𝑘#
+𝒘
+=min
+𝒘:∥𝒘∥=1E"
+(𝒘⊤𝒙)2𝒙=arg max
+𝑘∈K𝜽⊤
+𝑡˜˜𝒙𝑘#
+≥min
+𝒘:∥𝒘∥=1Var"
+𝒘⊤𝒙𝒙=arg max
+𝑘∈K𝜽⊤
+𝑡˜˜𝒙𝑘#=min
+𝒘:∥𝒘∥=1Var"
+(𝑸𝒘)⊤𝑸𝒙𝒙=arg max
+𝑘∈K(𝑸𝜽𝑡)⊤𝑸˜˜𝒙𝑘#
+(7)
+=min
+𝒘:∥𝒘∥=1Var"
+𝒘⊤𝑸𝒙𝒙=arg max
+𝑘∈K∥𝜽𝑡∥(𝑸˜˜𝒙𝑘)1#
+(8)
+=min
+𝒘:∥𝒘∥=1Var"
+𝒘⊤𝑸𝜺𝜺=arg max
+𝜺𝑘:𝑘∈K(𝑸˜𝒙𝑘+𝑸𝜺𝑘)1#
+(9)
+=min
+𝒘:∥𝒘∥=1Var"
+𝒘⊤𝜺𝜺=arg max
+𝜺𝑘:𝑘∈K(𝑸˜𝒙𝑘+𝜺𝑘)1#
+(10)
+where Equation (7) uses the property of unitary matrices: 𝑸⊤𝑸=𝑰𝑑.
+Equation (8) applies matrix 𝑸so only the first component is non-
+zero and we use the fact that minimizing over 𝑸𝒘is equivalent to
+over𝒘. Equation (9) follows because each smoothed key term ˜˜𝒙𝑘=
+˜𝒙𝑘+𝜺𝑘by definition, and adding a constant a to a random variable
+does not change its variance. Equation (10) is due to the rotation
+invariance of symmetrically truncated Gaussian distributions.
+Since 𝜺𝑘∼N( 0,𝜌2·𝑰𝑑)conditioned on|(𝜺𝑘)𝑗|≤𝑅,∀𝑗∈[𝑑], by
+the property of (truncated) multivariate Gaussian distributions, the
+components of 𝜺𝑡,𝑖can be equivalently regarded as 𝑑independent
+samples from a (truncated) univariate Gaussian distribution, i.e.,
+(𝜺𝑘)𝑗∼N( 0,𝜌2)conditioned on|(𝜺𝑘)𝑗|≤𝑅,∀𝑗∈[𝑑]. Therefore,
+we have
+Var
+𝒘⊤𝜺
+=Var"𝑑∑︁
+𝑖=1𝒘𝑖𝜺𝑖#
+=𝑑∑︁
+𝑖=1𝒘2
+𝑖Var[𝜺𝑖],
+where the exchanging of variance and summation is due to the
+independence of 𝜺𝑖. Therefore, we can write
+min
+𝒘:∥𝒘∥=1Var"
+𝒘⊤𝜺𝜺=arg max
+𝜺𝑘:𝑘∈K((𝜺𝑘)1+(𝑸˜𝒙𝑘)1)#
+=min
+𝒘:∥𝒘∥=1𝑑∑︁
+𝑗=1𝒘2
+𝑗Var"
+(𝜺)𝑗𝜺=arg max
+𝜺𝑘:𝑘∈K((𝜺𝑘)1+(𝑸˜𝒙𝑘)1)#
+=min
+𝒘:∥𝒘∥=1(
+𝒘2
+1Var"
+(𝜺)1𝜺=arg max
+𝜺𝑘:𝑘∈K((𝜺𝑘)1+(𝑸˜𝒙𝑘)1)#
++𝑑∑︁
+𝑗=2𝒘2
+𝑗Var"
+(𝜺)𝑗𝜺=arg max
+𝜺𝑘:𝑘∈K((𝜺𝑘)1+(𝑸˜𝒙𝑘)1)# 
+
+=min
+𝒘:∥𝒘∥=1(
+𝒘2
+1Var"
+(𝜺)1𝜺=arg max
+𝜺𝑘:𝑘∈K((𝜺𝑘)1+(𝑸˜𝒙𝑘)1)#
++𝑑∑︁
+𝑗=2𝒘2
+𝑗Var
+(𝜺)𝑗 
+
+=min
+𝒘:∥𝒘∥=1(
+𝒘2
+1Var"
+(𝜺)1𝜺=arg max
+𝜺𝑘:𝑘∈K((𝜺𝑘)1+(𝑸˜𝒙𝑘)1)#
++(1−𝒘2
+1)𝜌2)
+=min(
+Var"
+(𝜺)1𝜺=arg max
+𝜺𝑘:𝑘∈K((𝜺𝑘)1+(𝑸˜𝒙𝑘)1)#
+,𝜌2)
+≥𝑐1𝜌2
+log|K|,Leveraging the Power of Conversations: Optimal Key Term Selection in Conversational Contextual Bandits KDD ’25, August 3–7, 2025, Toronto, ON, Canada
+where in the last inequality, we use Lemma 15 and Lemma 14 in
+Sivakumar et al. [22] and get
+Var"
+(𝜺)1𝜺=arg max
+𝜺𝑘:𝑘∈K((𝜺𝑘)1+(𝑸˜𝒙𝑘)1)#
+≥Var"
+(𝜺)1𝜺=arg max
+𝜺𝑘:𝑘∈K(𝜺𝑘)1#
+≥𝑐1𝜌2
+log|K|.□
+A.5 Proof of Lemma 3
+Lemma 3. For CLiSK, with probability at least 1−𝛿for some𝛿∈
+(0,1), if𝑡≥𝑇0≜8(1+√
+𝑑𝑅)2
+𝑏𝜆Klog
+𝑑
+𝛿
+, we have
+𝜆min©­
+«𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘ª®
+¬≥𝜆K𝑏𝑡
+2.
+Proof. To apply the matrix Chernoff bound (Lemma 11), we
+first verify the required two conditions for the self-adjoint matrices
+˜˜𝒙𝑘˜˜𝒙⊤
+𝑘for any𝑘∈K𝑠and𝑠∈[𝑡]. First, ˜˜𝒙𝑘˜˜𝒙⊤
+𝑘is obviously positive
+semi-definite. Second, by the Courant-Fischer theorem,
+𝜆max(˜˜𝒙𝑘˜˜𝒙⊤
+𝑘)=max
+𝒘:∥𝒘∥=1𝒘⊤˜˜𝒙𝑘˜˜𝒙⊤
+𝑘𝒘=max
+𝒘:∥𝒘∥=1(𝒘⊤˜˜𝒙𝑘)2
+≤max
+𝒘:∥𝒘∥=1∥𝒘∥2∥˜˜𝒙𝑘∥2≤(1+√
+𝑑𝑅)2.
+Next, by Lemma 2 and the super-additivity of the minimum eigen-
+value (due to Weyl’s inequality), we have
+𝜇min=𝜆min©­
+«𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠Eh
+˜˜𝒙𝑘˜˜𝒙⊤
+𝑘iª®
+¬≥𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠𝜆min
+Eh
+˜˜𝒙𝑘˜˜𝒙⊤
+𝑘i
+≥𝜆K𝑏𝑡,
+where the last inequality is because there are at most 𝑏𝑡key terms
+selected by round 𝑡, so the summation has at most 𝑏𝑡terms. So by
+Lemma 11, we have for any 𝜀∈(0,1),
+Pr𝜆min©­
+«𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘ª®
+¬≤(1−𝜀)𝜆K𝑏𝑡
+≤Pr𝜆min©­
+«𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘ª®
+¬≤(1−𝜀)𝜇min
+≤𝑑𝑒−𝜀
+(1−𝜀)1−𝜀𝜇min/(1+√
+𝑑𝑅)2
+≤𝑑𝑒−𝜀
+(1−𝜀)1−𝜀𝜆K𝑏𝑡
+(1+√
+𝑑𝑅)2
+,
+where the last inequality is because 𝑒−𝑥is decreasing. Choosing
+𝜀=1
+2, we get
+Pr𝜆min©­
+«𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘ª®
+¬≤𝜆K𝑏𝑡
+2≤𝑑√
+2𝑒−1
+2𝜆K𝑏𝑡
+(1+√
+𝑑𝑅)2.
+Letting the RHS be 𝛿, we get𝑡=2(1+√
+𝑑𝑅)2log(𝑑
+𝛿)
+𝜆K𝑏(1−log(2))≤8(1+√
+𝑑𝑅)2
+𝜆K𝑏log
+𝑑
+𝛿
+.
+Therefore,𝜆minÍ𝑡
+𝑠=1Í
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘
+≥𝜆K𝑏𝑡
+2holds with probability
+at least 1−𝛿when𝑡≥8(1+√
+𝑑𝑅)2
+𝜆K𝑏log
+𝑑
+𝛿
+. □A.6 Proof of Lemma 4
+Lemma 4. For CLiSK, for any 𝑎∈A, if𝑡≥𝑇0≜8(1+√
+𝑑𝑅)2
+𝑏𝜆Klog
+𝑑
+𝛿
+,
+with probability at least 1−𝛿for some𝛿∈(0,1),∥𝒙𝑎∥𝑴−1
+𝑡≤√︃
+2
+𝜆K𝑏𝑡.
+Proof.
+∥𝒙𝑎∥𝑴−1
+𝑡=√︃
+𝒙⊤𝑎𝑴−1
+𝑡𝒙𝑎≤√︃
+𝜆max(𝑴−1
+𝑡)𝒙⊤𝑎𝒙𝑎=√︂1
+𝜆min(𝑴𝑡),
+(11)
+where the first inequality is due to the property of the Rayleigh
+quotient, and the second inequality is due to the fact that 𝒙⊤𝑎𝒙𝑎=1.
+By the definition of 𝑴𝑡, we have
+𝜆min(𝑴𝑡)=𝜆min©­
+«𝑡−1∑︁
+𝑠=1𝒙𝑎𝑠𝒙⊤
+𝑎𝑠+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘+𝜆𝑰𝑑ª®
+¬
+≥𝜆min©­
+«𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠˜˜𝒙𝑘˜˜𝒙⊤
+𝑘ª®
+¬
+≥𝜆K𝑏𝑡
+2, (12)
+where the first inequality follows the property of Loewner order
+that if 𝑨⪰𝑩then𝜆min(𝑨) ≥𝜆min(𝑩), and the last inequality
+follows from Lemma 3 conditioned on 𝑡≥𝑇0.
+Therefore, by plugging Equation (12) into Equation (11), we have
+∥𝒙𝑎∥𝑴−1
+𝑡≤√︃
+2
+𝜆K𝑏𝑡. □
+A.7 Proof of Lemma 5
+Lemma 5. Let𝜽𝑡be the estimated preference vector at round 𝑡and
+𝜽∗be the true preference vector. Under Assumptions 1, 2 and 3, for
+CLiME, at round 𝑡, for any arm 𝑎∈A, with probability at least 1−𝛿
+(𝛿∈(0,1)), we have𝒙⊤
+𝑎𝜽𝑡−𝒙⊤
+𝑎𝜽∗≤𝛼𝑡∥𝒙𝑎∥𝑴−1
+𝑡,
+where𝛼𝑡=√︄
+2 log(1
+𝛿)+𝑑log
+1+𝑡+𝛼𝑑𝑡
+𝜆𝑑𝑐2
+0
++√
+𝜆,𝛼is an exploration
+control factor in Algorithm 2, and 𝑐0is a constant in Assumption 3.
+Proof. The proof of Lemma 5 is similar to that of Lemma 1. The
+only difference is the trace and determinant of the matrix 𝑴𝑡.
+We first show that by round 𝑡, at most𝛼𝑑𝑡
+𝑐2
+0key terms have
+been selected since the beginning of the algorithm for all three
+uncertainty checking functions.
+Consider the case where CLiME uses the “Continuous Checking”
+function, i.e., the agent checks the eigenvalues of the matrix 𝑴𝑡
+at each round. We first denote the covariance matrix before select-
+ing key terms at round 𝑡by𝑴′
+𝑡, i.e., 𝑴𝑡=𝑴′
+𝑡+Í
+𝑘∈K𝑡𝒙𝑘𝒙⊤
+𝑘. For
+𝑴′
+𝑡, denote its eigenvectors by {𝒗𝑖}𝑑
+𝑖=1and corresponding eigen-
+values by{𝜆𝒗𝑖}𝑑
+𝑖=1. If some key term 𝑘is selected at round 𝑡, then
+there must exist an eigenvector 𝒗𝑖such that𝜆𝒗𝑖<𝛼𝑡, and the
+corresponding key term context ˜𝒙𝑘is close to 𝒗𝑖, i.e., ˜𝒙⊤
+𝑘𝒗𝑖≥𝑐0.
+We can write the vector ˜𝒙𝑘=Í𝑑
+𝑖=1𝛾𝑖𝒗𝑖for some coefficients
+{𝛾𝑖}𝑑
+𝑖=1. Then, for 𝑗∈ [𝑑], Denote 𝒛𝑗=Í𝑑
+𝑖=1,𝑖≠𝑗𝛾𝑖𝒗𝑖. For any
+𝑗∈ [𝑑], we have ˜𝒙⊤
+𝑘𝒗𝑗=Í𝑑
+𝑖=1𝛾𝑖𝒗⊤
+𝑖𝒗𝑗=𝛾𝑗≥𝑐0and ˜𝒙𝑘˜𝒙⊤
+𝑘=KDD ’25, August 3–7, 2025, Toronto, ON, Canada Maoli Liu, Zhuohua Li, Xiangxiang Dai, and John C.S. Lui
+(𝛾𝑗𝒗𝑗+𝒛𝑗)(𝛾𝑗𝒗𝑗+𝒛𝑗)⊤=𝛾2
+𝑗𝒗𝑗𝒗⊤
+𝑗+𝒛𝑗𝒛⊤
+𝑗, and then, we have the
+following:
+𝑴′
+𝑡+∑︁
+𝑘∈K𝑡𝒙𝑘𝒙⊤
+𝑘=𝑴′
+𝑡+∑︁
+𝑖∈[𝑑]:𝜆𝒗𝑖≤𝛼𝑡&
+𝛼𝑡−𝜆𝒗𝑖
+𝑐2
+0'
+(𝛾2
+𝑖𝒗𝑖𝒗⊤
+𝑖+𝒛𝑖𝒛⊤
+𝑖)
+⪰𝑑∑︁
+𝑖=1𝜆𝒗𝑖𝒗𝑖𝒗⊤
+𝑖+∑︁
+𝑖∈[𝑑]:𝜆𝒗𝑖≤𝛼𝑡𝛼𝑡−𝜆𝒗𝑖
+𝑐2
+0(𝛾2
+𝑖𝒗𝑖𝒗⊤
+𝑖+𝒛𝑖𝒛⊤
+𝑖)
+⪰𝑑∑︁
+𝑖=1𝜆𝒗𝑖𝒗𝑖𝒗⊤
+𝑖+∑︁
+𝑖∈[𝑑]:𝜆𝒗𝑖≤𝛼𝑡 𝛼𝑡−𝜆𝒗𝑖𝒗𝑖𝒗⊤
+𝑖
+=∑︁
+𝑖∈[𝑑]:𝜆𝒗𝑖<𝛼𝑡(𝛼𝑡−𝜆𝒗𝑖+𝜆𝒗𝑖)𝒗𝑖𝒗⊤
+𝑖+∑︁
+𝑖∈[𝑑]:𝜆𝒗𝑖>𝛼𝑡𝜆𝒗𝑖𝒗𝑖𝒗⊤
+𝑖
+⪰𝑑∑︁
+𝑖=1𝛼𝑡𝒗𝑖𝒗⊤
+𝑖. (13)
+Following from Equation (13), we have
+𝜆min(𝑴𝑡)≥𝛼𝑡. (14)
+Denote the number of key terms selected at round 𝑡as𝐾𝑡. We
+have𝐾𝑡=Í𝑑
+𝑖=1𝛼𝑡−𝜆𝒗𝑖
+𝑐2
+0. Since𝜆𝒗𝑖≥𝛼(𝑡−1),∀𝑖∈[𝑑]according to
+Equation (14), we have 𝐾𝑡≤𝛼𝑑
+𝑐2
+0, and thenÍ𝑡
+𝑠=1𝐾𝑠≤𝛼𝑑𝑡
+𝑐2
+0.
+For the “Fixed Interval Checking” function, at each uncertainty
+checking point 𝑡𝑗=𝑗𝑃where𝑗∈{1,2,...,⌊𝑇
+𝑃⌋}, we have𝜆min(𝑴𝑡𝑗)≥
+𝛼𝑡𝑗. For the𝑗-th checking, there areÍ𝑑
+𝑖=1𝛼𝑡𝑗−𝜆𝒗𝑖
+𝑐2
+0≤Í𝑑
+𝑖=1𝛼𝑡𝑗−𝛼𝑡𝑗−1
+𝑐2
+0≤
+𝛼𝑑𝑃
+𝑐2
+0conversations to be launched. Thus, by round 𝑡, the number
+of total conversations satisfiesÍ⌊𝑡
+𝑃⌋
+𝑗=1𝛼𝑑𝑃
+𝑐2
+0≤𝛼𝑑𝑡
+𝑐2
+0.
+For the “Exponential Phase Checking” function, by round 𝑡, there
+are⌊log2(𝑡)⌋uncertainty checking points. For the 𝑗-th checking,
+there areÍ𝑑
+𝑖=1𝛼𝑡𝑗−𝜆𝒗𝑖
+𝑐2
+0≤Í𝑑
+𝑖=1𝛼𝑡𝑗−𝛼𝑡𝑗−1
+𝑐2
+0≤𝛼𝑑2𝑗−1
+𝑐2
+0conversations
+to be launched. By round 𝑡, the number of total conversations
+satisfiesÍ⌊log2(𝑡)⌋
+𝑗=1𝛼𝑑2𝑗−1
+𝑐2
+0≤𝛼𝑑𝑡
+𝑐2
+0.
+Therefore, we have
+Tr(𝑴𝑡)≤𝑑𝜆+𝑡−1∑︁
+𝑠=1Tr(𝒙𝑎𝑠𝒙⊤
+𝑎𝑠)+𝑡∑︁
+𝑠=1∑︁
+𝑘∈K𝑠Tr(˜𝒙𝑘˜𝒙⊤
+𝑘)≤𝑑𝜆+𝑡+𝛼𝑑𝑡
+𝑐2
+0,
+and
+det(𝑴𝑡)≤Tr(𝑴𝑡)
+𝑑𝑑
+≤©­
+«𝑑𝜆+𝑡+𝛼𝑑𝑡
+𝑐2
+0
+𝑑ª®
+¬𝑑
+≤ 
+𝜆+𝑡+𝛼𝑑𝑡
+𝑐2
+0𝑑!𝑑
+,
+where the last inequality is obtained by the fact that 𝑐0<1.
+Following the same steps as in the proof of Lemma 1, we can
+obtain that
+𝒙⊤
+𝑎 𝜽𝑡−𝜽∗≤∥𝒙𝑎∥𝑴−1
+𝑡©­
+«√
+𝜆+vut
+2 log1
+𝛿
++𝑑log 
+1+𝑡+𝛼𝑑𝑡
+𝜆𝑑𝑐2
+0!
+ª®
+¬,
+which concludes the proof. □A.8 Proof of Lemma 6
+Lemma 6. For CLiME, for any arm 𝑎∈A, with probability at least
+1−𝛿for some𝛿∈(0,1), at round𝑡≥2𝑃, we have∥𝒙𝑎∥𝑴−1
+𝑡≤√︃
+2
+𝛼𝑡,
+where𝑃is a fixed integer.
+Proof. We first consider the case where CLiME uses the “Con-
+tinuous Checking” function, i.e., the agent checks the eigenval-
+ues of the matrix 𝑴𝑡at each round. By Equation (14), we have
+𝜆min(𝑴𝑡)≥𝛼𝑡. Then, following from Equation (11) in the proof of
+Lemma 4, we can obtain that ∥𝒙𝑎∥𝑴−1
+𝑡≤√︃
+1
+𝛼𝑡.
+Next, we consider the case for the “Fixed Interval Checking”
+function. In this case, the agent only checks the eigenvalues of the
+matrix 𝑴𝑡every𝑃rounds. For the rounds 𝑡when the agent checks
+the uncertainty, we have the same results as 𝜆min(𝑴𝑡)≥𝛼𝑡; For the
+rounds𝑡when the agent does not check it, we have 𝜆min(𝑴𝑡)≥𝛼𝑡′
+where𝑡′is the last round that the agent conducts the check and
+𝑡−𝑡′≤𝑃. When𝑡≥2𝑃,𝑡′≥𝑡−𝑃≥𝑡
+2, we can obtain that
+∥𝒙𝑎∥𝑴−1
+𝑡≤√︃
+1
+𝛼𝑡′≤√︃
+2
+𝛼𝑡.
+Finally, we consider the “Exponential Phase Checking” function.
+At rounds𝑡satisfying 2𝑖≤𝑡<2𝑖+1for𝑖=1,2,..., the last checking
+point𝑡′=2𝑖, then we have 𝜆min(𝑴𝑡)≥𝛼·2𝑖. When𝑡≥2, we
+have𝑡
+2≤2𝑖, and then∥𝒙𝑎∥𝑴−1
+𝑡≤√︃
+1
+𝛼2𝑖≤√︃
+2
+𝛼𝑡.
+Therefore, to generalize the bound, we can conclude that when
+𝑡≥2𝑃,∥𝒙𝑎∥𝑴−1
+𝑡≤√︃
+2
+𝛼𝑡for all three checking functions. □
+A.9 Proof of Theorem 1
+Theorem 1 (Regret of CLiSK) .With probability at least 1−𝛿for
+some𝛿∈(0,1), the regret upper bound of CLiSK satisfies
+R(𝑇)≤8(1+√
+𝑑𝑅)2log(|K|)
+𝑐1𝜌2𝑏log𝑑
+𝛿
++4√︄
+2𝑐1𝜌2𝑇
+𝑏log(|K|)·
+©­­­
+«vuuuut
+2 log1
+𝛿
++𝑑log©­­
+«1+𝑇+
+1+√
+𝑑𝑅
+𝑏𝑇
+𝜆𝑑ª®®
+¬+√
+𝜆ª®®®
+¬
+=O(√︁
+𝑑𝑇log(𝑇)+𝑑),
+where𝑅and𝜌2are constants in Definition 1.
+Proof. Denote the instantaneous regret at round 𝑡byreg𝑡. We
+first decompose it as follows:
+reg𝑡=(𝒙⊤
+𝑎∗
+𝑡𝜽∗+𝜂𝑡)−(𝒙⊤
+𝑎𝑡𝜽∗+𝜂𝑡)
+=𝒙⊤
+𝑎∗
+𝑡(𝜽∗−𝜽𝑡)+(𝒙⊤
+𝑎∗
+𝑡𝜽𝑡+𝛼𝑡∥𝒙𝑎∗
+𝑡∥𝑴−1
+𝑡)−(𝒙⊤
+𝑎𝑡𝜽𝑡+𝛼𝑡∥𝒙𝑎𝑡∥𝑴−1
+𝑡)
++𝒙⊤
+𝑎𝑡(𝜽𝑡−𝜽∗)−𝛼𝑡∥𝒙𝑎∗
+𝑡∥𝑴−1
+𝑡+𝛼𝑡∥𝒙𝑎𝑡∥𝑴−1
+𝑡
+≤𝒙⊤
+𝑎∗
+𝑡(𝜽∗−𝜽𝑡)+𝒙⊤
+𝑎𝑡(𝜽𝑡−𝜽∗)−𝛼𝑡∥𝒙𝑎∗
+𝑡∥𝑴−1
+𝑡+𝛼𝑡∥𝒙𝑎𝑡∥𝑴−1
+𝑡(15)
+≤𝛼𝑡∥𝒙𝑎∗
+𝑡∥𝑴−1
+𝑡+𝛼𝑡∥𝒙𝑎𝑡∥𝑴−1
+𝑡−𝛼𝑡∥𝒙𝑎∗
+𝑡∥𝑴−1
+𝑡+𝛼𝑡∥𝒙𝑎𝑡∥𝑴−1
+𝑡(16)
+≤2𝛼𝑡∥𝒙𝑎𝑡∥𝑴−1
+𝑡,
+where Equation (15) follows from the UCB strategy for arm selec-
+tion, and Equation (16) follows from Lemma 1. Next, we have
+R(𝑇)=𝑇0∑︁
+𝑡=1reg𝑡+𝑇∑︁
+𝑡=𝑇0+1reg𝑡Leveraging the Power of Conversations: Optimal Key Term Selection in Conversational Contextual Bandits KDD ’25, August 3–7, 2025, Toronto, ON, Canada
+≤𝑇0+𝑇∑︁
+𝑡=𝑇0+12𝛼𝑡∥𝒙𝑎𝑡∥𝑴−1
+𝑡(17)
+≤𝑇0+2𝑇∑︁
+𝑡=𝑇0+1𝛼𝑡√︄
+2
+𝜆K𝑏𝑡(18)
+≤𝑇0+4𝛼𝑇√︄
+2𝑇
+𝜆K𝑏(19)
+where Equation (17) is because the instantaneous regret reg𝑡≤1
+by Assumption 1, Equation (18) follows from Lemma 4, and Equa-
+tion (19) is because 𝛼𝑡is non-decreasing andÍ𝑇
+𝑡=11√𝑡≤2√
+𝑇.
+Recall the definition of 𝑇0≜8(1+√
+𝑑𝑅)2
+𝑏𝜆Klog
+𝑑
+𝛿
+in Lemma 3 and
+the definition of 𝛼𝑡in Lemma 1. Plugging 𝑇0and𝛼𝑡into Equa-
+tion (19), we can obtain the regret bound. □
+A.10 Proof of Theorem 2
+Theorem 2 (Regret of CLiME) .With probability at least 1−𝛿for
+some𝛿∈(0,1), the regret upper bound of CLiME satisfies
+R(𝑇)≤4√︂
+2𝑇
+𝛼©­
+«vut
+2 log(1
+𝛿)+𝑑log 
+1+𝑇+𝛼𝑑𝑇
+𝜆𝑑𝑐2
+0!
++√
+𝜆ª®
+¬+2𝑃
+=O√︁
+𝑑𝑇log(𝑇)
+.
+Proof. With the same decomposition as in the proof of Theo-
+rem 1, we have
+R(𝑇)=2𝑃∑︁
+𝑡=1reg𝑡+𝑇∑︁
+𝑡=2𝑃+1reg𝑡≤2𝑃+2𝑇∑︁
+𝑡=2𝑃+1𝛼𝑡∥𝒙𝑎𝑡∥𝑴−1
+𝑡
+≤2𝑃+2𝑇∑︁
+𝑡=2𝑃+1𝛼𝑡√︂
+2
+𝛼𝑡(20)
+≤2𝑃+4𝛼𝑇√︂
+2𝑇
+𝛼. (21)
+=2𝑃+4√︂
+2𝑇
+𝛼©­
+«vut
+2 log1
+𝛿
++𝑑log 
+1+𝑇+𝛼𝑑𝑇
+𝜆𝑑𝑐2
+0!
++√
+𝜆ª®
+¬,(22)
+where Equations (20) and (21) follow from Lemma 5 and analogous
+steps in Theorem 1. Note that 𝑃>1is a given constant for the “Fixed
+Interval Checking” function. Plugging 𝛼𝑇into the inequality, we
+can obtain the result and conclude that R(𝑇)=O(√︁
+𝑑𝑇log(𝑇)).□
+A.11 Proof of Theorem 3
+Since any algorithms for conversational bandits must select both
+arms and key terms, we model a policy 𝜋as a tuple consisting of
+two components 𝜋=(𝜋arm,𝜋key), where𝜋armselects arms and
+𝜋keyselects key terms. We assume that at each time step, the policy
+can select at most one key term; otherwise, the number of key terms
+could exceed the number of arms, which is impractical. Let H𝑡=
+{𝑎1,𝑥1,𝑘1,e𝑥1,...,𝑎𝑡,𝑥𝑡,𝑘𝑡,e𝑥𝑡}denote the history of interactions
+between the policy and the environment up to time 𝑡. We note that
+the presence of key terms at every time step in H𝑡is without lossof generality because we allow 𝑘𝑡to be empty if no conversation
+is initiated at round 𝑡. The noise terms associated with both arm-
+level and key term-level feedback, denoted by 𝜂𝑡ande𝜂𝑡, follow the
+standard Gaussian distribution N(0,1). We also denote the feature
+vectors of selected arm and key term as random variables 𝑨𝑡,𝑲𝑡∈
+R𝑑, and the arm-level and key term-level rewards 𝑋𝑡=⟨𝑨𝑡,𝜽⟩+𝜂𝑡
+ande𝑋𝑡=⟨𝑲𝑡,𝜽⟩+e𝜂𝑡, followN(⟨𝑨𝑡,𝜽⟩,1)andN(⟨𝑲𝑡,𝜽⟩,1),
+respectively. We denote by P𝜽the probability measure induced by
+the environment 𝜽and policy𝜋, and by E𝜽the expectation under
+P𝜽. With these definitions, we present the following lemma.
+Lemma 7. Let𝐷(𝑃∥𝑄)denote the KL divergence between distri-
+butions𝑃and𝑄, and let 𝜽,𝜽′be two environments, then we have
+𝐷(P𝜽∥P𝜽′)=1
+2𝑇∑︁
+𝑡=1
+E𝜽h
+𝑨𝑡,𝜽−𝜽′2i
++E𝜽h
+𝑲𝑡,𝜽−𝜽′2i
+.
+Proof. Given a bandit instance with parameter 𝜽and a policy
+𝜋, according to Section 4.6 of Lattimore and Szepesvári [14], we
+construct the canonical bandit model of our setting as follows. Let
+(Ω,F,P𝜽)be a probability space and Abe the set of all possible
+arms, where Ω=(A×R)𝑇,F=B(Ω), and the density function
+of the probability measure P𝜽is defined by 𝑝𝜽,𝜋:Ω→R:
+𝑝𝜽(H𝑇)=𝑇Ö
+𝑡=1𝜋arm
+𝑡(𝑎𝑡|H𝑡−1)𝑝𝑎𝑡(𝑥𝑡)·𝜋key
+𝑡(𝑘𝑡|H𝑡−1)e𝑝𝑘𝑡(e𝑥𝑡),
+where𝑝𝑎𝑡ande𝑝𝑘𝑡are the density functions of arm-level and key
+term-level reward distributions 𝑃𝑎𝑡ande𝑃𝑘𝑡, respectively. The def-
+inition of P𝜽′is identical except that 𝑝𝑎𝑡,e𝑝𝑘𝑡are replaced by 𝑝′𝑎𝑡,
+e𝑝′
+𝑘𝑡and𝑃𝑎𝑡,e𝑃𝑘𝑡are replaced by 𝑃′𝑎𝑡,e𝑃′
+𝑘𝑡.
+By the definition of KL divergence 𝐷(𝑃∥𝑄)=∫
+Ωlog
+d𝑃
+d𝑄
+d𝑃,
+𝐷(P𝜽∥P𝜽′)=∫
+ΩlogdP𝜽
+dP𝜽′
+dP𝜽=E𝜽
+logdP𝜽
+dP𝜽′
+.
+Note that
+logdP𝜽
+dP𝜽′(H𝑇)
+=log𝑝𝜽,𝜋(H𝑇)
+𝑝𝜽′,𝜋(H𝑇)(23)
+=logÎ𝑇
+𝑡=1𝜋arm
+𝑡(𝑎𝑡|H𝑡−1)𝑝𝑎𝑡(𝑥𝑡)·𝜋key
+𝑡(𝑘𝑡|H𝑡−1)e𝑝𝑘𝑡(e𝑥𝑡)
+Î𝑇
+𝑡=1𝜋arm
+𝑡(𝑎𝑡|H𝑡−1)𝑝′𝑎𝑡(𝑥𝑡)·𝜋key
+𝑡(𝑘𝑡|H𝑡−1)e𝑝′
+𝑘𝑡(e𝑥𝑡)
+=𝑇∑︁
+𝑡=1 
+log𝑝𝑎𝑡(𝑥𝑡)
+𝑝′𝑎𝑡(𝑥𝑡)+loge𝑝𝑘𝑡(e𝑥𝑡)
+e𝑝′
+𝑘𝑡(e𝑥𝑡)!
+.
+where in Equation 23 we used the chain rule for Radon–Nikodym
+derivatives, and in the last equality, all the terms involving the
+policy𝜋cancel. Therefore,
+𝐷(P𝜽∥P𝜽′)
+=𝑇∑︁
+𝑡=1 
+E𝜽"
+log𝑝𝐴𝑡(𝑋𝑡)
+𝑝′
+𝐴𝑡(𝑋𝑡)#
++E𝜽"
+loge𝑝𝐾𝑡(e𝑋𝑡)
+e𝑝′
+𝐾𝑡(e𝑋𝑡)#!
+=𝑇∑︁
+𝑡=1 
+E𝜽"
+E𝜽"
+log𝑝𝐴𝑡(𝑋𝑡)
+𝑝′
+𝐴𝑡(𝑋𝑡)𝐴𝑡##
++E𝜽"
+E𝜽"
+loge𝑝𝐾𝑡(e𝑋𝑡)
+e𝑝′
+𝐾𝑡(e𝑋𝑡)𝐾𝑡##!
+=𝑇∑︁
+𝑡=1
+E𝜽h
+𝐷(𝑃𝐴𝑡∥𝑃′
+𝐴𝑡)i
++E𝜽h
+𝐷(e𝑃𝐾𝑡∥e𝑃′
+𝐾𝑡)iKDD ’25, August 3–7, 2025, Toronto, ON, Canada Maoli Liu, Zhuohua Li, Xiangxiang Dai, and John C.S. Lui
+=1
+2𝑇∑︁
+𝑡=1
+E𝜽h
+𝑨𝑡,𝜽−𝜽′2i
++E𝜽h
+𝑲𝑡,𝜽−𝜽′2i
+.
+where the last equation uses Lemma 10 and the fact that 𝑃𝐴𝑡∼
+N(⟨𝐴𝑡,𝜽⟩,1),𝑃′
+𝐴𝑡∼ N(⟨𝐴𝑡,𝜽′⟩,1),e𝑃𝐾𝑡∼ N(⟨𝐾𝑡,𝜽⟩,1), and
+e𝑃′
+𝐾𝑡∼N(⟨𝐾𝑡,𝜽′⟩,1), respectively. □
+Next, we present a lower bound for conversational bandits but
+without imposing the constraint that the number of arms is 𝐾.
+Lemma 8. Let the arm set and the key term set A=K=[−1,1]𝑑
+andΘ=
+±√︃
+1
+𝑇𝑑
+, then for any policy, there exists an environ-
+ment 𝜽∈Θsuch that the expected regret satisfies: E𝜽[𝑅(𝑇)]≥
+exp(−4)
+4𝑑√
+𝑇.
+Proof. For any𝑖∈[𝑑]and𝜽∈Θ, defineE𝜽,𝑖as the event that
+the sign of the 𝑖-th coordinate of at least half of {𝑨𝑡}𝑇
+𝑡=1does not
+agree with 𝜽:E𝜽,𝑖=Í𝑇
+𝑡=1I{sign(𝑨𝑡𝑖)≠sign(𝜽𝑖)}≥𝑇
+2	
+.
+Let𝑝𝜽,𝑖=P𝜽
+E𝜽,𝑖and𝜽′=(𝜽1,...,𝜽𝑖−1,−𝜽𝑖,𝜽𝑖+1,...,𝜽𝑑)⊤,
+i.e.,𝜽′is the same as 𝜽except that the 𝑖-th coordinate is negated.
+It is easy to verify that E𝑐
+𝜽,𝑖=E𝜽′,𝑖. Thus, applying Lemma 9 and
+Lemma 7, we obtain
+𝑝𝜽,𝑖+𝑝𝜽′,𝑖≥1
+2exp(𝐷(P𝜽∥P𝜽′))
+=1
+2exp 
+−1
+2𝑇∑︁
+𝑡=1
+E𝜽h
+𝑨𝑡,𝜽−𝜽′2i
++E𝜽h
+𝑲𝑡,𝜽−𝜽′2i!
+=1
+2exp(−4),
+where the last equality follows from a straightforward calculation
+showing that⟨𝑨𝑡,𝜽−𝜽′⟩=⟨𝑨𝑡,𝜽−𝜽′⟩=4/𝑇.
+Since|Θ|=2𝑑, we have
+∑︁
+𝜽∈Θ1
+|Θ|𝑑∑︁
+𝑖=1𝑝𝜽,𝑖=1
+|Θ|𝑑∑︁
+𝑖=1∑︁
+𝜽∈Θ𝑝𝜽,𝑖
+=1
+2𝑑·𝑑·2𝑑
+2·1
+2exp(−4)=𝑑
+4exp(−4).
+This implies the existence of some 𝜽∗∈Θsuch that
+𝑑∑︁
+𝑖=1𝑝𝜽∗,𝑖≥𝑑
+4exp(−4). (24)
+Choosing this 𝜽∗and defining the optimal arm 𝒂∗as:
+𝒂∗=arg max
+𝒂∈A
+𝒂,𝜽∗
+=arg max
+𝒂∈A𝑑∑︁
+𝑖=1𝒂∗
+𝑖𝜽∗
+𝑖.
+It is easy to verify that to maximizeÍ𝑑
+𝑖=1𝒂∗
+𝑖𝜽∗
+𝑖, we must have 𝑎∗
+𝑖=
+sign(𝜽∗
+𝑖)for all𝑖∈[𝑑]. Therefore, the expected regret is at least
+E𝜽∗[𝑅(𝑇)]=E𝜽∗"𝑇∑︁
+𝑡=1
+𝒂∗−𝑨𝑡,𝜽∗#
+=E𝜽∗"𝑇∑︁
+𝑡=1𝑑∑︁
+𝑖=1(𝒂∗
+𝑖−𝑨𝑡𝑖)𝜽∗
+𝑖#=E𝜽∗"𝑇∑︁
+𝑡=1𝑑∑︁
+𝑖=1(sign(𝜽∗
+𝑖)−𝑨𝑡𝑖)𝜽∗
+𝑖#
+=E𝜽∗"𝑇∑︁
+𝑡=1𝑑∑︁
+𝑖=12I
+sign(𝑨𝑡𝑖)≠sign(𝜽∗
+𝑖)	√︂
+1
+𝑇#
+=2√︂
+1
+𝑇𝑑∑︁
+𝑖=1E𝜽∗"𝑇∑︁
+𝑡=1I
+sign(𝑨𝑡𝑖)≠sign(𝜽∗
+𝑖)	#
+≥√
+𝑇𝑑∑︁
+𝑖=1P𝜽∗"𝑇∑︁
+𝑡=1I
+sign(𝑨𝑡𝑖)≠sign(𝜽∗
+𝑖)	
+≥𝑇/2#
+(25)
+=√
+𝑇𝑑∑︁
+𝑖=1𝑝𝜽∗,𝑖≥exp(−4)
+4𝑑√
+𝑇,
+where Equation (25) uses Markov’s inequality, and the last inequal-
+ity follows from Equation (24). □
+Theorem 3 (Regret lower bound) .For any policy that chooses
+at most one key term per time step, there exists an instance of the
+conversational bandit problem such that the expected regret is at least
+Ω(√
+𝑑𝑇). Furthermore, for any 𝑇=2𝑚with𝑚∈[𝑑], the regret is at
+leastΩ(√︁
+𝑑𝑇log(𝑇)).
+Proof. Suppose we have 𝛽=𝑑
+𝑚smaller problem instances
+𝐼1.𝐼2,...,𝐼𝛽, each corresponding to an 𝑚-dimensional, 𝐾-armed
+bandit instance with a horizon of 𝑇/𝛽and we assume they have
+preference vectors 𝜽1,...,𝜽𝛽∈R𝑚, respectively. We denote the
+arm set for instance 𝐼𝑗asA𝐼𝑗⊂R𝑚, and the regret incurred
+by instance 𝐼under policy 𝜋as𝑅𝜋
+𝐼(𝑇). Next, we construct a 𝑑-
+dimensional instance 𝐼=(𝐼1,𝐼2,...,𝐼𝛽)by leting the unknown
+preference vector for instance 𝐼be𝜽=(𝜽⊤
+1,...,𝜽⊤
+𝛽)⊤, and dividing
+the time horizon 𝑇into𝛽consecutive periods, each of length 𝑇/𝛽.
+For each time step 𝑡∈ [𝑇], the feature vectors of arms A𝑡are
+constructed from instance 𝐼𝑗, where𝑗=⌈𝑡𝛽/𝑇⌉. Specifically,A𝑡=
+(0⊤,..., 𝒙⊤,..., 0⊤)⊤	
+𝒙∈A𝐼𝑗, where the non-zero entry is located
+at the𝑗-th block. This means that at time 𝑡, the learner can only
+get information about the 𝑗-th block of the preference vector 𝜽.
+Therefore for any policy 𝜋, there exists policies 𝜋1,...,𝜋𝛽such that
+𝑅𝜋
+𝐼(𝑇)=Í𝛽
+𝑗=1𝑅𝜋𝑗
+𝐼𝑗(𝑇
+𝛽). Applying Lemma 8, we can always find
+instances𝐼1,𝐼2,...,𝐼𝛽such that
+𝑅𝜋
+𝐼(𝑇)=𝛽∑︁
+𝑗=1𝑅𝜋𝑗
+𝐼𝑗(𝑇
+𝛽)≥𝛽∑︁
+𝑗=1Ω 
+𝑚√︄
+𝑇
+𝛽!
+=Ω
+𝑚√︁
+𝑇𝛽
+=Ω 
+𝑚√︂
+𝑇𝑑
+𝑚!
+=Ω√
+𝑑𝑇𝑚
+=Ω√︁
+𝑑𝑇log(𝑇)
+.□
+A.12 Technical Inequalities
+We present the technical inequalities used throughout the proofs.
+We provide detailed references for readers’ convenience.
+Lemma 9 (Bretagnolle and Huber [3]).Let𝑃and𝑄be probability
+measures on the same measurable space (Ω,F), and let𝐴∈F be an
+arbitrary event. Then,
+𝑃(𝐴)+𝑄(𝐴𝑐)≥1
+2exp(−𝐷(𝑃∥𝑄)),Leveraging the Power of Conversations: Optimal Key Term Selection in Conversational Contextual Bandits KDD ’25, August 3–7, 2025, Toronto, ON, Canada
+where𝐷(𝑃∥𝑄)=∫
+Ωlog
+d𝑃
+d𝑄
+d𝑃=E𝑃h
+logd𝑃
+d𝑄i
+is the KL diver-
+gence between 𝑃and𝑄.𝐴𝑐=Ω\𝐴is the complement of 𝐴.
+Lemma 10 (KL divergence between Gaussian distributions) .If
+𝑃∼N(𝜇1,𝜎2)and𝑄∼N(𝜇2,𝜎2), then
+𝐷(𝑃∥𝑄)=(𝜇1−𝜇2)2
+2𝜎2.
+Lemma 11 (Matrix Chernoff, Corollary 5.2 in Tropp [24]).Consider
+a finite sequence{𝑿𝑘}of independent, random, self-adjoint matrices
+with dimension 𝑑. Assume that each random matrix satisfies
+𝑿𝑘⪰0and𝜆max(𝑿𝑘)≤𝑅almost surely.
+Define
+𝒀:=∑︁
+𝑘𝑿𝑘and𝜇min:=𝜆min(E[𝒀])=𝜆min ∑︁
+𝑘E[𝑿𝑘]!
+.Then, for any 𝛿∈(0,1),
+Pr"
+𝜆min ∑︁
+𝑘𝑿𝑘!
+≤(1−𝛿)𝜇min#
+≤𝑑"
+𝑒−𝛿
+(1−𝛿)1−𝛿#𝜇min/𝑅
+.
+Lemma 12 (Determinant-trace inequality, Lemma 10 in Abbasi-Yad-
+kori et al . [1]).Suppose 𝑿1,𝑿2,..., 𝑿𝑡∈R𝑑and for any 1≤𝑠≤𝑡,
+∥𝑿𝑠∥2≤𝐿. Let𝑽𝑡=𝜆𝑰+Í𝑡
+𝑠=1𝑿𝑠𝑿⊤𝑠for some𝜆>0. Then,
+det(𝑽𝑡)≤
+𝜆+𝑡𝐿2
+𝑑𝑑
+.

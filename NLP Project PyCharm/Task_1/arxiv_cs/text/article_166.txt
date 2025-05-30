@@ -1,0 +1,997 @@
+Published as a conference paper at ICLR 2025
+MULTI -LEVEL CERTIFIED DEFENSE AGAINST
+POISONING ATTACKS IN OFFLINE REINFORCEMENT
+LEARNING
+Shijie Liu1⋆, Andrew C. Cullen1, Paul Montague2, Sarah Erfani1, Benjamin I. P. Rubinstein1
+1School of Computing and Information Systems, University of Melbourne, Melbourne, Australia
+2Defence Science and Technology Group, Adelaide, Australia
+⋆shijie3@unimelb.edu.au
+ABSTRACT
+Similar to other machine learning frameworks, Offline Reinforcement Learning
+(RL) is shown to be vulnerable to poisoning attacks, due to its reliance on exter-
+nally sourced datasets, a vulnerability that is exacerbated by its sequential nature.
+To mitigate the risks posed by RL poisoning, we extend certified defenses to pro-
+vide larger guarantees against adversarial manipulation, ensuring robustness for
+both per-state actions, and the overall expected cumulative reward. Our approach
+leverages properties of Differential Privacy, in a manner that allows this work to
+span both continuous and discrete spaces, as well as stochastic and deterministic
+environments—significantly expanding the scope and applicability of achievable
+guarantees. Empirical evaluations demonstrate that our approach ensures the per-
+formance drops to no more than 50% with up to 7%of the training data poisoned,
+significantly improving over the 0.008% in prior work (Wu et al., 2022), while
+producing certified radii that is 5times larger as well. This highlights the poten-
+tial of our framework to enhance safety and reliability in offline RL.
+1 I NTRODUCTION
+Offline Reinforcement Learning (RL), also known as batch RL, involves training policies entirely
+from pre-collected datasets. Doing so is particularly advantageous in scenarios where directly in-
+teracting with the environment is costly, risky, or infeasible, such as healthcare (Wang et al., 2018),
+autonomous driving (Pan et al., 2017), and robotics (G ¨urtler et al., 2023). Due to this, offline RL
+mechanistically shares the same vulnerability to data poisoning attacks (Kiourti et al., 2020; Wang
+et al., 2021) as traditional classifiers, in which adversarial manipulation of the training data can
+lead to suboptimal or harmful decisions. Such vulnerability is further intensified by the dependence
+on external datasets collected by unknown behavioral agents and the dynamic, sequential decision-
+making process of RL. Across industrial users of RL, poisoning attacks are broadly considered to
+pose the most pressing security risk (Kumar et al., 2020), with offline settings being of particular
+concern (Zhang et al., 2021a). These intrinsic risks highlight the need for specialized defensive
+strategies to be developed, in order to support RL deployments.
+Defenses in RL share many of the same risks as defenses deployed for other Machine Learning
+paradigms, in that they can be circumvented by a motivated attacker. By contrast, certified defenses
+offer theoretical guarantees of robustness against worst-case adversarial manipulations. Such ro-
+bustness guarantees are particularly desirable in safety-critical domains and have been extensively
+explored in classification tasks (Lecuyer et al., 2019; Salman et al., 2019; Cullen et al., 2022). How-
+ever the direct applicability of these techniques to RL is made more challenging due to the complex
+sequential dependency and interactive nature of RL (Kiourti et al., 2020).
+While some works (Ye et al., 2023; Zhang et al., 2021a; Lykouris et al., 2023) have established
+robustness bounds for RL from a theoretical perspective, they typically rely on significant sim-
+plifications of the problem setting that do not reflect the complexities of real-world RL scenarios,
+limiting their applicability. Furthermore, these robustness bounds are typically expressed in terms
+1arXiv:2505.20621v1  [cs.LG]  27 May 2025Published as a conference paper at ICLR 2025
+of the optimality gap to the practically unattainable Bellman optimal policy, offering qualitative
+insights rather than quantitative certification value of the robustness.
+To circumvent these limitations, recent research has begun to consider how practical certifications
+can be constructed, resulting in the COPA approach (Wu et al., 2022). This approach provides com-
+putable lower bounds on cumulative reward andcertified radii , to ensure policies are robust against
+poisoning attacks. However, despite its utility, COPA is fundamentally limited to discrete action
+spaces and deterministic settings, which constrains it to a small subset of potential RL environ-
+ments. Additionally, it certifies only individual trajectories without offering robustness guarantees
+for the overall performance of the learned policy.
+To resolve these limitations, within this work, we propose the Multi-level Certified Defenses
+(MuCD) against poisoning attacks in general offline RL settings, offering multi-level robustness
+guarantees across different levels of poisoning. To assist in this, we distinguish between adversar-
+ial attacks against RL that involve trajectory-level poisoning, which occur during the data collec-
+tion process; and transition-level poisoning, which occurs after the training dataset is collected. In
+response to the existence of these threat models, we propose employing certifications that employ
+action-level robustness (expanding upon Wu et al. 2022) to ensure that critical states are safeguarded
+against being entered; and policy-level robustness, which provides a lower bound on the expected
+cumulative reward. This latter framework naturally aligns with RL policy’s primary goal (Prudencio
+et al., 2024). To achieve these certifications, our framework comprises two stages: a Differential
+Privacy (DP) based randomized training process and robustness certification methods. These certi-
+fications are broadly applicable to RL, covering both discrete and continuous action spaces, as well
+as deterministic and stochastic environments.
+Our contributions on both a theoretical and empirical level are:
+• Formulating both multi-level attacks and certifications for poisoning attacks in offline RL, en-
+abling comprehensive analysis of the robustness of the offline RL training process.
+• Proposing the first practical certified defense framework that provides computable robustness cer-
+tification in terms of both per-state action stability andexpected cumulative reward ingeneral
+offline RL settings .
+• Experimentally demonstrating significant improvements over past certification frameworks across
+varying environments and RL algorithms.
+2 R ELATED WORKS
+Offline and Online RL. RL approaches can be broadly categorized as online or offline learning.
+Of these, online learning algorithms involve agents learning by interacting with the environment in
+real-time, driving advances in a range of fields (Silver et al., 2017; Schulman et al., 2017; Kendall
+et al., 2019). While frameworks like Policy Gradient (Sutton et al., 1999) and Actor-Critic (Mnih,
+2016) can effectively learn policies for online RL, their trial-and-error exploration may lead to un-
+intended harmful outcomes and unsafe decisions during the learning process, which is of particular
+concern to safety-critical areas such as healthcare (Yu et al., 2021) and finance (Nevmyvaka et al.,
+2006). By contrast, offline (or batch) RL is considered safer, as it learns to emulate pre-collected
+data to create optimal policies without interacting with the environment (Lange et al., 2012). Algo-
+rithms such as Deep Q-Network (DQN) (Mnih et al., 2013), Implicit Q-Learning (IQL) (Kostrikov
+et al., 2021) and C51 (Bellemare et al., 2017) have demonstrated effective in leveraging historical
+data to optimize decision-making without further exploration.
+Poisoning Attacks in Offline RL. Adversarial attacks are a well-documented threat to machine
+learning, where motivated adversaries manipulate models to induce unexpected behaviors. Among
+these, poisoning attacks (Barreno et al., 2006; Biggio et al., 2013)—which deliberately corrupt the
+training data to degrade the performance of learned models—are particularly concerning for offline
+RL, due to its reliance on pre-collected datasets and the complex dynamics of RL frameworks (Ku-
+mar et al., 2020; Kiourti et al., 2020). Adversaries can target specific components of the data, such as
+in reward poisoning attacks (Wu et al., 2023), or broadly corrupt the entire dataset as in general poi-
+soning attacks (Wang et al., 2021). Corruption can occur after data has been collected cleanly (Zhang
+et al., 2021a) or during data collection (Ye et al., 2023; Gong et al., 2024).
+2Published as a conference paper at ICLR 2025
+Certified Defenses. In response to these attacks, a range of defensive mechanisms have been pro-
+posed. Of these, certified defenses have drawn particular interest, due to their ability to provide ro-
+bustness guarantees against attack existence for classification tasks (Peri et al., 2020; Lecuyer et al.,
+2019; Liu et al., 2021; Cullen et al., 2024b), however applying these methods to RL directly has
+proven challenging due to RL’s sequential dependency (Kiourti et al., 2020). While some research
+has addressed certified robust RL in the context of reward poisoning (Banihashem et al., 2021; Nika
+et al., 2023), extensions to general poisoning attacks have been more limited, with results primarily
+restricted to theoretical analyses of simplified variants (using linear MDPs or assuming bounded
+distances to Bellman optimality) of offline RL under attack occurring during data collection (Ye
+et al., 2023) or afterward (Yang et al., 2024; Zhang et al., 2021a). Crucially, these robustness ap-
+proaches typically produce bounds expressed in asymptotic measures of the optimality gap between
+the learned policy and the theoretical optimal policy, which have limited practical applicability.
+By contrast, COPA (Wu et al., 2022) recently demonstrated that per-state certification for RL could
+be computed by adapting the Deep Partition Aggregation (DPA) (Levine & Feizi, 2021) method
+from classification tasks. Based on that, they proposed a tree-search approach that exhaustively
+explores all possible trajectories to compute a lower bound on the cumulative reward. However,
+such an approach intrinsically limits it to discrete action spaces and deterministic environments.
+Consequently, their certification framework only applies to specific, repeatable trajectories and fails
+to provide robustness guarantees for the reward or policy in more general scenarios.
+3 P RELIMINARIES
+In this section, we formulate the offline RL framework as an episodic finite-horizon Markov De-
+cision Process (MDP), establishing the foundation for our discussion. We then outline the dataset
+construction process and introduce a comprehensive multi-level poisoning attack model to address
+potential risks in offline RL training, along with the objectives for certified defense. Finally, we
+highlight key concepts from Differential Privacy (DP) that underpin our approach.
+3.1 M ULTI -LEVEL POISONING
+Framework. The RL framework is modeled as an episodic finite-horizon MDP, represented by
+the tuple (S,A, P, R, H, γ ), where Sis the state space, Ais the action space, P:S ×A → ∆(S)is
+the stochastic transition function with ∆(·)defining the set of probability measures, R:S ×A → R
+is the bounded reward function, His the time horizon, and γ∈Ris the discount factor.
+At a time step t, an RL agent in state st∈ S selects an action at=π(st)according to its policy
+π∈Π :S → A . Upon executing at, the agent transitions to the subsequent state st+1∼P(st, at)
+and receives a reward rt=R(st, at). The tuple (st, at, st+1, rt)is referred to as a transition, and
+the sequence of transitions {(st, at, st+1, rt)}H−1
+t=0over one episode constitutes a trajectory τ.
+Offline RL Datasets. Offline RL employs a dataset D={τj}M
+j=1consisting of Mtrajectories, or
+equivalently Ntransitions D={(si, ai, si+1, ri)}N
+i=1, collected by an unknown behavioral policy
+πβ. The agent learns its policy πfrom this dataset without further interaction with the environment,
+which provides opportunities for an adversary to poison the training data during the behavioral
+policy execution or after the collection process.
+Trajectory-level Poisoning. Trajectory-level poisoning occurs when the adversary corrupts the
+data collection process. The adversary, with full knowledge of the MDP, can observe all the histor-
+ical transitions and alter transitions {(st, at, st+1, rt)}at arbitrarily many time steps by replacing
+them with {(˜st,˜at,˜st+1,˜rt)}. As any alteration can affect subsequent transitions and propagate
+through gameplay, the following definition quantifies corruption by the number of modified trajec-
+tories , following the adversarial models in robust statistics (Diakonikolas et al., 2019) and robust
+RL (Zhang et al., 2021b; Wu et al., 2022) settings.
+Definition 3.1 (Trajectory-level poisoning) .Assume an adversary can make up to rchanges, in-
+cluding additions, deletions, or alterations, to the trajectories within a clean dataset D={τj}M
+j=1.
+Then the set of all possible poisoned datasets is Btrj(D, r) :={˜D:|D⊖trj˜D| ≤r}, where
+|D⊖tra˜D|measures the minimum number of changes to the trajectories required to map Dto˜D.
+3Published as a conference paper at ICLR 2025
+Transition-level Poisoning. In transition-level poisoning, the adversary modifies transitions
+after the data is collected. Therefore, alterations are limited to the specific transitions
+{(˜si,˜ai,˜si+1,˜ri)}r
+i=1that were directly modified, without impacting any subsequent transitions
+across the trajectory. Hence, we quantify the corruption by the total number of modified transitions
+through the following definition.
+Definition 3.2 (Transition-level poisoning) .Assume an adversary can make up to rchanges,
+including additions, deletions, or alterations, to the transitions within a clean dataset D=
+{(si, ai, si+1, ri)}N
+i=1. Then the set of all possible poisoned datasets is Btra(D, r) := {˜D:
+|D⊖tra˜D| ≤r}, where |D⊖tra˜D|measures the minimum number of changes to the transitions
+required to map Dto˜D.
+3.2 M ULTI -LEVEL ROBUSTNESS CERTIFICATION
+To ensure robustness against data poisoning in RL, we aim to certify test-time performance of a
+policy π=M(D)trained on a clean dataset Dwith the training algorithm M. In doing so, we will
+bound the difference between πand the equivalent ˜π=M(˜D)trained upon a poisoned dataset ˜D,
+subject to a constraint on the difference between Dand˜D.
+Policy-level Robustness. Offline RL algorithms aim to find an optimal policy that maximizes the
+expected cumulative reward for all trajectories induced by the policy (Prudencio et al., 2024). Thus
+we first aim to construct certifications regarding the expected cumulative reward . The expected
+cumulative reward is denoted as J(π) =Eσ,ξ[P
+tγtrt|π], where ξrepresents the randomness
+of the environment and σrepresents the randomness introduced by the training algorithm. The
+following definition demonstrates how policy-level robustness certifications can construct a lower
+bound on the expected cumulative reward, henceforth labelled as Jr, under a poisoning attack of
+sizer.
+Definition 3.3 (Policy-level robustness certification) .Given a clean dataset D, a policy-level certifi-
+cation ensures that a policy ˜π=M(˜D)trained on any poisoned dataset ˜D∈ B(D, r)will produce
+an expected cumulative reward J(˜π)≥Jrwith probability at least 1−δ.
+Action-level Robustness. Beyond ensuring generalised robustness, it is crucial to be able to guar-
+antee the safety of the agent by ensuring it avoids catastrophic outcomes and entering undesirable
+states (Gu et al., 2024). Therefore, we also aim to certify the stability of the agent’s actions on a
+per-state basis during testing. The action-level robustness certification in a discrete action space at
+statestunder a poisoning attack of size ris defined in the following definition.
+Definition 3.4 (Action-level robustness certification) .Given a clean dataset Dand state st, the
+action-level robustness certification states that for any poisoned dataset ˜D∈ B(D, r), the clean
+and poisoned policies produce the same action π(st) = ˜π(st)where π=M(D)and˜π=M(˜D),
+with a probability of at least 1−δ.
+3.3 D IFFERENTIAL PRIVACY
+DP quantifies privacy loss when releasing aggregate statistics or trained models on sensitive
+data (Dwork et al., 2006; Abadi et al., 2016; Friedman & Schuster, 2010). As DP can be used
+to measure the sensitivity of outputs to input perturbations, it is well aligned to use in certifications,
+leading to it being employed in multiple works (Lecuyer et al., 2019; Ma et al., 2019; Cullen et al.,
+2024a). The remainder of this section will introduce key properties of DP as employed by our work,
+with more detailed explanations of the Approximate-DP (ADP) and R´enyi-DP (RDP) mechanisms
+deferred to Appendix A.1.
+Our work relies upon two key principles of DP—the post-processing property , that any computation
+applied to the output of a DP algorithm preserves the same DP guarantee (Dwork et al., 2006); and
+theoutcomes guarantee (Liu et al., 2023; Mironov, 2017), as explained in the following definition
+specifically for ADP and RDP.
+Definition 3.5 (Outcomes guarantee for ADP and RDP) .A randomised function Mis said to pre-
+serve a (K, r)-outcomes guarantee if for any function K∈ K such that for all datasets D1and
+4Published as a conference paper at ICLR 2025
+D2∈ B(D1, r), and for all measurable output sets S⊆Range( M)if
+Pr[M(D1)∈S]≤K(Pr[M(D2)∈S]). (1)
+In ADP , the function family Kis parameterized by ϵ, δasKϵ,δ(x) =eϵx+δ, while in RDP Kis
+parameterized by ϵ, αasKϵ,α(x) = (eϵx)α−1
+α.
+4 A PPROACH
+Our novel certified defense employs a DP-based randomized training process and provides two
+unique certification methods to construct both action-level andpolicy-level robustness certification
+against transition andtrajectory level poisoning attacks.
+4.1 R ANDOMIZED TRAINING PROCESS
+Our certification requires the training algorithm Mto ensure the DP guarantee of its output policy
+πwith respect to the training dataset D. DP mechanisms introduce randomness into the training
+process by adding calibrated noise in updating the parameters, producing a randomized policy π.
+Empirically, this can be represented as a set of ppolicy instances (ˆπ1,···,ˆπp). As each instance
+undergoes the same training process, this can be easily parallelized for efficiency. For larger datasets,
+further efficiency gains can be achieved by training each instance on a subset Dsub⊆D.
+Our specific approach employs the Sampled Gaussian Mechanism (SGM) (Mironov et al., 2019)
+to ensure DP guarantee at the transition-level Btra, and adapts the DP-FEDA VG (McMahan et al.,
+2017) for the trajectory-level BtrjDP guarantee. Details of the training algorithms are deferred to
+Appendix A.2. For the remainder of this paper, Bwill represent either BtraorBtrj, depending on
+whether the applied DP training algorithm provides transition- or trajectory-level guarantees.
+4.2 P OLICY -LEVEL ROBUSTNESS CERTIFICATION
+Consider a DP training algorithm M(as described in Section 4.1) that preserves a (K, r)-outcomes
+guarantee for the clean dataset D, producing the clean policy π=M(D). When the dataset is
+poisoned as ˜D, the resulting policy is denoted as ˜π=M(˜D). To certify the policy-level robustness
+as in Definition 3.3 in terms of the lower bound of expected cumulative reward, we denote the testing
+time expected cumulative reward of a policy πas expressed by
+J(π) =E
+σ[C(π)]where C(π) =E
+ξ"H−1X
+t=0γtrt|π#
+, (2)
+thatσrepresents the training randomness, and ξrepresents the environment randomness.
+To provide bounds over the expected output of the DP mechanisms, we propose the following lemma
+that extends the outcomes guarantee from probability to the expected value.
+Lemma 4.1 (Expected Outcomes Guarantee for ADP and RDP) .If anMthat produces bounded
+outputs in [0, b], b∈R+satisfies (K, r)-outcomes guarantee, then for any ˜D∈ B(D, r)the expected
+value of the outputs of the Mmust satisfy: If Kdenotes the function family of ADP Kϵ,δ,
+e−ϵ(E[M(D)]−bδ)≤E[M(˜D)]≤eϵE[M(D)] +bδ . (3)
+Similarly, if Kdenotes the function family of RDP Kϵ,α,
+e−ϵ(b−1/αE[M(D)])α
+α−1≤E[M(˜D)]≤b1/α(eϵE[M(D)])(α−1)/α, (4)
+where the expectation is taken over the randomness in M.
+Proof. While a full proof is contained within Appendix A.3, here we present an informative sketch.
+The upper bound of the expected value can be obtained by integrating over the right-tail distribution
+function of the probabilities in Equation (1) by Fubini’s Theorem (Fubini, 1907). The integral results
+of ADP and RDP can be derived by respectively employing Lecuyer et al. (2019) and H ¨older’s
+Inequality. The lower bound follows by the symmetry in the roles of D1,D2in DP, and by Kbeing
+strictly monotonic.
+5Published as a conference paper at ICLR 2025
+With this preliminary result, we now turn to the main result of this section, which is to establish that
+DP learning algorithms ensure policy-level robustness against poisoning attacks up to size r, with
+an extension to real-valued cumulative rewards deferred to Appendix A.4.
+Theorem 4.2 (Policy-level robustness by outcomes guarantee) .Consider an RL environment with
+bounded cumulative reward in the range [0, b], b∈R+, as well as a randomized offline RL policy
+π=M(D)constructed by the learning algorithm Musing training dataset D. IfMpreserves a
+ADP (K, r)-outcomes guarantee, then each K∈ K ϵ,δwith corresponding ϵ, δsatisfies the policy-
+level robustness of size rfor any poisoned dataset ˜D∈ B(D, r)as
+J(˜π)≥Jr(˜π) =e−ϵ(J(π)−bδ). (5)
+IfMpreserves a RDP (K, r)-outcomes guarantee, then each K∈ K ϵ,αwith corresponding ϵ, α
+satisfies the policy-level robustness of size ras
+J(˜π)≥Jr(˜π) =e−ϵ(b−1/αJ(π))α
+α−1. (6)
+Proof. This result is a direct consequence of the (K, r)-outcomes guarantee and the post-processing
+property, as C(˜π) =C(M(˜D))is a post-computation applied to the output of the DP mechanism
+M, hence it satisfies the same (K, r)-outcomes guarantee by the post-processing property. By
+Lemma 4.1, the expected value J(˜π) =E[C(˜π)]andJ(π) =E[C(π)]satisfy the inequality in
+Equation (5) and Equation (6) for ADP and RDP respectively.
+To compute the policy-level robustness using Theorem 4.2, we need to obtain the lower bound of
+J(π)to substitute into the Equation (5) and Equation (6). Consider the cumulative reward of the
+policy πas a random variable X=PH
+tγtrtwhere J(π) =Eσ,ξ[X]. The estimations of Xcan be
+obtained by playing the games mtimes using the trained policy instances (ˆπ1,···,ˆπp), and obtain
+its empirical Cumulative Distribution Function (CDF) ˆFX(x). By the Dvoretzky–Kiefer–Wolfowitz
+inequality (Dvoretzky et al., 1956), the true CDF FX(x)must be bounded by an empirical CDF
+ˆFX(x)of a finite sample size mwith probability at least 1−δas
+ˆFX(x)−ε≤FX(x)≤ˆFX(x) +εwhere ε=s
+ln2
+δ
+2m. (7)
+The expected value of the random variable Xin the bounded range [0, b]can be expressed by the
+true CDF FX(x)and bounded by the empirical CDF ˆFX(x)as
+J(π) =E
+σ,ξ[X] =Zb
+0(1−FX(x))dx≥Zb
+0(1−(ˆFX(x)−ε))dx , (8)
+and thus allows us to construct the lower bound Jr(˜π), as required for policy-level certification.
+4.3 A CTION -LEVEL ROBUSTNESS CERTIFICATION
+In this section, we propose a method for certifying action-level robustness as in Definition 3.4 in
+terms of the stability of output actions. To achieve this, we begin by considering the decision-
+making process of a policy πgiven state stin a discrete action space A={A1,···, AL}. For
+each instance ˆπiof the policy, the action at,iis selected based on the highest action-value at,i=
+arg max al∈AQˆπi(st, al) =E˜πihPH−1
+t=0γtrt|s0=st, a0=ali
+. Without loss of generality, we
+denote the action atchosen by the randomized policy πas the one with the highest inferred scores
+IAl(st, π), whereP
+Al∈AIAl(st, π) = 1 andIAl(st, π)∈[0,1]. The inferred score function of the
+randomized policy πtakes the form
+IAl(st, π) = Pr[arg max
+aiQπ(st, ai) =Al], (9)
+indicating that the action is induced as the most likely one, which can be estimated unbiasedly by
+using a majority vote among all policy instances. We then propose the following lemma, which
+extends the outcome guarantees to inferred scores.
+6Published as a conference paper at ICLR 2025
+Lemma 4.3 (Inferred scores outcomes guarantee) .IfMpreserves a (K, r)-outcomes guarantee
+for a dataset D, and there exist an Ithat maps the learned policy π=M(D)and a state stto
+an inferred score, then for any K∈ K , it must hold that for any action Al∈ A and any policy
+˜π=M(˜D)trained with dataset ˜D∈ B(D, r):
+K−1(IAl(st, π))≤IAl(st,˜π)≤K(IAl(st, π)). (10)
+Proof. The composition I◦ M preserves the same outcomes guaranteed by the post-processing
+property. The reverse inequality is derived from the symmetry in the roles of the datasets in DP, with
+Kbeing strictly monotonic. The outcomes guarantee can be directly converted to Equation (10) by
+defining S={π: arg max aiQπ(st, ai) =Al}.
+With the bounds over inferred scores by outcomes guarantee, we present the theorem that speci-
+fies the conditions under which a DP learning algorithm maintains action-level robustness against
+poisoning attacks of size rin any arbitrary state st.
+Theorem 4.4 (Action-level robustness by outcomes guarantee) .Consider an offline RL training
+dataset D, a randomized learning algorithm Mthat satisfies a (K, r)-outcomes guarantee and
+outputs a policy π=M(D). Let Ibe the inferred score function, and stbe an arbitrary test-
+time input state with the corresponding output action at= arg max al∈AIal(st, π). If there exist
+K1, K2∈ K such that:
+K−1
+1(Iat(st, π))>max
+al∈A\{ al}K2(Ial(st, π)) (11)
+then the algorithm preserves action-level robustness at state stunder a poisoning attack of size r.
+Proof. As the policy selects the action that maximises the inferred score, the objective of certifying
+action-level robustness is equivalent to proving that the inferred score of atis larger than the inferred
+score of any other actions al∈ A \ { at}for any poisoned dataset ˜D∈ B(D, r), as
+∀˜D∈ B(D, r)
+Iat(st,M(˜D))>max
+al∈A\{ al}Ial(st,M(˜D)).(12)
+GivenMpreserves a (K, r)-outcomes guarantee, then for any K1, K2∈ K, the following inequali-
+ties can be derived by Lemma 4.3 as
+Iat(st,M(˜D))> K−1
+1(Iat(st, π))
+max
+al∈A\{ al}Ial(st,M(˜D))<max
+al∈A\{ al}K2(Ial(st, π)).(13)
+Therefore, if there exists K1andK2that satisfy the condition in Equation (11), the transitive prop-
+erty of inequalities ensures that the condition in Equation (12) is also satisfied.
+The maximum tolerable poisoning size rtcan be calculated while maintaining action-level robust-
+ness by way of the policy instances (ˆπ1,···,ˆπp)and the condition in Theorem 4.4. At each time,
+the selected action atis that with the highest inferred score across the policy instances, with upper
+and lower bounds estimated simultaneously through sampling the outputs of the policy instances to
+a confidence level of at least 1−δby the S IMUEM method (Jia et al., 2020). We substitute the
+lower bound of Iat(st, π)and the upper bound of max at∈A\{ at}Iat2(st, π)into the condition of
+Equation (11). By Theorem 4.4 we can then certify whether action-level robustness is achieved at
+statestunder a poisoning size r. The maximum tolerable poisoning size rtis determined through a
+binary search over the domain of Kto find the K1andK2that satisfies the condition for maximising
+r. We defer the details of this process to Appendix A.5.
+5 E XPERIMENTS
+In this section, we evaluate our proposed certified defenses under scenarios of either transition- or
+trajectory-level poisoning (Section 3.1) for policy-level and action-level robustness (Section 3.2). To
+7Published as a conference paper at ICLR 2025
+facilitate these, we conducted evaluations using Farama Gymnasium (Towers et al., 2023) discrete
+Atari games Freeway and Breakout, as well as the continuous action space Mujoco game Half Chee-
+tah. We also employed the D4RL (Fu et al., 2020) dataset and the Opacus (Yousefpour et al., 2021)
+DP framework. Our environments were trained using DQN (Mnih et al., 2013), IQL (Kostrikov
+et al., 2021) and C51 (Bellemare et al., 2017), implemented with Convolutional Neural Networks
+(CNN) in PyTorch on a NVIDIA 80GB A100 GPU. Further results considering the robustness of
+these defenses to empirical attacks are presented within Appendix A.7.
+Our offline RL datasets consist of 2million transitions for each game, with corresponding trajectory
+counts of 976for Freeway, 3,648for Breakout, and 2,000for Half Cheetah. In all experiments, the
+sample rates qin the DP training algorithms were adjusted to achieve a batch size of 32, with varying
+noise multipliers σas detailed in the results. Uncertainties were estimated within a confidence
+interval suitable for δ= 0.001. For each game, the number of policy instances p, as described in
+Section 4.1, is set to 50. The number of estimations of expected cumulative reward mis set to 500,
+with10estimations per policy instance, as detailed in Section 4.2.
+5.1 A CTION -LEVEL ROBUSTNESS RESULTS
+Figure 1: Stability ratio against the tolerable poisoning threshold ¯rforaction-level robustness using
+DQN and C51 for the Freeway and Breakout environments under transition- or trajectory-level poi-
+soning attacks. Blue, Green and Red lines represent different noise levels σduring the randomized
+training process as σ={1,2,3}for Freeway and {1,1.5,2}for Breakout, while the yellow dashed
+line denotes COPA, which can only be calculated for trajectory-level poisoning.
+Environment Method NoiseAvg. Cumulative Reward Action-level Mean Radii
+DQN C51DQN C51
+Transition Trajectory Transition Trajectory
+FreewayProposed (RDP)0.0 20.1 21.3 N/A N/A N/A N/A
+1.0 16.9 16.1 128.1 32.6 111.6 22.1
+2.0 16.6 15.3 145.5 58.7 119.3 37.8
+3.0 16.0 15.1 160.0 102.4 134.5 49.7
+COPA N/A 16.4 16.4 N/A 10.1 N/A 9.7
+BreakoutProposed (RDP)0.0 385.4 389.3 N/A N/A N/A N/A
+1.0 366.6 369.0 3.4 3.2 4.0 3.9
+1.5 320.8 270.4 7.9 7.6 9.5 9.3
+2.0 268.4 102.7 17.7 16.9 22.0 21.7
+COPA N/A 325.7 330.1 N/A 6.6 N/A 6.3
+Table 1: Testing time average cumulative reward in a clean environment and the mean of maximum
+tolerable poisoning size rtof the action-level robustness.
+We will now evaluate action-level robustness across varying RL algorithms and environments for
+RDP, with additional ADP based experiments and statistics provided in Appendix A.6. This analysis
+considers the mean andmaximum value of rtacross a set of evaluated trajectories as well the
+8Published as a conference paper at ICLR 2025
+stability ratio (Wu et al., 2022). This latter metric represents the proportion of time steps in a
+trajectory where the maximum tolerable poisoning size rtof action-level robustness is maintained
+under a poisoning attack of size up to a given threshold ¯rfor a trajectory length Hby way of
+Stability Ratio =1
+HH−1X
+t=01[rt≥¯r]. (14)
+To interpret our results, it is important to emphasise that a higher stability ratio at larger thresholds
+signifies better certified robustness. Models trained with higher noise achieve stronger certified
+robustness, at the cost of clean performance decreasing in terms of the average cumulative rewards,
+as shown in Table 1. In concert with Figure 1 it is clear that DQN produces a consistently higher
+certifications than C51 in Freeway, while matching performance in Breakout. These differences
+arise from DQNs ability to adapt to noisey training process, allowing it to ameliorate the impact of
+these perturbations without a significant drop in performance. It is also important to note that the
+Freeway consistently shows better action-level robustness than Breakout, suggesting that Freeway
+supports more stable and robust policies.
+Given the effectively interchangeable action-level robustness of the variants as reported in
+COPA (Wu et al., 2022), our comparisons are constructed against the basic PARL variant in the
+same setting, with the number of partitions set to 50. For a fair comparison, the models trained at a
+noise level represented by the green line in each game achieve comparable performance to COPA in
+terms of Avg. Cumulative Reward, as shown in Table 1. Our technique’s maximum tolerable poi-
+soning size—indicated by the x-axis intersection in Figure 1—is approximately 5times larger than
+other approaches, which confirms that our approach produces stronger robustness in states where
+certain actions are highly preferable, typically during critical moments. Additionally, our method
+achieves a higher mean value of the tolerable poisoning size across all steps as shown in Table 1,
+demonstrating better certification for most states.
+5.2 P OLICY -LEVEL ROBUSTNESS RESULTS
+Figure 2: Policy-level robustness certifications, capturing the lower bound of the expected cumula-
+tive reward Jragainst poisoning size rfor Atari games. Solid and dashed lines represent RDP and
+ADP derived guarantees respectively, with colors indicating noise levels as per Figure 1.
+To assess policy-level robustness, we turn to the measure Jr(π), which directly reflects the policy-
+level robustness of the learned policy against a poisoning attack of size ¯r(as in Definition 3.3),
+with Figure 2 showing this for the discrete games Freeway and Breakout. We also consider the
+continuous game Half Cheetah as shown in Figure 3, where the benign training yielded an average
+cumulative reward of 96.47and randomized training with noise levels set at σ= 1.0,2.0, and
+3.0yielded average cumulative rewards of 90.5,87.0, and 83.4, respectively. The results can be
+compared from different aspects. In terms of the poisoning level, for the same policy certification
+Jr, the tolerable poisoning size rin transition-level certification is about 10times larger than in
+trajectory-level. Given that each trajectory consists of approximately 1,000transitions, the total
+9Published as a conference paper at ICLR 2025
+Figure 3: Policy-level robustness certification for the continuous action game Mujoco Half Cheetah,
+using RL algorithm IQL. The plot is formulated in the same way as Figure 2.
+number of transitions that can be altered in trajectory-level certification is actually higher than in
+transition-level. This aligns with the nature of the threat models: in trajectory-level poisoning, not
+all transition changes are assumed adversarial, whereas in transition-level poisoning, the adversary
+can more precisely target key transitions to minimize the number of modifications.
+In analyzing the influence of RL algorithms and certification methods, DQN consistently demon-
+strates higher robustness certification than C51, which is consistent with the analysis from the action-
+level certification. RDP’s tight quantification of privacy loss, particularly in handling iterative func-
+tion composition in deep networks, provides a significant advantage over ADP in all settings.
+Lastly, our approach accommodates more general RL settings, in that it can be applied to both
+discrete and continuous action spaces, as well as deterministic and stochastic environments, and
+significantly improves upon the performance of extant techniques, namely COPA. As COPA cer-
+tifies the cumulative reward for specific trajectories rather than the expected cumulative reward of
+the policy, our comparison with COPA is often implicit. The limited applicable scenarios of COPA
+stem from its reliance upon exhaustive tree search in certifying cumulative reward, which is funda-
+mentally incompatible with environments involving randomness or continuous action spaces, and
+limiting the trajectory length to 400in Freeway and 75in Breakout due to the exponential growth
+of the tree size, while the default trajectory lengths are 2,000and600, respectively. As a result, the
+maximum cumulative reward COPA can certify is restricted to 5in Freeway and 2in Breakout. By
+contrast, our approach has no such limitations regarding environment settings or trajectory length.
+Furthermore, for Freeway, COPA only allows 0.008% of trajectories in the training dataset to be
+poisoned while certifying less than a 50% performance drop, whereas our method achieves a much
+higher ratio of 7.17%. We observe a similar delta in relative performance within the Breakout games,
+where COPA’s ratio of 0.0075% is significantly smaller than 2.05% observed for our approach.
+6 C ONCLUSIONS
+This work explored how certified defenses against poisoning attacks can be both constructed and
+enhanced in offline RL. To do this, we introduced a novel framework that leverages Differential
+Privacy mechanisms to provide the first practical certified defense in a general offline RL setting.
+While past works have only considered theoretical robustness bounds or are limited to specific RL
+settings, our framework is able to offer both action-level stability and policy-level lower bounds
+with respect to the expected cumulative reward of the learned policy. Furthermore, our experiments
+across a wide range of RL environments and algorithms demonstrate robust certifications in practical
+applications, significantly outperforming other state-of-the-art defense frameworks.
+Our work suggests several potential directions for future research. First, developing a unified DP
+training algorithm that simultaneously supports both transition- and trajectory-level certified de-
+fenses could significantly enhance robustness. Additionally, defense performance may be further
+improved by designing a more sophisticated noise injection mechanism that adapts noise levels dy-
+namically, rather than uniform noise throughout the entire training process.
+10Published as a conference paper at ICLR 2025
+7 A CKNOWLEDGEMENTS
+This research was supported by The University of Melbourne’s Research Computing Services and
+the Petascale Campus Initiative. This work was also supported in part by the Australian Department
+of Defence through the Defence Science and Technology Group (DSTG). Sarah Erfani is in part
+supported by the Australian Research Council (ARC) Discovery Early Career Researcher Award
+(DECRA) DE220100680.
+REFERENCES
+Mart ´ın Abadi, Andy Chu, Ian Goodfellow, H. Brendan McMahan, Ilya Mironov, Kunal Tal-
+war, and Li Zhang. Deep Learning with Differential Privacy. Proceedings of the 2016 ACM
+SIGSAC Conference on Computer and Communications Security , pp. 308–318, October 2016.
+doi: 10.1145/2976749.2978318. URL http://arxiv.org/abs/1607.00133 . arXiv:
+1607.00133.
+Borja Balle, Maziar Gomrokchi, and Doina Precup. Differentially private policy evaluation. In
+International Conference on Machine Learning , pp. 2130–2138. PMLR, 2016.
+Borja Balle, Gilles Barthe, Marco Gaboardi, Justin Hsu, and Tetsuya Sato. Hypothesis Testing
+Interpretations and Renyi Differential Privacy. arXiv:1905.09982 [cs, stat] , October 2019. URL
+http://arxiv.org/abs/1905.09982 . arXiv: 1905.09982.
+Kiarash Banihashem, Adish Singla, and Goran Radanovic. Defense Against Reward Poisoning
+Attacks in Reinforcement Learning, June 2021. URL http://arxiv.org/abs/2102.
+05776 . arXiv:2102.05776 [cs].
+Marco Barreno, Blaine Nelson, Russell Sears, Anthony D Joseph, and J Doug Tygar. Can Machine
+Learning be Secure? In Proceedings of the 2006 ACM Symposium on Information, Computer and
+Communications Security , pp. 16–25, 2006.
+Marc G Bellemare, Will Dabney, and R ´emi Munos. A Distributional Perspective on Reinforcement
+Learning. In International Conference on Machine Learning , pp. 449–458. PMLR, 2017.
+Battista Biggio, Blaine Nelson, and Pavel Laskov. Poisoning Attacks against Support Vector Ma-
+chines. arXiv:1206.6389 [cs, stat] , March 2013. URL http://arxiv.org/abs/1206.
+6389 . arXiv: 1206.6389.
+Andrew Cullen, Paul Montague, Shijie Liu, Sarah Erfani, and Benjamin Rubinstein. Double Bubble,
+Toil and Trouble: Enhancing Certified Robustness Through Transitivity. Advances in Neural
+Information Processing Systems , 35:19099–19112, 2022.
+Andrew C. Cullen, Paul Montague, Shijie Liu, Sarah M. Erfani, and Benjamin I. P. Rubinstein. It’s
+Simplex! Disaggregating Measures to Improve Certified Robustness. In 2024 IEEE Symposium
+on Security and Privacy (SP) , pp. 2886–2900, 2024a. doi: 10.1109/SP54263.2024.00065.
+Andrew Craig Cullen, Shijie Liu, Paul Montague, Sarah Monazam Erfani, and Benjamin IP Ru-
+binstein. Et Tu Certifications: Robustness Certificates Yield Better Adversarial Examples. In
+International Conference on Machine Learning , 2024b.
+Christoph Dann, Tor Lattimore, and Emma Brunskill. Unifying pac and regret: Uniform pac bounds
+for episodic reinforcement learning. Advances in Neural Information Processing Systems , 30,
+2017.
+Ilias Diakonikolas, Gautam Kamath, Daniel Kane, Jerry Li, Ankur Moitra, and Alistair Stewart.
+Robust Estimators in High Dimensions without the Computational Intractability, March 2019.
+URL http://arxiv.org/abs/1604.06443 . arXiv:1604.06443 [cs, math, stat].
+Aryeh Dvoretzky, Jack Kiefer, and Jacob Wolfowitz. Asymptotic Minimax Character of the Sample
+Distribution Function and of the Classical Multinomial Estimator. The Annals of Mathematical
+Statistics , 27(3):642–669, 1956.
+11Published as a conference paper at ICLR 2025
+Cynthia Dwork, Frank McSherry, Kobbi Nissim, and Adam Smith. Calibrating Noise to Sensitivity
+in Private Data Analysis. In Theory of cryptography conference , pp. 265–284. Springer, 2006.
+Arik Friedman and Assaf Schuster. Data Mining with Differential Privacy. In Proceedings of the
+16th ACM SIGKDD international conference on Knowledge discovery and data mining , pp. 493–
+502, 2010.
+Justin Fu, Aviral Kumar, Ofir Nachum, George Tucker, and Sergey Levine. D4RL: Datasets for
+Deep Data-Driven Reinforcement Learning, 2020.
+Guido Fubini. Sugli integrali multipli. Rendiconti del Circolo Matematico di Palermo , 24(1):97–
+155, 1907. doi: 10.1007/BF03014329.
+Evrard Garcelon, Vianney Perchet, Ciara Pike-Burke, and Matteo Pirotta. Local Dif-
+ferential Privacy for Regret Minimization in Reinforcement Learning. In Advances
+in Neural Information Processing Systems , volume 34, pp. 10561–10573. Curran Asso-
+ciates, Inc., 2021. URL https://proceedings.neurips.cc/paper/2021/hash/
+580760fb5def6e2ca8eaf601236d5b08-Abstract.html .
+Quan Geng and Pramod Viswanath. The optimal noise-adding mechanism in differential privacy.
+IEEE Transactions on Information Theory , 62(2):925–951, 2015.
+Chen Gong, Zhou Yang, Yunpeng Bai, Junda He, Jieke Shi, Kecen Li, Arunesh Sinha, Bowen Xu,
+Xinwen Hou, David Lo, et al. Baffle: Hiding Backdoors in Offline Reinforcement Learning
+Datasets. In 2024 IEEE Symposium on Security and Privacy (SP) , pp. 2086–2104. IEEE, 2024.
+Sivakanth Gopi, Yin Tat Lee, and Lukas Wutschitz. Numerical composition of differential privacy.
+Advances in Neural Information Processing Systems , 34:11631–11642, 2021.
+Shangding Gu, Long Yang, Yali Du, Guang Chen, Florian Walter, Jun Wang, and Alois Knoll. A
+Review of Safe Reinforcement Learning: Methods, Theory and Applications, May 2024. URL
+http://arxiv.org/abs/2205.10330 . arXiv:2205.10330 [cs].
+Nico G ¨urtler, Sebastian Blaes, Pavel Kolev, Felix Widmaier, Manuel W ¨uthrich, Stefan Bauer, Bern-
+hard Sch ¨olkopf, and Georg Martius. Benchmarking Offline Reinforcement Learning on Real-
+Robot Hardware. arXiv preprint arXiv:2307.15690 , 2023.
+Jinyuan Jia, Xiaoyu Cao, and Neil Zhenqiang Gong. Intrinsic Certified Robustness of Bag-
+ging against Data Poisoning Attacks. arXiv:2008.04495 [cs] , December 2020. URL http:
+//arxiv.org/abs/2008.04495 . arXiv: 2008.04495.
+Alex Kendall, Jeffrey Hawke, David Janz, Przemyslaw Mazur, Daniele Reda, John-Mark Allen,
+Vinh-Dieu Lam, Alex Bewley, and Amar Shah. Learning to Drive in a Day. In 2019 international
+conference on robotics and automation (ICRA) , pp. 8248–8254. IEEE, 2019.
+Panagiota Kiourti, Kacper Wardega, Susmit Jha, and Wenchao Li. TrojDRL: Evaluation of Back-
+door Attacks on Deep Reinforcement Learning. In 2020 57th ACM/IEEE Design Automation
+Conference (DAC) , pp. 1–6, San Francisco, CA, USA, July 2020. IEEE. ISBN 978-1-72811-
+085-1. doi: 10.1109/DAC18072.2020.9218663. URL https://ieeexplore.ieee.org/
+document/9218663/ .
+Ilya Kostrikov, Ashvin Nair, and Sergey Levine. Offline Reinforcement Learning with Implicit
+Q-learning. arXiv preprint arXiv:2110.06169 , 2021.
+Ram Shankar Siva Kumar, Magnus Nystr ¨om, John Lambert, Andrew Marshall, Mario Goertzel,
+Andi Comissoneru, Matt Swann, and Sharon Xia. Adversarial Machine Learning-Industry Per-
+spectives. In 2020 IEEE security and privacy workshops (SPW) , pp. 69–75. IEEE, 2020.
+Sascha Lange, Thomas Gabel, and Martin Riedmiller. Batch Reinforcement Learning. In Reinforce-
+ment learning: State-of-the-art , pp. 45–73. Springer, 2012.
+Mathias Lecuyer, Vaggelis Atlidakis, Roxana Geambasu, Daniel Hsu, and Suman Jana. Certified
+Robustness to Adversarial Examples with Differential Privacy. arXiv:1802.03471 [cs, stat] , May
+2019. URL http://arxiv.org/abs/1802.03471 . arXiv: 1802.03471.
+12Published as a conference paper at ICLR 2025
+Alexander Levine and Soheil Feizi. Deep Partition Aggregation: Provable Defense against General
+Poisoning Attacks. arXiv:2006.14768 [cs, stat] , March 2021. URL http://arxiv.org/
+abs/2006.14768 . arXiv: 2006.14768.
+Chizhou Liu, Yunzhen Feng, Ranran Wang, and Bin Dong. Enhancing Certified Robustness via
+Smoothed Weighted Ensembling. arXiv:2005.09363 [cs, stat] , February 2021. URL http:
+//arxiv.org/abs/2005.09363 . arXiv: 2005.09363.
+Shijie Liu, Andrew C Cullen, Paul Montague, Sarah M Erfani, and Benjamin IP Rubinstein. Enhanc-
+ing the Antidote: Improved Pointwise Certifications Against Poisoning Attacks. In Proceedings
+of the AAAI Conference on Artificial Intelligence , volume 37, pp. 8861–8869, 2023.
+Thodoris Lykouris, Max Simchowitz, Aleksandrs Slivkins, and Wen Sun. Corruption-robust Explo-
+ration in Episodic Reinforcement Learning, October 2023. URL http://arxiv.org/abs/
+1911.08689 . arXiv:1911.08689 [cs, stat].
+Yuzhe Ma, Xiaojin Zhu, and Justin Hsu. Data Poisoning against Differentially-Private Learners:
+Attacks and Defenses. arXiv:1903.09860 [cs] , July 2019. URL http://arxiv.org/abs/
+1903.09860 . arXiv: 1903.09860.
+H Brendan McMahan, Daniel Ramage, Kunal Talwar, and Li Zhang. Learning Differentially Private
+Recurrent Language Models. arXiv preprint arXiv:1710.06963 , 2017.
+Ilya Mironov. Renyi Differential Privacy. 2017 IEEE 30th Computer Security Foundations Sym-
+posium (CSF) , pp. 263–275, August 2017. doi: 10.1109/CSF.2017.11. URL http://arxiv.
+org/abs/1702.07476 . arXiv: 1702.07476.
+Ilya Mironov, Kunal Talwar, and Li Zhang. Renyi Differential Privacy of the Sampled Gaussian
+Mechanism. arXiv:1908.10530 [cs, stat] , August 2019. URL http://arxiv.org/abs/
+1908.10530 . arXiv: 1908.10530.
+V olodymyr Mnih. Asynchronous Methods for Deep Reinforcement Learning. arXiv preprint
+arXiv:1602.01783 , 2016.
+V olodymyr Mnih, Koray Kavukcuoglu, David Silver, Alex Graves, Ioannis Antonoglou, Daan Wier-
+stra, and Martin Riedmiller. Playing Atari with Deep Reinforcement Learning, December 2013.
+URL http://arxiv.org/abs/1312.5602 . arXiv:1312.5602 [cs].
+Yuriy Nevmyvaka, Yi Feng, and Michael Kearns. Reinforcement Learning for Optimized Trade
+Execution. In International Conference on Machine Learning , pp. 673–680, 2006.
+Andi Nika, Adish Singla, and Goran Radanovic. Online Defense Strategies for Reinforcement
+Learning Against Adaptive Reward Poisoning. In 26th International Conference on Artificial
+Intelligence and Statistics , pp. 335–358. PMRL, 2023.
+Hajime Ono and Tsubasa Takahashi. Locally private distributed reinforcement learning. arXiv
+preprint arXiv:2001.11718 , 2020.
+Yunpeng Pan, Ching-An Cheng, Kamil Saigol, Keuntaek Lee, Xinyan Yan, Evangelos Theodorou,
+and Byron Boots. Agile Autonomous Driving Using End-to-end Deep Imitation Learning. arXiv
+preprint arXiv:1709.07174 , 2017.
+Neehar Peri, Neal Gupta, W Ronny Huang, Liam Fowl, Chen Zhu, Soheil Feizi, Tom Goldstein,
+and John P Dickerson. Deep K-NN Defense Against Clean-label Data Poisoning Attacks. In
+Computer Vision–ECCV 2020 Workshops: Glasgow, UK, August 23–28, 2020, Proceedings, Part
+I 16, pp. 55–70. Springer, 2020.
+Rafael Figueiredo Prudencio, Marcos R. O. A. Maximo, and Esther Luna Colombini. A Survey
+on Offline Reinforcement Learning: Taxonomy, Review, and Open Problems. IEEE Trans-
+actions on Neural Networks and Learning Systems , pp. 1–0, 2024. ISSN 2162-237X, 2162-
+2388. doi: 10.1109/TNNLS.2023.3250269. URL https://ieeexplore.ieee.org/
+document/10078377/ .
+13Published as a conference paper at ICLR 2025
+Hadi Salman, Jerry Li, Ilya Razenshteyn, Pengchuan Zhang, Huan Zhang, Sebastien Bubeck, and
+Greg Yang. Provably Robust Deep Learning via Adversarially Trained Smoothed Classifiers.
+Advances in neural information processing systems , 32, 2019.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal Policy
+Optimization Algorithms. arXiv preprint arXiv:1707.06347 , 2017.
+David Silver, Julian Schrittwieser, Karen Simonyan, Ioannis Antonoglou, Aja Huang, Arthur Guez,
+Thomas Hubert, Lucas Baker, Matthew Lai, Adrian Bolton, et al. Mastering the Game of Go
+Without Human Knowledge. nature , 550(7676):354–359, 2017.
+Richard S Sutton, David McAllester, Satinder Singh, and Yishay Mansour. Policy Gradient Meth-
+ods for Reinforcement Learning with Function Approximation. Advances in neural information
+processing systems , 12, 1999.
+Mark Towers, Jordan K. Terry, Ariel Kwiatkowski, John U. Balis, Gianluca de Cola, Tristan Deleu,
+Manuel Goul ˜ao, Andreas Kallinteris, Arjun KG, Markus Krimmel, Rodrigo Perez-Vicente, An-
+drea Pierr ´e, Sander Schulhoff, Jun Jet Tai, Andrew Tan Jin Shen, and Omar G. Younis. Gymna-
+sium, March 2023. URL https://zenodo.org/record/8127025 .
+Giuseppe Vietri, Borja Balle, Akshay Krishnamurthy, and Steven Wu. Private reinforcement learn-
+ing with pac and regret guarantees. In International Conference on Machine Learning , pp. 9754–
+9764. PMLR, 2020.
+Lu Wang, Wei Zhang, Xiaofeng He, and Hongyuan Zha. Supervised Reinforcement Learning with
+Recurrent Neural Network for Dynamic Treatment Recommendation. In Proceedings of the 24th
+ACM SIGKDD international conference on knowledge discovery & data mining , pp. 2447–2456,
+2018.
+Yue Wang, Esha Sarkar, Wenqing Li, Michail Maniatakos, and Saif Eddin Jabari. Stop-and-Go:
+Exploring Backdoor Attacks on Deep Reinforcement Learning-based Traffic Congestion Control
+Systems. IEEE Transactions on Information Forensics and Security , 16:4772–4787, 2021. ISSN
+1556-6013, 1556-6021. doi: 10.1109/TIFS.2021.3114024. URL http://arxiv.org/abs/
+2003.07859 . arXiv:2003.07859 [physics, stat].
+Fan Wu, Linyi Li, Chejian Xu, Huan Zhang, Bhavya Kailkhura, Krishnaram Kenthapadi, Ding
+Zhao, and Bo Li. COPA: Certifying Robust Policies for Offline Reinforcement Learning
+against Poisoning Attacks, March 2022. URL http://arxiv.org/abs/2203.08398 .
+arXiv:2203.08398 [cs].
+Young Wu, Jeremy McMahan, Xiaojin Zhu, and Qiaomin Xie. Reward Poisoning Attacks on Of-
+fline Multi-agent Reinforcement Learning. In Proceedings of the aaai conference on artificial
+intelligence , volume 37, pp. 10426–10434, 2023.
+Rui Yang, Han Zhong, Jiawei Xu, Amy Zhang, Chongjie Zhang, Lei Han, and Tong Zhang. To-
+wards Robust Offline Reinforcement Learning under Diverse Data Corruption, March 2024. URL
+http://arxiv.org/abs/2310.12955 . arXiv:2310.12955 [cs].
+Chenlu Ye, Rui Yang, Quanquan Gu, and Tong Zhang. Corruption-Robust Of-
+fline Reinforcement Learning with General Function Approximation. Advances in
+Neural Information Processing Systems , 36:36208–36221, December 2023. URL
+https://proceedings.neurips.cc/paper_files/paper/2023/hash/
+71b52a5b3fe2e9303433a174b60e160d-Abstract-Conference.html .
+Ashkan Yousefpour, Igor Shilov, Alexandre Sablayrolles, Davide Testuggine, Karthik Prasad, Mani
+Malek, John Nguyen, Sayan Ghosh, Akash Bharadwaj, Jessica Zhao, Graham Cormode, and
+Ilya Mironov. Opacus: User-friendly Differential Privacy Library in PyTorch. arXiv preprint
+arXiv:2109.12298 , 2021.
+Chao Yu, Jiming Liu, Shamim Nemati, and Guosheng Yin. Reinforcement Learning in Healthcare:
+A survey. ACM Computing Surveys (CSUR) , 55(1):1–36, 2021.
+14Published as a conference paper at ICLR 2025
+Xuezhou Zhang, Yiding Chen, Jerry Zhu, and Wen Sun. Corruption-Robust Offline Reinforcement
+Learning, June 2021a. URL http://arxiv.org/abs/2106.06630 . arXiv:2106.06630
+[cs].
+Xuezhou Zhang, Yiding Chen, Xiaojin Zhu, and Wen Sun. Robust Policy Gradient against
+Strong Data Corruption, June 2021b. URL http://arxiv.org/abs/2102.05800 .
+arXiv:2102.05800 [cs].
+15Published as a conference paper at ICLR 2025
+A A PPENDIX
+A.1 ADP AND RDP D EFINITIONS
+Definition A.1 (Approximate-DP) .A randomised function Mis said to be (ϵ, δ)-Approximate DP
+(ADP) if for all datasets D1andD2for which D2∈ B(D1,1), and for all measurable output sets
+S⊆Range( M):
+Pr[M(D1)∈S]≤eϵPr[M(D2)∈S] +δ , (15)
+where ϵ >0andδ∈[0,1)are chosen parameters.
+ADP with the privacy guarantee as expressed in Equation (15) is the most commonly used format
+in DP research. Smaller values of the privacy budget ϵrestrict the (multiplicative) influence of
+a participant joining dataset D2to form D1, thereby limiting the probability of any subsequent
+privacy breach. The confidence parameter δrelaxes this guarantee by allowing for the possibility
+that no bound is provided on privacy loss in the case of low-probability events.
+To bound the residual risk from ADP, R ´enyi-DP (RDP) was introduced by Mironov (2017). R ´enyi-
+DP provide tighter quantification of privacy through sequences of function composition, as required
+when iteratively training a deep net on sensitive data, which leads to improved certifications in
+practice.
+Definition A.2 (R´enyi-DP) .A randomised function Mpreserves (α, ϵ)-R´enyi-DP , with α >1, ϵ >
+0, if for all datasets D1andD2∈ B(D1,1):
+Dα(M(D1)∥M(D2))≤ε , (16)
+where Dαrepresents the R ´enyi divergence of finite order α̸= 1between two distributions PandQ
+defined over the same probability space Xwith densities pandqas
+Dα(P∥Q)≜1
+α−1lnZ
+Xq(x)p(x)
+q(x)α
+dx . (17)
+The generalization to Definition 3.5 incorporates group privacy (Dwork et al., 2006) to extend DP
+to adjacent datasets to pairs datasets that differ in up to rdata points B(D1, r). The ADP’s function
+family Kis derived directly from the Definition A.1, while the RDP’s family is obtained by applying
+H¨older’s inequality to the integral of the density function in the R ´enyi divergence (Mironov, 2017).
+A.2 DP T RAINING ALGORITHMS
+Several works have extended differential privacy to RL by developing privacy-preserving algorithms
+that balance the trade-off between model performance and privacy guarantees. To tackle the distinct
+challenges in RL, such as the sequential dependency, multi-sourced data, notable contributions have
+been made, including techniques for regret minimization RL with privacy guarantee (Vietri et al.,
+2020; Dann et al., 2017; Garcelon et al., 2021), off-policy evaluation (Balle et al., 2016), and distri-
+butional RL (Ono & Takahashi, 2020).
+The proposed methods require the training algorithm Mto preserve the DP guarantee of its output
+policy πregarding the training dataset D. Depending on the DP training mechanisms, the trained
+private policy in the context of offline RL can achieve either transition- or trajectory-level DP guar-
+antees, meaning the Bused in the aforementioned DP definitions can be BtraorBtrjrespectively.
+Transition-level DP Training Method SGM. While numerous differential privacy (DP) mecha-
+nisms have been proposed and extensively studied in machine learning (Abadi et al., 2016; Mironov
+et al., 2019), most rely on adding noise directly to the training samples. Instead, the Sampled Gaus-
+sian Mechanism (SGM) (Mironov et al., 2019) introduces randomness through both noise injection
+and sub-sampling, providing a better privacy cost. In SGM, each element of the training batch is
+sampled without replacement with uniform probability qfrom the training dataset. Additionally,
+Gaussian noise is added to the gradients during each weight update step. The training algorithm
+is illustrated in Algorithm 1 When applied to a model M, SGM preserves (α, ϵ)-RDP, where ϵis
+determined by the parameters (α,M, q, σ). This RDP guarantee can be further transformed into
+(ϵ, δ)-ADP using the conversion method described by Balle et al. (2019).
+16Published as a conference paper at ICLR 2025
+Algorithm 1 Sampled Gaussian Mechanism (SGM) for a Model Musing Dataset D
+Require: Dataset Dwithnsamples, sampling ratio q, noise multiplier σ, number of iterations T,
+learning rate η
+Ensure: Private model M
+1:Initialize model parameters θ0
+2:fort= 1,2, . . . , T do
+3: Sample a mini-batch Bt⊆Dby selecting each element of Dwith probability qwithout
+replacement
+4: Compute gradients ∇L(θt−1;Bt)with respect to the mini-batch
+5: Clip gradients: ¯∇L=∇L
+max(1 ,∥∇L∥
+C)where Cis the clipping threshold
+6: Add Gaussian noise: ˜∇L=¯∇L+N(0, σ2C2I)
+7: Update model parameters: θt=θt−1−η˜∇L
+8:end for
+9:return Differentially private model Mwith parameters θT
+Trajectory-level DP Training Method DP-FEDA VG. As demonstrated in the SGM, clipping
+per-sample gradients makes it unsuitable for trajectory-level DP, where the privacy cost needs to
+be accounted for on a per-trajectory basis. To address this, we utilize DP-FEDA VG (McMahan
+et al., 2017), initially designed for client-level privacy in federated learning, which can be adapted
+to scenarios where training data is naturally segmented, such as trajectory data in offline RL. The
+core idea of DP-FEDA VG is as follows: at each iteration t, a subset Btof trajectories is sampled
+from the dataset Dwith probability qwithout replacement. A single gradient ∇L(θt−1;τt)is then
+computed and clipped with constant Cfor each trajectory. An unbiased estimator of the average
+gradient of the subset is then calculated, with sensitivity bounded by the Cdivided by the batch
+size. Finally, the Gaussian mechanism is applied with noise magnitude σ, and the model is updated
+using the noisy gradient. The details of the training algorithm is shown in Algorithm 2.
+Algorithm 2 Model Training with DP-FEDA VG
+Require: Dataset D, sampling ratio q∈(0,1), noise multiplier σ, clipping norm C, local epochs
+E, batch size B, learning rate η
+Ensure: Private model M
+1:Initialize model parameters θ0
+2:foreach iteration t∈[0, T−1]do
+3: Ut←(sample with replacement trajectories from Dwith probability q)
+4: foreach trajectory τk∈Utdo
+5: Clone current model θstart←θt
+6: foreach local epoch i∈[1, E]do
+7: B ← (split τ’s data into size Bbatches)
+8: foreach batch b∈ B do
+9: θ←θ−η∇L(θ;b)
+10: θ←θstart+PerLayerClip (θ−θstart;C)
+11: end for
+12: end for
+13: ∆clipped
+t,k←θ−θstart
+14: end for
+15: ∆avg
+t←P
+k∈Ut∆clipped
+t,k
+qK
+16: ˜∆avg
+t←∆avg
+t+N
+0,
+σC
+qK2
+17: θt+1←θt+˜∆avg
+t
+18:end for
+In addition to the DP training algorithms discussed above, it is worth highlighting the existence of
+more advanced DP algorithms capable of offering tighter privacy guarantees, enhanced computa-
+tional efficiency, or optimality analysis (Gopi et al., 2021; Geng & Viswanath, 2015). These ad-
+vancements enable more precise privacy bounds and contribute to further reinforcing the robustness
+17Published as a conference paper at ICLR 2025
+of the certification for our proposed defense mechanism. However, it is crucial to emphasize that the
+primary focus of our work is on establishing a general framework for integrating DP into certified
+defenses for offline RL. This framework is designed to be adaptable, allowing for the incorporation
+of more advanced DP mechanisms in future developments.
+A.3 P ROOF OF THE EXPECTED OUTCOMES GUARANTEE
+Lemma A.1 (Expected Outcomes Guarantee for ADP and RDP) .Suppose a randomized function
+M, with bounded output [0, b], b∈R+, satisfies (K, r)-outcomes guarantee. Then for any ˜D∈
+B(D, r), ifKdenotes the function family of ADP Kϵ,δ, the expected value of its outputs satisfies:
+e−ϵ(E[M(D)]−bδ)≤E[M(˜D)]≤eϵE[M(D)] +bδ , (18)
+ifKdenotes the function family of RDP Kϵ,α, the expected value of its outputs satisfies:
+e−ϵ(b−1/αE[M(D)])α
+α−1≤E[M(˜D)]≤b1/α(eϵE[M(D)])(α−1)/α, (19)
+where the expectation is taken over the randomness in M.
+Proof. The expected value can be obtained by integrating over the right-tail distribution function of
+the probabilities in Equation (1) by Fubini’s Theorem (Fubini, 1907) as
+E[M(˜D)] =Zb
+0Pr[M(˜D)> t]dt . (20)
+In the case of ADP, for any K∈ Kϵ,δthat parameterized by ϵ, δ, we have
+E[M(˜D)]≤Zb
+0eϵPr[M(D)> t] +δ dt=eϵE[M(D)] +bδ . (21)
+In the case of RDP, for any K∈ Kϵ,αthat parameterized by ϵ, α, we have
+E[M(˜D)]≤Zb
+0(eϵPr[M(D)> t])(α−1)/αdt . (22)
+Recall H ¨older’s Inequality, which states that for real-valued functions fandg, and real p, q > 1,
+such that 1/p+ 1/q= 1,
+∥fg∥1≤ ∥f∥p∥g∥q. (23)
+By H ¨older’s Inequality setting p=αandq=α/(α−1),f(t) = 1 ,g(t) = Pr [ M(D)> t](α−1)/α,
+allows for us to state that
+E(M(˜D))≤eϵ(α−1)/α(Zb
+01αdt)1/α(Zb
+0Pr[M(D)> t]dt)(α−1)/α
+=eϵ(α−1)/αb1/α(E(M(D)))(α−1)/α
+=b1/α(eϵE(M(D)))(α−1)/α.(24)
+The alternative inequality follows by both Kbeing strictly monotonic and symmetry in the roles of
+D1,D2for DP.
+A.4 P OLICY -LEVEL ROBUSTNESS CERTIFICATION FOR REAL-VALUED REWARD
+To certify policy-level robustness in real-valued cumulative reward, we first extend the Lemma 4.1
+to the expected value in real number.
+Lemma A.2 (Real-valued Expected Outcomes Guarantee for ADP and RDP) .Suppose a random-
+ized function M, with bounded output [a, b], a∈R−, b∈R+, satisfies (K, r)-outcomes guarantee.
+Then for any ˜D∈ B(D, r), ifKdenotes the function family of ADP Kϵ,δ, the expected value of its
+outputs satisfies:
+E[M(˜D)]≥e−ϵ(E[M(D)+]−bδ)−(eϵE[M(D)−]−aδ) (25)
+E[M(˜D)]≤eϵE[M(D)+] +bδ−e−ϵ(E[M(D)−] +aδ) (26)
+18Published as a conference paper at ICLR 2025
+ifKdenotes the function family of RDP Kϵ,α, the expected value of its outputs satisfies:
+E[M(˜D)]≥e−ϵ(b−1/αE[M(D)+])α
+α−1−(−a)1/α(eϵE[M(D)−])(α−1)/α(27)
+E[M(˜D)]≤b1/α(eϵE[M(D)+])(α−1)/α−e−ϵ((−a)−1/αE[M(D)−])α
+α−1 (28)
+where the expectation is taken over the randomness in M,E[M(D)+]represents the expected value
+of all non-negative M(D),E[M(D)−]represents the expected value of all negative M(D).
+Proof. We extend the Fubini’s Theorem from non-negative values to real values as:
+E[X] =Z∞
+0Pr[X≥t]dt−Z0
+−∞Pr[X≤t]dt (29)
+which can be derived as
+LetX+:=X ifX≥0
+0 otherwise
+X−:=
+−X ifX < 0
+0 otherwise(30)
+Then, we have
+X=X+−X−→E[X] =E[X+]−E[X−]
+E[X+] =Z∞
+0Pr[X+≥t]dt=Z∞
+0Pr[X≥t]dt
+E[X−] =Z∞
+0Pr[X−≥t]dt=Z∞
+0Pr[X≤ −t]dt=Z0
+−∞Pr[X≤t]dt(31)
+The expected value E[M(˜D)]in range [a, b]withMsatisfies (K, r)-outcomes guarantee, can be
+written as
+E[M(˜D)] =Zb
+0Pr[M(˜D)≥t]dt−Z0
+aPr[M(˜D]≤u)du
+=Zb
+0Pr[M(˜D]∈T)dt−Z0
+aPr[M(˜D]∈U)du
+≥Zb
+0K−1(Pr[M(D)∈T])dt−Z0
+aK(Pr[M(D)∈U])du(32)
+where K∈ K . For the cases of ADP and RDP, replace the Kwith corresponding function as
+outlined in Definition 3.5.
+Then the Theorem 4.2 can be extended to the case of real-valued expected cumulative reward as,
+Theorem A.3 (Policy-level robustness by outcomes guarantee in real-value range) .Consider an RL
+environment with bounded cumulative reward in the range [a, b], a∈R−, b∈R+, an offline RL
+training dataset D, and a learning algorithm Mthat takes the training dataset Dand outputs the
+randomized policy π=M(D). IfMpreserves a (K, r)-outcomes guarantee in ADP , then for each
+K∈ K ϵ,δwith corresponding ϵ, δsatisfies the policy-level robustness of size rfor any poisoned
+dataset ˜D∈ B(D, r)as
+J(˜π)≥e−ϵ(J(π)+−bδ)−(eϵJ(π)−−aδ). (33)
+IfMpreserves a (K, r)-outcomes guarantee in RDP , then for each K∈ K ϵ,αwith corresponding
+ϵ, αsatisfies the policy-level robustness of size ras
+J(˜π)≥e−ϵ(b−1/αJ(π)+)α
+α−1−(−a)1/α(eϵJ(π)−)(α−1)/α, (34)
+where J(π)+denotes the expected value of all non-negative cumulative rewards, J(π)−denotes the
+expected value of all negative cumulative rewards.
+Proof. The proof is similar to the proof of Theorem 4.2, instead replace the usage of Lemma 4.1 to
+Lemma A.2 for the real-valued expected outcomes guarantee.
+19Published as a conference paper at ICLR 2025
+A.5 A DDITIONAL DETAILS OF ACTION -LEVEL CERTIFICATION
+Here we provide additional details of the action-level certification process. As discussed in Sec-
+tion 4.3, the inferred scores are estimated by the sampling from the policy instances (ˆπ1,···,ˆπp).
+Due to uncertainty, we obtain the upper and lower bounds of the inferred score with a confidence
+interval of at least 1−αvia the S IMUEM method (Jia et al., 2020) based on the Clopper-Pearson
+method. Specifically, the S IMUEM directly estimates the upper and lower bounds of the inferred
+scores IAl(st, π) = Pr[arg max aiQπ(st, ai) =Al]based on the frequencies (ni,···, nL)of each
+Alproduced by the policy instances as
+IAl=Betaα
+L;nl, p−nl+ 1
+,
+IAi=Beta
+1−α
+L;ni+ 1, p−ni
+,∀i̸=l .
+To determine the maximum tolerable poisoning size rtfor a given state st, a binary search is per-
+formed over the domain of K. As described in Section 3.3 and Appendix A.2, Krepresents the set
+of(δ, ϵ)or(α, ϵ)pairs that satisfy the privacy guarantees of the respective DP training algorithm.
+The binary search operates within a predefined range, such as (0,500) , aiming to identify the largest
+radius rtthat meets the condition specified in Theorem 4.4, provided there exist K1andK2within
+the domain of K.
+A.6 A DDITIONAL RESULTS OF ACTION -LEVEL CERTIFICATION
+The Figure 4 and Table 1 show additional experimental results of action-level robustness certification
+and training statics.
+Figure 4: Stability ratio versus the tolerable poisoning threshold ¯rfor action-level robustness with
+ADP. Results are presented for two Atari games, Freeway and Breakout with RL algorithms DQN
+and C51 under transition- and trajectory-level poisoning. The blue, green, and red lines represent
+our proposed certified defense.
+A.7 A DDITIONAL RESULTS AGAINST EMPIRICAL ATTACKS
+To assess the performance of certifications relative to trajectory-level attacks, we implemented two
+attacks against HalfCheetah when defended using RDP at σ= 2.0, with the results presented below.
+These attacks include one in which the rewards in a subset of trajectories are replaced with r′
+i∼
+Uniform [−1,1](Random Reward); and one where they are replaced by r′
+i=−ri(Adversarial
+Reward), following the methodology of Ye et al. (2023). For each attack, our experiments were
+conducted over 150runs to provide the estimated expected cumulative reward (Est. ECR) with 95%
+confidence intervals, and the minimum cumulative reward among all the runs. The corresponding
+policy-level robustness certification (certified lower bound on ECR) Jrfor each poisoning size 10%
+(r= 200 ) and 20% (r= 400 ) are shown as the same as in Figure 3 in the paper.
+20Published as a conference paper at ICLR 2025
+Environment Method NoiseAction-level Max Radii
+DQN C51
+Transition Trajectory Transition Trajectory
+FreewayProposed (RDP)0.0 N/A N/A N/A N/A
+1.0 159 37 144 29
+2.0 186 66 186 59
+3.0 200 136 200 83
+COPA N/A N/A 13 N/A 10
+BreakoutProposed (RDP)0.0 N/A N/A N/A N/A
+1.0 99 98 100 100
+1.5 99 99 100 100
+2.0 118 117 120 120
+COPA N/A N/A 25 N/A 24
+Table 2: Our proposed method with RDP. The maximum value of maximum tolerable poisoning
+sizertof the action-level robustness for the evaluated environments, certified methods, noise levels,
+and RL algorithms.
+Environment Method NoiseAction-level Mean Radii
+DQN C51
+Transition Trajectory Transition Trajectory
+Freeway Proposed (ADP)0.0 N/A N/A N/A N/A
+1.0 0.3 0.3 0.0 0.0
+2.0 18.0 0.7 11.3 1.7
+3.0 20.5 20.0 9.6 2.1
+Breakout Proposed (ADP)0.0 N/A N/A N/A N/A
+1.0 0.1 0.07 0.1 0.04
+1.5 0.09 0.05 0.1 0.03
+2.0 0.18 0.08 0.3 0.10
+Table 3: Our proposed method with ADP. The mean value of maximum tolerable poisoning size rt
+of the action-level robustness for the evaluated environments, certified methods, noise levels, and
+RL algorithms.
+Environment Method NoiseAction-level Max Radii
+DQN C51
+Transition Trajectory Transition Trajectory
+Freeway Proposed (ADP)0.0 N/A N/A N/A N/A
+1.0 1 1 0 0
+2.0 23 3 18 7
+3.0 28 28 16 16
+Breakout Proposed (ADP)0.0 N/A N/A N/A N/A
+1.0 10 4 11 5
+1.5 10 4 11 5
+2.0 10 4 11 5
+Table 4: Our proposed method with ADP. The max value of maximum tolerable poisoning size rtof
+the action-level robustness for the evaluated environments, certified methods, noise levels, and RL
+algorithms.
+The results demonstrate that the empirical performance of our certified defense significantly exceeds
+the certified lower bound. This observation aligns with the theoretical framework, which defines the
+certified lower bound as a guarantee for the worst-case scenario, and it provides a conservative
+measurement of the robustness against attack.
+Attack (Trajectory-level) Poisoning Proportion Est. ECR Min Cumulative Reward Certified Lower Bound on ECR ( Jr)
+Random Reward 10% 79.73 ± 0.44 76.52 48.76
+Random Reward 20% 75.94 ± 0.74 71.96 23.17
+Adversarial Reward 10% 68.49 ± 0.93 61.33 48.76
+Adversarial Reward 20% 60.97 ± 0.58 56.39 23.17
+Table 5: Trajectory-level defence with RDP and noise σ= 2.0against empirical attacks in the game
+Halfcheetha.
+21

@@ -1,0 +1,665 @@
+arXiv:2505.21288v1  [cs.LG]  27 May 2025GSAT: Graph Structure Attention Networks
+Farshad Noravesh1, Reza Haﬀari2, Layki Soon3, Arghya Pal4
+1Monash University, Malaysia Farshad.Noravesh@monash.edu
+2Monash University, Australia Gholamreza.Haffari@monash.edu
+3Monash University, Malaysia soon.layki@monash.edu
+4Monash University, Malaysia arghya.pal@monash.edu
+Abstract. Graph Neural Networks (GNNs) have emerged as a power-
+ful tool for processing data represented in graph structure s, achieving re-
+markable success across a wide range of applications. Howev er, to further
+improve the performance on graph classiﬁcation benchmarks , structural
+representation of each node that encodes rich local topolog ical informa-
+tion in the neighbourhood of nodes is an important type of fea ture that
+is often overlooked in the modeling. The consequence of negl ecting the
+structural information has resulted high number of layers t o connect mes-
+sages from distant nodes which by itself produces other prob lems such
+as oversmoothing. In the present paper, we leverage these st ructural in-
+formation that are modeled by anonymous random walks (ARWs) and
+introduce graph structure attention network (GSAT) which i s a gen-
+eralization of graph attention network(GAT) to integrate t he original
+attribute and the structural representation to enforce the model to auto-
+matically ﬁnd patterns for attending to diﬀerent edges in th e node neigh-
+bourhood to enrich graph representation. Our experiments s how GSAT
+slightly improves SOTA on some graph classiﬁcation benchma rks.
+Keywords: graph attention networks · anonymous random walk · struc-
+tural information · graph classiﬁcation
+1 Introduction
+In graph neural networks (GNNs), message passing is a fundam ental mechanism
+for aggregating information from neighboring nodes, enabl ing eﬀective learning
+on graph-structured data. However, traditional message-p assing schemes often
+suﬀer from limitations such as oversmoothing and limited re ceptive ﬁelds [23].
+Combining random walk (RW) techniques with message passing oﬀers a powerful
+approach to enhance GNN performance by capturing long-rang e dependencies
+while preserving local structural information [2]. RW enab le nodes to sample
+diverse neighborhoods beyond immediate neighbors, facili tating more expressive
+feature propagation [14].
+Structural embedding is essential in message passing for GN Ns because it
+provides a way to encode the topological properties of nodes within the graph.
+In standard message-passing frameworks, a node aggregates information from2 Farshad Noravesh1, Reza Haﬀari2, Layki Soon3, Arghya Pal4
+its neighbors to update its representation. However, witho ut structural embed-
+dings, this process may fail to capture higher-order connec tivity patterns, leading
+to suboptimal representations, especially in graphs with c omplex structures or
+heterophily [34] . Structural embeddings, such as position al or walk-based em-
+beddings, encode information about a node’s role and positi on within the graph,
+enhancing the expressiveness of message passing. This allo ws GNNs to generalize
+better across diﬀerent graph structures and improve perfor mance in tasks like
+graph classiﬁcation, node classiﬁcation and link predicti on. The present work is
+only focused on graph classiﬁcation. The closest approach t o our work for com-
+bining random walk(RW) and message passing is [2] which aggr egates the RW
+embeddings and sends messages from these aggregated embedd ings and ﬁnally
+updates the node representation. We take a diﬀerent approac h and generalize
+the graph attention to enforce the graph to attend to diﬀeren t structural pat-
+terns of neighbour nodes. Moreover, our approach uses a prep rocessing based on
+Word2Vec training that provides the embedding of ARWs.
+In Graph Convolutional Networks (GCN) [17], the eﬀect of wal k length(Hops)
+is primarily tied to the receptive ﬁeld of nodes. A longer wal k length allows in-
+formation to be aggregated from farther nodes, eﬀectively i ncreasing the neigh-
+borhood size considered during message passing. However, d ue to the inherent
+smoothing property of GCN, excessively long walks(Hops) th rough multiple lay-
+ers may lead to over-smoothing [23], where node representat ions become indis-
+tinguishable. This eﬀect is especially pronounced in homop hilic graphs, where
+nodes of the same class are closely connected. In contrast, s horter walks restrict
+the receptive ﬁeld, limiting the model’s ability to capture long-range dependen-
+cies but reducing the risk of over-smoothing. Thus, in GCNs, tuning the walk
+length is crucial to balance locality and over-smoothing eﬀ ects.
+In graph attention network(GAT) [30], walk length inﬂuence s the adaptive
+weighting of neighbors through the attention mechanism. Un like GCN, which
+uniformly aggregates features, GAT assigns diﬀerent impor tance to nodes in the
+neighborhood, mitigating the over-smoothing problem to so me extent. Longer
+walks in GAT allow the model to capture more distant relation ships, but at-
+tention scores decay as the distance increases, reducing th eir impact. Shorter
+walks, on the other hand, focus on local node interactions, l everaging the at-
+tention mechanism to reﬁne feature aggregation within a lim ited neighborhood.
+While GAT is generally more robust to over-smoothing than GC N, excessive
+walk lengths can still introduce noise and increase computa tional complexity.
+Therefore, ﬁnding an optimal walk length remains essential for eﬀectively utiliz-
+ing GAT in graph learning tasks.
+1.1 Main Contributions
+The contributions of our work are as follows:
+1. We generalized the GAT to the case that combines structura l information
+with node attributes to guide the message passing via approp riate learned
+edge attention weights.GSAT: Graph Structure Attention Networks 3
+2. We outperformed state-of-the-art (SOTA) baselines for g raph classiﬁcation
+on some benchmarks with only one layer of GSAT which is an indi cation that
+higher layers are not necessary if structural information c ould be captured
+adequately using ARW.
+3. Sensitivity analysis is performed to investigate the eﬀe ct of ARW hyperpa-
+rameters such as walk length and the size of structural featu res on the graph
+classiﬁcation performance.
+2 Related Work
+2.1 Encoding Structural Similarity
+Graph Kernels [4] uses graph kernels that compute an inner product on
+graphs, to extend the standard convolution operator to the g raph domain and
+provides structural masks that are learned during the train ing process. Similarly,
+[8] introduced KerGNNs which utilizes trainable hidden gra phs as graph ﬁlters
+and are combined with subgraphs centered at each node to upda te node embed-
+dings using graph kernels. The ﬁrst drawback of these types o f kernels is the
+limited assumption on the number of learnable structures. E ven a big number
+does not resolve the issue since many of the structures would then have high
+correlation with each others. The second drawback of [4] is t he lack of modeling
+for node neighbour structures based on label information si nce [4] has focused
+on graph classiﬁcation tasks only. Many methods such as [16] ,[8],[4] that use
+graph kernels to model structural similarity of two nodes ar e ignoring the node
+labels as a way to model local structure and therefore can not fully capture
+heterogeneous graphs or tasks like node classiﬁcation.
+Anonymous Random Walk Anonymous random walk (ARW) was originally
+introduced in [21]. [13] designed task-independent algori thms for learning graph
+representations in explicit and distributed based on ARW.
+Deﬁnition 1 ([13]). Lets= (u1,u2,...,u k)be an ordered list of elements
+withui∈V. We deﬁne the positional function pos(s,ui)→qsuch that, for
+any ordered list s= (u1,u2,...,u k)and an element ui∈V, it returns a list
+q= (p1,p2,...,p l)of all positions pj∈Nat which uioccurs in the list s.
+ARW play a vital role in structural encoding because they all ow the ex-
+ploration of graph topology without being inﬂuenced by node -speciﬁc features,
+ensuring that the learned representations focus solely on t he underlying struc-
+ture of the graph. In graph-based machine learning tasks, st ructural encoding
+refers to the process of capturing patterns of connectivity , such as motifs, com-
+munity structures, or graph symmetries. While original ran dom walks rely on
+traversing the graph and potentially incorporating node id entities or features,
+they may inadvertently bias the exploration toward nodes wi th certain attributes
+or higher connectivity. This means that original random wal ks may overempha-
+size the role of speciﬁc nodes, leading to representations t hat are skewed by node4 Farshad Noravesh1, Reza Haﬀari2, Layki Soon3, Arghya Pal4
+identities, rather than capturing purely structural prope rties of the graph. On
+the other hand, ARW eliminates the dependence on node identi ties, ensuring
+that each step in the walk is treated equally, regardless of t he node’s attributes.
+This method allows for the discovery of structural patterns that are independent
+of any speciﬁc node characteristics, enabling a more genera lizable and accurate
+encoding of the graph’s topology. Without this anonymity, t raditional random
+walks may fail to properly generalize in tasks like graph cla ssiﬁcation, where the
+goal is to understand the overall structure rather than indi vidual nodes. Thus,
+ARW is essential for capturing true structural information , leading to more ro-
+bust and unbiased graph representations and therefore is us ed in the present
+paper.
+Deﬁnition 2. [13] Ifw= (v1,v2,...,v k)is a random walk, then its correspond-
+ing anonymous walk is the sequence of integers a= (f(v1),f(v2),...,f(vk)),
+where integer f(vi) =min pos (w,vi).
+The aim is to maximize the following average log probability :
+1
+Tt=T−δ/summationdisplay
+t=δlogp(wt|wt−δ,...,w t+δ,d) (1)
+where the graph corresponds to d and δis the window size, i.e. number of context
+words for each target word. The above probability is deﬁned v ia the following
+softmax function:
+p(wt|wt−δ,...,w t+δ,d) =ey(wt)
+/summationtextη
+i=1ey(wi)(2)
+whereηis the number of ARWs of length l.
+[31] combines breath ﬁrst search(BFS) and anonymous walk(A W) to deﬁne the
+topological AW which provides bijective mapping between em bedding and local
+structure of node. To consider diverse heterostructures as opposed to homoge-
+nous graphs, [11] proposed a theoretically guaranteed tech nique called hetero-
+geneous anonymous walk (HAW). [20] combines the traditiona l RW with ARW
+and they used q anonymous walk landmarks to provide q-dimens ional subspace.
+Similarly, [15] introduced an attention module to model var ying importance of
+neighbors shown by their structural patterns.
+Generalized Graph Diﬀusion [7] introduced pathGCN that learns the coeﬃ-
+cients of generalized graph diﬀusion(GGD) to be able to gene ralize conventional
+graph convolution operator to a convolution operator over p aths. Learning the
+coeﬃcients makes the modeling very sensitive to the domain, and in the case
+of out of domain generalization, a big domain shift would pro duce a poor per-
+formance. Thus, this motivates us to avoid using GGD since it only gives an
+expectation and it also mixes the information from diﬀerent random walks of
+varying lengths into one conservative variable. Although t he usage of GGD is
+very convenient in modeling, but it is just a mean and the vari ance could beGSAT: Graph Structure Attention Networks 5
+high for diﬀerent graph datasets. Another drawback of GGD is the memory lim-
+itations to store these values as well as computational comp lexity for calculating
+it for big graphs.
+Graph Random Features [26] proposed general graph random features(g-
+GRF) that includes many of the most popular graph kernels. g- GRF has sub-
+quadratic time complexity with respect to the number of node s and it can be
+distributed across machines. It has a modulation function w hich upweights and
+downweights the contribution from diﬀerent random walks de pending on their
+lengths. Consider the matrices Kα(W)∈RN×Nwhereα= (αk)∞
+k=0andαk∈R.
+We deﬁne the following matrix:
+Kα(W) =∞/summationdisplay
+k=0αkWk(3)
+where W is the weighted adjacency matrix. Kαcan be considered as a mapping
+from a pair of graph nodes to a real number. A special case of Kα(W)is p-step
+RW which has the following form:
+(αIN−L)p=p/summationdisplay
+k=0/parenleftbiggp
+k/parenrightbigg
+(α−1)−kWk(4)
+Diﬀusion is another popular case which has the following for m:
+exp(−σ2L/2) =1
+k!(σ2
+2)k(5)
+The major goal of g-GRF is to construct a random feature map φ(i) :V→
+Rlwithl∈Nthat provides unbiased approximation of Kα(W)in (3). [26]
+uses a modulation function fwhich is a function of walk length and a load
+value which is dependent on the degree of the current node. g- GRF of node i
+is the average of m random walks of arbitrary length starting from node i to
+produce a random feature vector φf(i)∈Rn. The novelty of this algorithm is
+that the random length gives an estimate of all kinds of RW whi ch reduces time
+complexity signiﬁcantly. Another important property of th is algorithm is that
+the feature is an unbiased approximation of all behaviours. The walk length is a
+uniform distribution which makes no distinction from lengt h one and very high
+length. This means that the random feature has become a very c onservative
+variable. This is the motivation behind the modulation func tion that diminishes
+the eﬀect of long walks. The choice of decaying speed in modul ation function
+is still not based on theoretical backgrounds. [27] introdu ces quasi-Monte Carlo
+GRFs (q-GRFs), to prove that they yield lower-variance esti mators of the 2-
+regularised Laplacian kernel under mild conditions. The id ea of q-GRFs is to
+correlate diﬀerent random walks to more eﬃciently explore t he graph [3], and is
+motivated by orthogonal random features(ORF) [19]. The pro bability of choosing
+a neighbour w of v can be deﬁned as:
+p(v,w) =f(N(v,w))/summationtext
+z∈Nvf(N(v,z))(6)6 Farshad Noravesh1, Reza Haﬀari2, Layki Soon3, Arghya Pal4
+whereN(x,y)stands for the number of times that an edge (x,y)has been already
+used and since we want to deprioritize edges that were alread y frequently visited,
+f should be a decreasing function. This inductive bias is rel ated to self-repellent
+random walk in [6]. Note that g-GRF is not used in the present p aper as a proxy
+of structural representation since the size of the vector is equal to the number
+of vertices of a graph which is very high for datasets like COR A that have big
+number of nodes in their connected components. It also uses d egree of the node
+neighbour to update the g-GRF which makes the RW very biased s ince there
+are many examples that a node has low degree but has high centr ality.
+2.2 Structural Information
+[12] uniﬁed many graph representation learning methods suc h as deepWalk,
+Node2Walk and GraphSage in a framework that implements enco der, decoder,
+similarity measures and loss functions distinctly. [29] le verages kernels instead
+of encoder-decoder architecture in [12] and implements the kernel between two
+nodes using feature smoothing method of Nadaraya-Watson ke rnel weighted av-
+erage. Methods in [29] and [12] ignore the local structure of two nodes and
+optimizes node embeddings so that nearby nodes in the graph h ave similar em-
+bedding. In many applications, two nodes that are far from ea ch other in the
+global positioning may have very similar local structures s uch as having simi-
+lar number of triangle structures. [28] resolved this resea rch gap by introducing
+struc2vec that generates structural context for nodes. The core of struc2vec is
+a variable that measures the ordered degree sequence of a par ticular set. The
+set is the ring of nodes at distance k. Then the structural dis tance between
+any two nodes can be obtained recursively by measuring the di stance between
+two ordered degree sequences corresponding to the two nodes . Another type of
+structure arises in heterogeneous graphs. [11] proposes he terogeneous anonymous
+walk (HAW) for representation learning on heterostructure s. HAW could be seen
+as generalization of ARW . Thus, it maps to the same ARW in the o riginal for-
+mulation of ARW that can distinguish two diﬀerent sequences by concatenating
+them with node types.
+Methods so far do not integrate the rich RW representations w ith message
+passing methods. To address this research gap, [2] put forwa rd a novel framework
+that integrates them by aggregating RW embeddings and learn s the encoding of
+RW end-to-end. However, they neglect the usage of ARW to make their modeling
+more generalisable. Another drawback of [2] is the limitati on in walk embedding
+that the entries in the vector are limited to two sequential n ode embedding
+which neglects the richness of the whole sequence represent ation and cuts oﬀ
+the nonlocal information in the sequence since each sequenc e embedding can be
+analogous to sentence embedding in natural language proces sing(NLP).GSAT: Graph Structure Attention Networks 7
+3 Proposed Method
+3.1 Preliminaries
+Given a graph G= (V,E), we use VandEto denote its nodes and edges,
+respectively. The nodes are indexed by v and u such that v,u∈V, and an edge
+connecting nodes v and u is denoted by (v,u)∈E. The connectivity is encoded
+in the adjacency matrix A∈Rn×nwhere n is the number of nodes. p denotes
+the width (hidden dimension size), while lis the number of layers. The feature
+of node v at layer lis written as hl+1
+v.
+3.2 Problem Formulation
+Given a graph and its node attributes, the problem is to ﬁnd a m essage pass-
+ing algorithm that encodes the structural representation( SR) to guide the mes-
+sage passing of original attributes(OA). We deﬁne latent st ructure representa-
+tion(LSR) as the representation of each node such that impli cit local structures
+could be represented as a vector and GSAT provides such messa ge passing algo-
+rithm.
+Both Skip-gram and ARW are used in graph embedding methods to learn
+meaningful node representations. Skip-gram, originally u sed in word embeddings
+(e.g., Word2Vec [22]), learns vector representations by ma ximizing the likelihood
+of predicting context nodes given a target node. In the conte xt of graph embed-
+ding, anonymous random walks generate sequences of node vis its that capture
+structural properties of the graph without considering spe ciﬁc node identities.
+These sequences serve as input to the skip-gram model, treat ing nodes in a walk
+similarly to words in a sentence. By optimizing the skip-gra m objective on these
+walks, the model learns embeddings that capture local and gl obal structural
+relationships in the graph.
+3.3 Preprocessing
+RWs (such as those used in Node2Vec [10] or DeepWalk[24]) can be interpreted
+similarly to SkipGram in the sense that nodes in the graph are treated as words,
+and the RW serves as the context that SkipGram attempts to pre dict. Just as
+SkipGram learns the relationship between a target word and i ts context words,
+graph-based random walk methods learn the relationships be tween nodes and
+their neighbors, encoding the local graph structure into me aningful node embed-
+dings. Thus, RWs in graph learning methods serve a role analo gous to context
+windows in SkipGram, both helping to capture local structur e for eﬀective rep-
+resentation learning. We use skipGram which is a fast Word2V ec algorithm [22].
+The ARW could be seen as a sentence which includes repeated wo rds. Before
+combining the SR with OA, we do preprocessing to calculate wo rd embedding
+through skipGram algorithm. The sampling of RW is diﬀerent f rom pretrained
+model which is done in preprocessing step.8 Farshad Noravesh1, Reza Haﬀari2, Layki Soon3, Arghya Pal4
+3.4 Sampling Random Walks
+The length of the walk can vary, and multiple walks are often s ampled to capture
+diverse structural patterns within the graph. By sampling a series of RWs, it is
+possible to explore local neighborhoods of nodes, which can then be used in
+learning meaningful embeddings or representations of the g raph’s structure. To
+obtain LSR of each node, an ARW is drawn randomly. The mean vec tor of all
+word embeddings of an ARW started at node vwill be the LSR in of that node
+in GSAT and we call it h(s)
+v.
+3.5 Latent Structural Attention
+In GSAT, RW embeddings are used to inform the attention mecha nism to au-
+tomatically discern which neighbors are more likely to cont ribute meaningfully
+to a node’s updated representation based on their structura l proximity in the
+graph or any other implicit guidance of structural embeddin gs. Note that GSAT
+uses ARW and not the original RW. Thus, structural encoding i s more eﬀective.
+Nodes that share many random walk paths are considered struc turally impor-
+tant to each other and they could be identiﬁed as bottlenecks of the graph.
+Since each graph classiﬁcation dataset such as PROTEIN has a diﬀerent graph
+properties distributions, diﬀerent datasets respond diﬀe rently to diﬀerent walk
+length. Even the walk length of each node could be personaliz ed but through
+modeling of the GSAT, we assume that there is no partiality an d in all nodes,
+and the same number of random walks as well as the same walk len gth is used for
+numerical experiments. In a GSAT, these random walk embeddi ngs are used to
+create the attention mechanism to automatically ﬁgure out w hich neighbors are
+more likely to contribute meaningfully to a node’s updated r epresentation based
+on their structural proximity or any other implicit justiﬁc ation in the graph.
+We decouple the feature vector into two diﬀerent parts namel y, structural at-
+tributes h(s)
+uand original attributes h(orig)
+u. g-GRF and ARW are examples of
+structural attributes which have superscript s in our termi nology. Like other
+GNNs, deep GATs suﬀer from over-smoothing, where repeated m essage passing
+causes node representations to become indistinguishable, reducing the model’s
+expressiveness. One cornerstone for the success of GAT is th e fact that unlike
+GCNs, which use ﬁxed-weight averaging, GATs assign diﬀeren t importance (at-
+tention scores) to each neighbor, allowing more inﬂuential nodes to contribute
+more to the ﬁnal representation. So, We draw inspiration fro m graph attention
+network(GAT)[30] but the attention weights are not based on original attributes
+and is only calculated using the h(s)
+vwhich are ARWs of all its neighbours. Thus,
+the aggregated messages at layer k are:
+m(k)
+N(u)=σ(/summationdisplay
+v∈N(u)αu,vWh(orig)
+v) (7)
+where the attention weights are as follows:
+αu,v=exp(Relu(aT[Wh(s)
+u||Wh(s)
+v]))
+/summationtext
+v′∈Nuexp(Relu(aT[Wh(s)
+u||Wh(s)
+v′]))(8)GSAT: Graph Structure Attention Networks 9
+Finally, the nodes are updated using the following combine r ule:
+h(k+1)
+u=ReLU(V(k)m(k)
+N(u)+b(k)) (9)
+whereV(k)denotes a trainable weight matrix and b(k)is bias term. Note that
+the present work is only using ARW to calculate the attention weights. A multi-
+headed formulation could be easily developed to include oth er types of structural
+features such as ARW or personalized PageRank or GGD to have m ore expres-
+sive representation of structural attributes. Our modelin g is a type of PNA since
+each node has diﬀerent local structure and attending to neig hbours of each node
+is personalized and unique to that point. Attention mechani sms can be noisy
+or overly focused on certain parts of the input. The outputs o f multiple heads
+are averaged which leads to a more robust representation. Th us, GSAT is im-
+plemented based on multiheaded attention with similar spir it to the original
+multiheaded GAT.
+3.6 GSAT as Generalization of GAT
+Theorem 1. LetG= (V,E,X)be a graph with node set V, edge set E, and
+node feature matrix X∈R|V|×d. A Graph Attention Network (GAT) with global
+pooling is used to generate a graph-level representation hGfor classiﬁcation. If
+the GAT does not incorporate structural graph information (ARW embedding),
+then there exist non-isomorphic graphs G1andG2such that:
+G1/ne}a⊔ionslash≃G2buthG1=hG2 (10)
+leading to misclassiﬁcation and poor generalization.
+Proof. Consider a GAT layer that updates node embeddings using self -attention.
+Leth(l)
+ibe the hidden representation of node iat layerl. The update rule for
+GAT is given by:
+h(l+1)
+i=σ
+/summationdisplay
+j∈N(i)α(l)
+ijWh(l)
+j
+ (11)
+whereWis a trainable weight matrix, σis a nonlinearity, and α(l)
+ijis the learned
+attention coeﬃcient:
+α(l)
+ij=exp/parenleftBig
+LeakyReLU (a⊤[Wh(l)
+i/bardblWh(l)
+j])/parenrightBig
+/summationtext
+k∈N(i)exp/parenleftBig
+LeakyReLU (a⊤[Wh(l)
+i/bardblWh(l)
+k])/parenrightBig (12)
+The attention mechanism allows nodes to weigh their neighbo rs diﬀerently but
+does not inherently incorporate global graph structure unl ess explicitly encoded.
+AfterLlayers of GAT, a global pooling function Paggregates node embeddings
+into a single graph-level representation:
+hG=P({h(L)
+i|i∈V}) (13)10 Farshad Noravesh1, Reza Haﬀari2, Layki Soon3, Arghya Pal4
+wherePis typically a sum, mean, or max function. Since Pis permutation-
+invariant, it treats graphs with the same set of node embeddi ngs as identical.
+Now we aim to remove the structural ambiguity without struct ural information.
+Consider two non-isomorphic graphs G1andG2with the same node features but
+diﬀerent structures. Since GAT message passing is purely fe ature-driven without
+explicit structural encoding, it follows that:
+h(L)
+i(G1) =h(L)
+i(G2)∀i∈V (14)
+leading to the same global representation:
+hG1=P({h(L)
+i(G1)}) =P({h(L)
+i(G2)}) =hG2 (15)
+SinceG1/ne}a⊔ionslash≃G2buthG1=hG2, the classiﬁer cannot distinguish them, caus-
+ing misclassiﬁcation and poor generalization. To ensure th atG1andG2are
+mapped to distinct embeddings, structural encodings (ARW e mbedding) must
+be involved in node representations:
+X′= [X/bardblARW] (16)
+Incorporating ARW alters the attention coeﬃcients αijand the ﬁnal embeddings
+hG, ensuring that hG1/ne}a⊔ionslash=hG2, which improves generalization. ⊓ ⊔
+3.7 Computational Complexity
+To calculate the computational complexity of GSAT we break i t into two parts
+namely attention calculation for message passing and the hi erarchical pooling
+based on edgePool [5] which is . Assume the structural size ha s dimension F
+and H be the number of attention heads , E be the number of edges and N is
+the number of nodes. Then GSAT has computational complexity ofO(HEF)+
+O(NlogN).
+4 Experiments
+Note that all experiments in the present work do not concaten ate the structural
+features with original features. However, (16) could be con sidered as a more gen-
+eral formulation which provides a framework for future work s and experiments
+with more hyperparameters. The hyperparameters used in our experiments is
+optimized by the values in Table 1. The learning rate is start ed at10−3but is
+gradually reduced by 90 percent every 20 epochs. Five heads a re used since a
+single headed attention produced very noisy results with hi gh variance for the
+performance. There are other hyperparameters that are ment ioned in Table 7.
+4.1 Dataset
+MUTAG, PROTEINS, DD, and NCI1 are widely used datasets for gr aph classiﬁ-
+cation, particularly in bioinformatics and cheminformati cs [32]. MUTAG consistsGSAT: Graph Structure Attention Networks 11
+Table 1. hyperparameters
+hyperparameters values
+batch 32
+num pooling layers 14
+heads 5
+epochs 100
+hidden 64
+dynamic learning rate 1e-3
+optimizer Adam
+of molecular graphs where nodes represent atoms and edges re present chemical
+bonds, with the task of classifying compounds based on their mutagenic proper-
+ties. PROTEINS contains protein structure graphs, where no des correspond to
+secondary structure elements, and edges represent interac tions, aiming to clas-
+sify proteins into functional categories. DD (Drosophila D evelopment) is a larger
+and more complex protein dataset, making it useful for evalu ating models on di-
+verse biological structures. NCI1, derived from the Nation al Cancer Institute,
+consists of molecular graphs used to predict anti-cancer ac tivity. Their statistics
+are shown in Table 2.
+Table 2. Bioinformatics Dataset Statistics
+Dataset MUTAG Proteins DD NCI1
+Graphs 188 1,113 1,178 4,110
+Classes 2 2 2 2
+Average Nodes 17.9 39.1 284.3 29.8
+4.2 Comparison With Baselines
+For fair comparison and reasoning, we developed two version of GSAT namely
+the GSAT-hp and GSAT-gp which correspond to hierarchical an d global pool-
+ing respectively. As Table 4 shows, the hierarchical poolin g version (GSAT-hp)
+produced better results than the global pooling version(GS AT-gp) as expected
+since the mean pooling simply eliminate the information pro vided by the graph
+topology which is essential for eﬃcient graph classiﬁcatio n. Note that edgePool
+[5] is used to model hierarchical graph pooling in GSAT-hp. T here is one ad-
+vantage of using edgePool which is the fact that there is no re quirement to set
+the number of clusters in advance and this allows the dataset to naturally ﬁnd
+appropriate number of clusters in each pooling layer and res pects the distribu-
+tion of dataset. Table 3 shows how GSAT slightly outperforms performance for
+NCI1 dataset. It also shows that performance for MUTAG datas et could be en-
+hanced by 6 percent in comparison with MinCutPool which is a w ell recognized12 Farshad Noravesh1, Reza Haﬀari2, Layki Soon3, Arghya Pal4
+approach to hierarchical graph pooling [1]. Some other impo rtant hierarchical
+pooling methods are [9],[25], [18], [33].
+Table 3. Graph classiﬁcation accuracies on ﬁve benchmarks (percent age). The shown
+accuracies are mean and standard deviation over 10 diﬀerent runs. We use bold to
+highlight wins and underline to highlight the second best.
+Model MUTAG Proteins DD NCI1
+TopKPool [9] 67.61±3.36 70.48±1.01 73.63±0.55 67.02±2.25
+ASAP [25] 77.83±1.49 73.92±0.63 76.58±1.04 71.48±0.42
+SAGPool [18] 73.67±4.28 71.56±1.49 74.72±0.82 67.45±1.11
+DiﬀPool [33] 79.22±1.02 73.03±1.00 77.56±0.41 62.32±1.90
+MinCutPool [1] 79.17±1.64 74.72±0.48 78.22±0.54 74.25±0.86
+GSAT-hp(ours) 86.33±0.55 74.29±0.76 77.35±1.52 75.12±1.17
+Table 4. Comparative Study on four models (percentage). The shown ac curacies are
+mean and standard deviation over 10 diﬀerent runs. We use bold to highlight wins
+and underline to highlight the second best.
+Model MUTAG Proteins DD NCI1
+GCN-gp 80.61±3.36 72.48±1.01 73.63±0.55 67.02±2.25
+GAT-gp 81.83±1.49 73.13±0.63 76.58±1.04 71.48±0.42
+GIN-gp 81.67±4.28 72.56±1.49 71.72±0.82 67.45±1.11
+GSAT-gp(ours) 82.29±2.72 73.92±0.41 76.92±0.39 72.21±0.43
+4.3 Ablation Study for walk length
+Designing an optimal walk length for each graph dataset dist ribution is crucial,
+particularly in protein graph datasets, where capturing mo tifs and high-order
+structures signiﬁcantly impacts model performance. A care fully chosen walk
+length helps in eﬀectively capturing these motifs and short walks may primar-
+ily encode local residue interactions, while longer walks c an reveal higher-order
+structural patterns. If the walk length is too short, the mod el may fail to rec-
+ognize essential long-range dependencies critical for fun ctional characterization.
+Conversely, excessively long walks may introduce noise by a ggregating distant,
+functionally irrelevant nodes, diluting meaningful struc tural signals. Therefore,
+designing the walk length in alignment with the inherent str uctural properties of
+the dataset, ensures that graph learning models can accurat ely capture biologi-
+cally relevant patterns, while minimizing unnecessary inf ormation propagation.
+We can interpret the results of our ablation study as follows . The walk length
+in random walks inﬂuences graph classiﬁcation in multiple w ays, particularly forGSAT: Graph Structure Attention Networks 13
+Table 5. Ablation study for the eﬀect of walk length in Protein Datase t(percentage).
+The shown accuracies are mean and standard deviation over 10 diﬀerent runs. We use
+bold to highlight wins and underline to highlight the second best.
+model walk_length =10 walk_length =20 walk_length =40
+GIN-gp 71.61±1.06 71.43±1.26 71.32±1.46
+GCN-gp 72.61±3.36 72.43±1.36 72.52±3.36
+GAT-gp 72.83±1.59 72.71±1.14 72.61±2.12
+Table 6. Ablation study for the eﬀect of walk length in Mutag Dataset( percentage).
+The shown accuracies are mean and standard deviation over 10 diﬀerent runs. We use
+bold to highlight wins and underline to highlight the second best.
+model walk_length =10 walk_length =20 walk_length =40
+GIN-gp 82.11±1.04 82.43±1.27 82.12±1.45
+GCN-gp 82.28±3.25 82.11±1.24 82.35±1.70
+GAT-gp 82.61±1.49 82.31±3.18 82.37±2.12
+the PROTEIN and MUTAG datasets as are shown in Table 5 and Tabl e 6 re-
+spectively. Here’s how diﬀerent walk lengths impact classi ﬁcation performance:
+The small walk length(short walks) captures local neighbor hood structure which
+preserves ﬁne-grained structural details and is useful for distinguishing proteins
+based on small functional motifs but it fails to capture glob al graph connectiv-
+ity and global topology. This is the reason we experimented m edium walks that
+balances local and global information that provides more co ntext about neigh-
+borhood connectivity and helps capture structural variati ons at a mesoscopic
+scale. Thus, it works well for graphs where medium scale topo logy is important
+like the case for graph classiﬁcation for PROTEIN dataset. T he third extreme
+case is the long walk that approximates global graph structu re. The drawback of
+large walk length is that it may introduce noise if RW drift to o far from meaning-
+ful substructures. On the other hand, it captures the overal l graph connectivity
+and large scale properties but it dilutes the importance of l ocal motifs which are
+critical for graph classiﬁcation.
+4.4 Sensitivity Analysis
+The eﬀect of ARW is rooted in three main hyperparameters. The ﬁrst one is
+structural_size , which is the size of structural features that skipGram has
+been trained on. The second parameter is walk_length , which is the number of
+walks starting from each node. Finally, num_RW_per_node is the number of RW
+that has been done. Note that this parameter is directly rela ted to the corpus size
+when training the skipGram model. Here we study the sensitivity of these pa-
+rameters on the ﬁnal graph classiﬁcation performance. From a qualitative point
+of view, when structural_size increases, more structural information around
+each node is represented and therefore we expect that the per formance would
+be increased. However this increase in performance is limit ed by computational14 Farshad Noravesh1, Reza Haﬀari2, Layki Soon3, Arghya Pal4
+Table 7. Eﬀect of hyperparameters on the performance of Protein grap h classiﬁcation
+(percentage). The shown accuracies are mean and standard de viation over 10 diﬀerent
+runs. We use bold to highlight wins and underline to highlight the second best.
+conﬁgstructural_size walk_length num_RW_per_node performance
+1 10 10 30 71.41± 0.91
+2 10 20 30 71.15± 0.69
+3 50 10 30 74.29± 0.57
+4 50 20 30 74.92± 0.59
+5 100 20 30 73.74± 0.36
+6 100 20 60 73.51± 0.84
+7 200 20 60 71.27± 1.13
+8 400 20 60 70.83± 0.74
+resource limitations since the attention weights should be calculated from these
+high dimensional features for all nodes. Similarly, increa singwalk_length can
+capture local neighbourhood at higher radius and may includ e bottlenecks in
+the graphs that are responsible for oversquashing. Increas ingnum_RW_per_node
+may reduce the noise of structural modeling and produces a ro bust representa-
+tion of structure since nodes with high centrality will be im plicitly captured by
+increasing this hyperparameter.
+5 Conclusion
+We have introduced a novel method called GSAT which could be s een as a
+generalization of GAT. GSAT leverages the structural embed dings of nodes to
+guide the attention in message passing to learn to automatic ally manage the edge
+strengths in the message passings that are guided by structu ral information of
+individual nodes. GSAT could be seen as generalization of GA T and the eﬀect
+of walk length and walk embedding size is also analyzed.
+References
+1. Bianchi, F.M., Grattarola, D., Alippi, C.: Spectral clus tering with graph neural
+networks for graph pooling. In: Proceedings of the 37th Inte rnational Conference
+on Machine Learning. ICML’20, JMLR.org (2020)
+2. Chen, D., Schulz, T., Borgwardt, K.: Learning long range d ependencies on graphs
+via random walks (06 2024)
+3. Choromanski, K.: Taming graph kernels with random featur es (04 2023)
+4. Cosmo, L., Minello, G., Bicciato, A., Bronstein, M.M., Ro dolà, E., Rossi, L.,
+Torsello, A.: Graph kernel neural networks. IEEE Transacti ons on Neural Net-
+works and Learning Systems p. 1–14 (2024)
+5. Diehl, F.: Edge contraction pooling for graph neural netw orks. arXiv preprint
+arXiv:1905.10990 (2019)
+6. Doshi, V., Hu, J., Eun, D.: Self-repellent random walks on general graphs - achiev-
+ing minimal sampling variance via nonlinear markov chains ( extended abstract).
+pp. 8394–8398 (08 2024). https://doi.org/10.24963/ijcai.2024/929GSAT: Graph Structure Attention Networks 15
+7. Eliasof, M., Haber, E., Treister, E.: pathgcn: Learning g eneral graph spatial oper-
+ators from paths (07 2022)
+8. Feng, A., You, C., Wang, S., Tassiulas, L.: Kergnns: Inter pretable graph neural
+networks with graph kernels. Proceedings of the AAAI Confer ence on Artiﬁcial
+Intelligence 36, 6614–6622 (06 2022)
+9. Gao, H., Ji, S.: Graph representation learning via hard an d soft assignment. In:
+International Conference on Machine Learning (ICML). pp. 1 823–1832. PMLR
+(2019)
+10. Grover, A., Leskovec, J.: node2vec: Scalable feature le arning for networks (2016)
+11. Guo, X., Jiao, P., Zhang, W., Pan, T., Jia, M., Shi, D., Wan g, W.: Representation
+learning on heterostructures via heterogeneous anonymous walks. IEEE Transac-
+tions on Neural Networks and Learning Systems 35(7), 9538–9552 (2024)
+12. Hamilton, W.L., Ying, R., Leskovec, J.: Representation learning on graphs: Meth-
+ods and applications. IEEE Data Eng. Bull. 40, 52–74 (2017)
+13. Ivanov, S., Burnaev, E.: Anonymous walk embeddings. In: Dy, J., Krause, A. (eds.)
+Proceedings of the 35th International Conference on Machin e Learning. Proceed-
+ings of Machine Learning Research, vol. 80, pp. 2186–2195. P MLR (10–15 Jul
+2018)
+14. Jin, D., xia Wang, R., Ge, M., He, D., Li, X., Lin, W., Zhang , W.: Raw-gnn:
+Random walk aggregation based graph neural network. ArXiv abs/2206.13953
+(2022)
+15. Jin, Y., Song, G., Shi, C.: Gralsp: Graph neural networks with local structural
+patterns. ArXiv abs/1911.07675 (2019)
+16. Kalofolias, J., Welke, P., Vreeken, J.: SUSAN: The Struc tural Similarity Random
+Walk Kernel, pp. 298–306 (04 2021)
+17. Kipf, T., Welling, M.: Semi-supervised classiﬁcation w ith graph convolutional net-
+works. ArXiv (2016)
+18. Lee, J., Lee, I., Kang, J.: Self-attention graph pooling . In: International Conference
+on Machine Learning (ICML). pp. 3734–3743. PMLR (2019)
+19. Likhosherstov, V., Choromanski, K., Dubey, K.A., Liu, F ., Sarlós, T.,
+Weller, A.: Chefs’ random tables: Non-trigonometric rando m features. ArXiv
+abs/2205.15317 (2022)
+20. Long, Q., Jin, Y., Wu, Y., Song, G.: Theoretically improv ing graph neural networks
+via anonymous walk graph kernels. In: Proceedings of the Web Conference 2021.
+p. 1204–1214. WWW ’21, Association for Computing Machinery , New York, NY,
+USA (2021)
+21. Micali, S., Zhu, Z.A.: Reconstructing markov processes from independent and
+anonymous experiments. Discrete Applied Mathematics 200, 108–122 (2016)
+22. Mikolov, T., Chen, K., Corrado, G.S., Dean, J.: Eﬃcient e stimation of word rep-
+resentations in vector space. In: International Conferenc e on Learning Representa-
+tions (2013)
+23. Nguyen, K., Nguyen, T., Ho, N., Nguyen, K., Nong, H., Nguy en, V.: Revisiting
+over-smoothing and over-squashing using ollivier’s ricci curvature (11 2022)
+24. Perozzi, B., Al-Rfou, R., Skiena, S.: Deepwalk: online l earning of social repre-
+sentations. In: Proceedings of the 20th ACM SIGKDD Internat ional Conference
+on Knowledge Discovery and Data Mining. p. 701–710. KDD ’14, Association for
+Computing Machinery, New York, NY, USA (2014)
+25. Ranjan, E., Sanyal, S., Liu, C., Peng, J., Ester, M.: Asap : Adaptive structure
+aware pooling for learning hierarchical graph representat ions. In: Proceedings of
+the AAAI Conference on Artiﬁcial Intelligence (AAAI). vol. 34, pp. 5470–5477
+(2020)16 Farshad Noravesh1, Reza Haﬀari2, Layki Soon3, Arghya Pal4
+26. Reid, I., Choromanski, K., Berger, E., Weller, A.: Gener al graph random features.
+In: International Conference on Learning Representations (2023)
+27. Reid, I., Choromanski, K., Weller, A.: Quasi-monte carl o graph random features.
+In: Proceedings of the 37th International Conference on Neu ral Information Pro-
+cessing Systems. NIPS ’23, Curran Associates Inc., Red Hook , NY, USA (2024)
+28. Ribeiro, L.F., Saverese, P.H., Figueiredo, D.R.: struc 2vec: Learning node repre-
+sentations from structural identity. In: Proceedings of th e 23rd ACM SIGKDD
+International Conference on Knowledge Discovery and Data M ining. p. 385–394.
+KDD ’17, Association for Computing Machinery, New York, NY, USA (2017)
+29. Tian, Y., Zhao, L., Peng, X., Metaxas, D.: Rethinking ker nel
+methods for node representation learning on graphs (10 2019 ).
+https://doi.org/10.48550/arXiv.1910.02548
+30. Veličković, P., Cucurull, G., Casanova, A., Romero, A., Liò, P., Bengio, Y.: Graph
+attention networks (2018)
+31. Yan, Y., Hu, Y., Zhou, Q., Wu, S., Wang, D., Tong, H.: Topol ogical anonymous
+walk embedding: A new structural node embedding approach. I n: Proceedings of
+the 33rd ACM International Conference on Information and Kn owledge Manage-
+ment. p. 2796–2806. CIKM ’24, Association for Computing Mac hinery, New York,
+NY, USA (2024)
+32. Yanardag, P., Vishwanathan, S.: Deep graph kernels. In: Proceedings of the 21th
+ACM SIGKDD International Conference on Knowledge Discover y and Data Min-
+ing. p. 1365–1374. KDD ’15, Association for Computing Machi nery, New York,
+NY, USA (2015)
+33. Ying, R., You, J., Morris, C., Ren, X., Hamilton, W.L., Le skovec, J.: Hierarchi-
+cal graph representation learning with diﬀerentiable pool ing. In: Proceedings of
+the 32nd International Conference on Neural Information Pr ocessing Systems. p.
+4805–4815. NIPS’18, Curran Associates Inc., Red Hook, NY, U SA (2018)
+34. Zheng, X., Liu, Y., Pan, S., Zhang, M., Jin, D., Yu, P.S.: G raph neural networks
+for graphs with heterophily: A survey. ArXiv (2022)

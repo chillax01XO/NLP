@@ -1,0 +1,657 @@
+arXiv:2505.21279v1  [cs.AI]  27 May 2025XBOUND: Exploring the Capability Boundaries of
+Device-Control Agents through Trajectory Tree
+Exploration
+Shaoqing Zhang1,2, Kehai Chen1,2, Zhuosheng Zhang3, Rumei Li4
+Rongxiang Weng4,Yang Xiang2,Liqiang Nie1,Min Zhang1,2
+1Harbin Institute of Technology, Shenzhen, China
+2Pengcheng Laboratory, Shenzhen, China
+3Shanghai Jiao Tong University, China
+4Meituan, China
+Abstract
+Recent advancements in vision-language models (VLMs) have spurred increased
+interest in Device-Control Agents (DC agents), such as utilizing in-the-wild device
+control to manage graphical user interfaces. Conventional methods for assessing the
+capabilities of DC agents, such as computing step-wise action accuracy and overall
+task success rates, provide a macroscopic view of DC agents’ performance; how-
+ever, they fail to offer microscopic insights into potential errors that may occur in
+real-world applications. Conducting a finer-grained performance evaluation of DC
+agents presents significant challenges. This study introduces a new perspective on
+evaluation methods for DC agents by proposing the XBOUND evaluation method,
+which employs the calculation of a novel Explore Metric to delineate the capability
+boundaries of DC agents. Compared to previous evaluation methods, XBOUND fo-
+cuses on individual states to assess the proficiency of DC agents in mastering these
+states. Furthermore, we have developed a “pseudo” episode tree dataset derived
+from Android Control test data. Utilizing this dataset and XBOUND, we compre-
+hensively evaluate the OS-Atlas and UI-TARS series, examining both the overall
+and specific performance across five common tasks. Additionally, we select repre-
+sentative cases to highlight the current deficiencies and limitations inherent in both
+series. Code is available at https://github.com/sqzhang-lazy/XBOUND .
+1 Introduction
+The recent advancement in vision-language models (VLMs) has spurred increased interest in Device-
+Control Agents (DC agents), such as utilizing in-the-wild device control to manage graphical user
+interfaces (GUIs) (Achiam et al., 2023; Anil et al., 2023; Zhang and Zhang, 2023; Hong et al., 2024;
+Yang et al., 2023). When assigned a task, DC agents interact with the GUIs on the digital device until
+the objective is accomplished.
+There has been an increasing number of DC agents, making evaluating their capability crucial.
+Current test sets consist of trajectory datasets that capture task completion paths (Chen et al., 2024;
+Deng et al., 2024; Xie et al., 2024; Deng et al., 2023). During testing, the DC agents forecast each
+step of the execution process, assessing agent performance through either step-wise action accuracy
+or overall task success rates (Rawles et al., 2023; Li et al., 2020; Burns et al., 2022).
+These two metrics predominantly focus on the success rate of transitions between states (e.g.,
+screenshots). For example, a task requires the corresponding action to be successfully executed
+to transition from one state to another. However, they neglect the ability of DC agents to assess
+Preprint. Under review.the current state during task execution. This assessment includes determining whether an agent
+can successfully transition from one state to its subsequent states and whether the same action can
+enable smooth state transitions across different tasks. For example, within the test set, encountering
+a state that consistently transitions to a particular state leads to a favorable evaluation of step-wise
+action accuracy. However, transitions from this state to other states remain unevaluated, leaving the
+proficiency of DC agents in this state unassessed. Consequently, it is possible that the agents merely
+know how to transition from this state to the specific state for whatever task.
+The success rate of transitions between states provides a macroscopic view of DC agents’ performance;
+however, it fails to offer microscopic insights into potential errors. This limitation arises from the
+lack of aggregation of similar states during evaluation, hindering performance observation across
+transitions to all subsequent states from a given state. This study presents novel perspectives on the
+evaluation methods of DC agents by concentrating on two primary questions:
+RQ1: Do DC agents fully understand the states? When presented with multiple tasks involving the
+same state, can the DC agents successfully execute the corresponding actions based on the instructions
+of these tasks?
+RQ2: Do DC agents adequately understand the actions they are executing? If multiple tasks require
+the performance of the same action, can DC agents consistently undertake that action according to
+the instructions of these tasks?
+(c) XBOUND
+(a) Step-wise action accuracy
+(b) Overall task success ratesState siState sxState sjState syState siState sxState syState szState s0State s1State s2State s3
+Figure 1: Comparison between
+XBOUND and existing evaluation
+methods.In addressing these questions, we introduce an innovative eval-
+uation method, E Xploring the Capabilities BOUND aries of
+Device-Control Agent Capabilities (XBOUND), along with a
+new data format, trajectory trees. Compared to existing evalua-
+tion methods, XBOUND focuses on individual states to assess
+the proficiency of DC agents in mastering these states. We refer
+to this as exploring the capability boundaries of DC agents,
+specifically evaluating the success rate of transitions from in-
+dividual states to subsequent ones. The importance of this
+evaluation is analogous to blood circulation through vessels,
+where the rupture of a single channel can have severe conse-
+quences; thus, ensuring all “pathways” remain unimpeded is
+crucial. We extend the trajectory tree dataset derived from
+the Android Control (Li et al., 2024a) test set and apply the
+new evaluation method to assess open-source DC agents within
+the OS-Atlas and UI-TARS series. Furthermore, we manually
+gather and construct representative cases to highlight the current
+deficiencies and limitations inherent in both series. The com-
+parison between XBOUND and existing evaluation methods is
+shown in Figure 1.
+Our contributions are as follows:
+(1) We propose a novel evaluation method, XBOUND, along with a new data format, the trajectory
+tree dataset. Compared to existing evaluation methods, XBOUND offers a more comprehensive
+assessment of the capability boundaries, emphasizing the agents’ comprehension of states and actions.
+(2) We construct the trajectory tree dataset derived from the Android Control test set, which is
+segmented into two dimensions: width and depth, comprising a total of 43,759 instructions.
+(3) We perform comprehensive evaluations of the OS-Atlas and UI-TARS series. We conduct
+a detailed assessment of the overall performance of DC agents, in addition to evaluating their
+performance across five distinct tasks. Furthermore, we gather analysis samples to uncover the
+shortcomings of the DC agent series.
+2 Related Work
+2.1 LLM as Device-Control Agents
+Recently, there has been considerable exploration in the field of the Device-Control Agents, ranging
+from box prediction based on HTML and OCR parsing to coordinate prediction based on images (Li
+2and Li, 2022; Li et al., 2024b; Wang et al., 2024; Zhang et al., 2024b). For example, Yan et al. (2023)
+utilized the MM-Navigator method to enhance the localization capabilities of GPT-4V . Zheng et al.
+(2024) proposed a novel prompt method, SeeAct, which combines the reasoning abilities of LLMs
+with more accurate HTML and OCR parsing to improve GPT-4V’s action prediction. Ma et al. (2024)
+trained a segmented reasoning CoCo-Agent to boost action prediction accuracy. Wu et al. (2024)
+employed significant engineering effort to collect multi-platform data and train a more powerful
+Device-Control Grounding Agent OS-Atlas. Qin et al. (2025) trained UI-TARS on large-scale GUI
+screenshot data, enabling context-aware understanding of UI elements and precise captioning of
+interfaces. Gou et al. (2024) introduces a human-like embodiment for DC agents that perceive the
+environment entirely visually and directly perform pixel-level operations on the GUI.
+2.2 Benchmark For Device-Control Agents
+To advance the development of Device-Control Agents, researchers have constructed numerous
+datasets (Zhou et al., 2023; Xie et al., 2024; Rawles et al., 2024; Lu et al., 2024). Bai et al. (2021);
+Deka et al. (2017); Cheng et al. (2024) created datasets focused on understanding UI Icons, where
+models are required to identify the location of relevant UI Icons based on queries. As the development
+of DC agents progresses, the demands for GUI datasets have shifted, necessitating agents to perform a
+series of actions in response to user instructions. For example, Rawles et al. (2023); Sun et al. (2022)
+constructed datasets containing episodes in the form of a sequence of screen-action pairs. However,
+simple screen-action data pairs are insufficient to unleash the reasoning capabilities of LLMs, leading
+to recent datasets incorporating screen-thought-action triplets. For instance, Zhang et al. (2024a)
+supplemented the AITW dataset by adding thought processes. Li et al. (2024a) constructed a
+fine-grained AndroidControl dataset by including low-level instructions during episodes.
+However, existing evaluation datasets focus on the success rate of transitions between states but often
+overlook the ability of DC agents to assess the current state during task execution. To address this
+issue, we have developed a “pseudo” trajectory tree dataset named the Android Control Tree Dataset,
+derived from Android Control.
+3 Trajectory Tree DataSet and XBOUND
+This section introduces the proposed trajectory tree dataset. We present the metadata definition in
+Sec. 3.1, details in data collection in Sec. 3.2, and dataset statistics in Sec. 3.3, respectively. The
+XBOUND evaluation method is detailed in Sec. 3.4.
+3.1 Metadata Definition
+GUI Episode Tree Data. Common GUI trajectory datasets record a series of action sequences
+that result in screen transitions, completing user instruction tasks. However, trajectory trees fo-
+cus on other possible actions and tasks that may branch out from a given state (e.g., screenshot).
+Formally, given the state Stat the time step tand various user instructions I1
+t, I2
+t, . . . IM
+t, the DC
+agent Gwill take corresponding actions under different instructions, such as A1
+t=G(St, I1
+t),
+A2
+t=G(St, I2
+t), . . . , AM
+t=G(St, IM
+t), where Mrepresents the number of instructions. Each
+instruction completes a corresponding trajectory sequence E={(St, At)T
+t=1, I}, where Trep-
+resents the total steps. These trajectory sequences are constructed into a trajectory tree dataset
+T={(Sm
+t,(Im, Am), Sm
+t+1)T
+t=1}M
+m=1based on overlapping states. Figure 2 shows the schematic
+diagram of a trajectory tree.
+3.2 Data Collection
+Following Sun et al. (2024), we employ GPT4o-mini to generate high-level and low-level instructions,
+along with UI icons for each screenshot. Each screenshot is annotated using Android Control’s
+accessibility trees to identify clickable and visible UI icons, which are sequentially numbered. Red
+boxes highlight these icons on screenshots, and their numbers ensure clear identification. With
+instructions and icons from GPT4o-mini, Qwen2.5-vl-72B-Instruct precisely annotates actions.
+To ensure the quality of the collected data, GPT4o-mini then evaluates if actions and low-level
+instructions satisfy high-level instructions for quality assurance, forming our dataset of successful
+3In the Momondo app,find a flight from Scotland (Aberdeen airport) to Canada (Toronto airport) departing on August 10, 2023 and returning on August 15, 2023 then select a flight between 11:30 a.m. to 12 p.Change the departure airport from Aberdeen (ABZ) to Edinburgh (EDI) for the flight search to Toronto.Change the destination airport from Toronto (YTO) to Vancouver (YVR) for the flight search from Aberdeen.
+Click: 540, 2232
+Share the flight details from ABZ to YTO with my friend via WhatsApp.Save the best flight option from ABZ to YTO priced at $966 for future reference.
+Click: 540, 1800
+Figure 2: Schematic diagram of a trajectory tree. The screenshot in the middle represents the current
+state, the screenshot on the far right is the final state where the task is completed, and the screenshot
+on the far left shows the previous state. For screenshots that are not the current state, we set them to
+be semi-transparent. The red arrow denotes the UI location required for completing the corresponding
+task interaction. In the same state, different instructions will execute different actions, which may
+lead to transitions to different states. These different states extend into different trajectories, and these
+trajectories ultimately form the trajectory tree data based on overlapping states.
+interactions. As the high-level instructions are generated per screenshot, lacking a complete trajectory,
+the test dataset is termed a “pseudo” trajectory tree dataset.
+We observe that the same action can correspond to multiple high-level instructions. Therefore,
+we collect another test set based on the tree depth. We combine the high-level instructions
+I1
+t+1, I2
+t+1, . . . , IM
+t+1collected from screenshot St+1with action Atand screenshot Stinto the
+structure {(St,(Im, At), St+1)}M
+m=1, the actions Atare originally provided by Android Control,
+rather than being newly constructed by us. This indicates that screenshot Stcan transition to St+1
+by following instructions IM
+m=1. Similarly, to ensure the quality of the collected data, we employ
+GPT4o-mini to analyze the actions. The prompts used are included in the Appendix A.5.
+Our evaluation dataset consists of two dimensions: width and depth. The width dimension focuses
+on interactions across multiple UI icons on a screenshot, showcasing the ability of DC agents to
+understand the current screenshot and showing the generalization of DC agents. The depth dimension
+evaluates various high-level instructions associated with the same action, emphasizing the agents’
+understanding of actions and their connections to corresponding instructions. Figure 3 visually
+represents the dataset construction process for these dimensions.
+3.3 Dataset Statistics
+Our dataset comprises 1,536 episodes with 43,759 instructions, where the width dimension includes
+43,759 instructions, and the depth dimension contains 13,460 instructions. More details are shown in
+Appendix A.2.
+4123456789101112ScreenshotsUIUI Icon: 7 Low-level instructionClick the field displaying 'Aberdeen, Scotland, United Kingdom (ABZ)' to change the departure airport.High-level instructionChange the departure airport from Aberdeen (ABZ) to Edinburgh (EDI) for the flight search to Toronto.UIUI Icon: 11 Low-level instructionClick the 'Search flights' button to initiate the flight search process.High-level instructionSearch for flights from Aberdeen, Scotland (ABZ) to Toronto, Ontario (YTO) for one traveler in economy class, departing on August 10 and returning on August 15.UIUI Icon: 10 Low-level instructionClick the 'Any stops' option to specify the stopover preferences for the flight search.High-level instructionSelect 'Non-stop' flights for the search from Aberdeen to Toronto for 1 traveler in economy class.
+Click: 540, 2232Screenshots & Actions
+High-level instruction 1High-level instruction 2 High-level instruction 3 High-level instruction 4 High-level instruction m ……+Next screenshot Instructions……
+Click: 540, 2232High-level instruction 1High-level instruction 2 High-level instruction 3 High-level instruction 4 High-level instruction m ……Action & High-level instruction=Width
+DepthFigure 3: The data collection construction process involves width and depth dimensions. Width Di-
+mension: Screenshots are annotated, and GPT4o-mini is utilized to select UI elements for generating
+both low-level and high-level instructions. Depth Dimension: High-level instructions corresponding
+to subsequent screenshots are identified based on transitions between screenshots, alongside the
+collection of actions and high-level instructions.
+3.4 XBOUND Evaluation Method
+We introduce a novel evaluation method, XBOUND. This method calculates the Explore Metric for
+each screenshot, which involves averaging the action accuracy across all instructions associated with
+the screenshot. Compared to the Action Accuracy metric, XBOUND places greater emphasis on
+the instructional tasks associated with each screenshot. In the width dimension, it focuses on DC
+agents’ understanding of UI icons within the screenshots. In the depth dimension, it concentrates
+on the agents’ comprehension of the actions performed to the screenshots. The formulas for Action
+Accuracy and Explore Metric are as follows:
+Accuracy =1
+nnX
+i=1I(Ai), (1)
+Explore Metric =1
+ssX
+x=11
+mxmxX
+y=1I(Ay), (2)
+where I(·)is the indicator function, which equals 1 if the action Aiis correct and 0 otherwise. n
+represents the number of actions. s represents the number of screenshots. m represents the number of
+instructions associated with each screenshot.
+4 Experiment
+We extensively evaluate the Android Control Tree Dataset on the OS-Atlas and UI-TARS series. The
+experimental setup is presented in Sec. 4.1. The evaluation results are provided in Sec. 4.3, Sec. 4.4
+and Sec. 4.5.
+5Table 1: The results of the two evaluation metrics across different dimensions of the evaluation data
+show the differences between the Explore Metric and Action Accuracy. We use distinct colors to
+represent these differences: green indicates that the Explore Metric value is higher, while red indicates
+that the Explore Metric value is lower.
+ModelWidth Depth
+Action Accuracy Explore Metric Action Accuracy Explore Metric
+OS-Atlas-4B-Pro 42.82 41.92(-0.90) 30.24 31.80(+1.56)
+OS-Atlas-7B-Pro 59.50 57.59(-1.91) 53.22 53.44(+0.22)
+UI-TARS-7B-SFT 68.2 66.96(-1.24) 52.4 50.53(-1.87)
+UI-TARS-7B-DPO 67.57 66.08(-1.49) 53.41 52.02(-1.39)
+UI-TARS-1.5-7B 65.82 64.25(-1.57) 79.69 76.44(-3.25)
+4.1 Experimental Setup
+We chose the OS-Atlas and the UI-TARS series as our evaluation agents. We adhered to the prompts
+they utilized while deliberately excluding execution history from the inputs. Our experiments are
+conducted on an A100 GPU with 80GB of memory. The detailed calculations of the evaluation are
+included in the Appendix 4.2.
+4.2 Evaluation Metrics
+In line with the criteria set forth by Zhang and Zhang (2023); Wu et al. (2024), an action is considered
+correct if its type matches the ground-truth type. Specifically, for CLICK and LONG PRESS actions,
+correctness in the depth dimension is determined if they occur within a 14% screen distance from the
+reference gestures. In the width dimension, correctness is assessed based on whether the actions fall
+within the bounding box of the ground truth UI icon. For SCROLL actions, correctness is evaluated
+by checking if the direction (up, down, left, or right) matches the reference gesture. For TYPE
+actions, correctness is assessed using the F1 score; the action is deemed correct if the score is below
+a threshold of 0.5, as set in our experiments.
+4.3 Comprehensive Evaluation
+We present the Explore Metric and Action Accuracy performance of various DC agents across
+different dimensions in Table 1. In both the width and depth dimensions, we observe that the
+evaluation results using the Explore Metric closely align with those obtained using Action Accuracy
+for most agents, suggesting the scientific validity of the Explore Metric. Moreover, the results of
+the Explore Metric are slightly lower than those of Action Accuracy. This suggests that by utilizing
+screenshots as the unit of calculation, the Explore Metric offers a more precise measurement of the
+actual performance of DC agents. Notably, in the width dimension, UI-TARS-1.5-7B’s performance
+is slightly below that of UI-TARS-7B-SFT and UI-TARS-7B-DPO. However, in the depth dimension,
+UI-TARS-1.5-7B significantly outperforms the two models in the UI-TARS series. This indicates a
+superior understanding of actions compared to the other agents in the UI-TARS series on the existing
+test set.
+Moreover, the advantages of the Explore Metric extend beyond this; it effectively illustrates the
+distribution of DC agents’ performance in different screenshots . This metric provides a nuanced
+understanding of how DC agents perform across various screenshots and tasks, facilitating the
+identification of areas of strength and potential improvement within the agents’ capabilities. The
+detailed specifics of the distribution are included in Appendix A.3. To facilitate analysis, we segment
+the distribution into four intervals rooted in the distinct characteristics of the distribution:
+•Learning Stage (Explore Metric <30%)
+Indicate that the DC agent is still learning and adapting to the new environment.
+•Improvement Stage (30%≤Explore Metric <60%)
+Indicate that the DC agent has started mastering basic operations and making progress.
+6Figure 4: The proportion of DC agents across the four stages—Learning, Improvement, Proficient,
+and Expert—within both the width and depth dimensions.
+•Proficient Stage (60%≤Explore Metric <90%)
+Indicate that the DC agent has a relatively proficient understanding of the environment.
+•Expert Stage (90%≤Explore Metric ≤100% )
+Indicate a comprehensive and expert level of understanding by the DC agent.
+Figure 4 presents the proportion within both the width and depth dimensions.
+In the width dimension, we observe that the UI-TARS series performs better, with at least 20%
+of the distribution in the Expert Stage and at least 40% in the Proficient Stage. This suggests that
+the UI-TARS series has a stronger grasp of screenshots compared to the OS-Atlas series, with
+UI-TARS-7B-SFT exhibiting the best performance. Additionally, a significant proportion remains
+in the Learning Stage; for example, OS-Atlas-4B-Pro has a Learning Stage proportion as high as
+37.3%. The Learning Stage indicates that DC agents have not successfully understood these
+screenshots, posing challenges to the agents’ performance .
+In the depth dimension, the proportion of DC agents in the Learning Stage and Expert Stage is sig-
+nificantly higher compared to the other two stages. This suggests that the DC agents’ comprehension
+of actions in the test data is polarized; they either thoroughly understand the association between
+the actions and high-level instructions or fail to understand them completely. The actions in the
+Learning Stage pose challenges to the practical application of DC agents.
+4.4 Capability Evaluation based on Task
+Following Li et al. (2024a), we use Qwen2-vl-7B-Instruct to classify the test data based on the app
+categories provided. Ultimately, we select the five most prevalent app categories within the test set
+for further analysis. The result is shown in Table 2. The Explore Metric performance of five DC
+agents is included in the Appendix A.4.
+Width Dimension. The results reveal that the UI-TARS series demonstrates superior performance
+compared to the OS-Atlas series, with UI-TARS-7B-SFT excelling across all five application cat-
+egories. Notably, both series perform the worst in the Email task category, with OS-Atlas-7B-Pro
+exhibiting a substantial representation of screenshots during the Learning Stage, amounting to 39.6%.
+Conversely, the Shopping task is where the UI-TARS series displays the highest efficacy, achieving a
+performance rate of 70.58% with UI-TARS-7B-SFT. In the OS-Atlas series, the News task emerges
+as the best-performing domain, with OS-Atlas-7B-Pro attaining 59.12% effectiveness.
+7Table 2: The Explore Metric performance of DC agents in the width and depth dimension, segmented
+by different app categories. On the left of ‘/’ is Action Accuracy, and on the right of ‘/ is Explore
+Metric. The best results are highlighted in bold.
+ModelWidth
+Art & crafts Email News Shopping Other
+OS-Atlas-4B-Pro 40.97 / 39.78 34.38 / 32.69 44.99 / 44.15 41.81 / 41.91 40.32 / 39.04
+OS-Atlas-7B-Pro 57.10 / 55.40 50.58 / 46.18 60.98 / 59.12 57.36 / 58.30 57.54 / 55.30
+UI-TARS-7B-SFT 67.41 / 66.51 62.84 / 60.59 67.96 / 66.96 70.65 / 70.58 64.07 / 62.48
+UI-TARS-7B-DPO 66.21 / 65.32 62.88 / 60.28 67.69 / 66.50 69.53 / 68.98 63.28 / 61.24
+UI-TARS-1.5-7B 64.90 / 63.52 59.94 / 57.78 66.78 / 65.33 68.60 / 67.73 61.72 / 59.83
+ModelDepth
+Art & crafts Email News Shopping Other
+OS-Atlas-4B-Pro 33.18 / 36.27 30.58 / 29.54 29.38 / 32.50 30.02 / 30.18 26.55 / 25.54
+OS-Atlas-7B-Pro 55.12 / 55.13 65.56 / 63.73 50.08 / 51.36 50.21 / 46.43 52.42 / 51.59
+UI-TARS-7B-SFT 46.05 / 46.45 58.40 / 53.47 44.15 / 44.03 48.47 / 42.98 54.88 / 51.80
+UI-TARS-7B-DPO 45.58 / 46.34 64.60 / 60.67 47.64 / 47.71 46.82 / 41.75 56.45 / 52.86
+UI-TARS-1.5-7B 74.96 / 73.57 80.03 / 75.77 78.82 / 75.18 73.45 / 69.85 80.61 / 76.02
+From the standpoint of task performance, the OS-Atlas series training dataset predominantly contains
+News and Shopping tasks, whereas the UI-TARS series includes a significant proportion of News,
+Shopping, and Art & Crafts tasks. To enhance future training efficacy, an increased focus on the
+Email task is recommended, particularly by leveraging screenshots during the Learning Stage to
+develop effective trajectories.
+Depth Dimension. Our analysis reveals that the UI-TARS-1.5-7B exhibits superior performance
+across the five app tasks. Notably, OS-Atlas-7B-Pro outperforms both UI-TARS-7B-SFT and UI-
+TARS-7B-DPO. We hypothesize that the divergent performance dynamics between OS-Atlas-7B-Pro,
+UI-TARS-7B-SFT, and UI-TARS-DPO across the two dimensions can be largely attributed to the
+diversity of the training data. Specifically, the training dataset for OS-Atlas-7B-Pro demonstrates
+reduced diversity in specific app tasks compared to the UI-TARS series. However, the dataset closely
+resembles the test set, enhancing OS-Atlas-7B-Pro’s prowess in the depth dimension while reducing
+its efficacy in the width dimension.
+From the standpoint of task performance, the Email task emerges as the best-performing task across
+all five DC agents. This indicates a current lack of diversity in the Email task, resulting in pronounced
+performance variations within the depth dimension.
+4.5 Capability Analysis based on Cases
+To determine the current limitations of DC agents, we select a set of representative cases from
+various tasks. These examples are drawn from the Learning Stage and Improvement Stage of our test
+data. For each case, we meticulously construct high-level instructions, ensuring the accuracy of the
+corresponding interactive UI icons. Our analysis reveals the following findings:
+(1)Inadequate Understanding of UI Icons Leading to Task Failure: This error occurs when UI
+icons are absent from the tasks in the training set, resulting in the DC agents’ inability to comprehend
+the potential outcomes of interactions with these icons. Consequently, the agent fails to assimilate
+the high-level instructions related to these UI icons. In Figure 5(a), the goal is to use the image for
+search, but the DC agent does not understand how to perform an image search, so it continues to click
+the search box.
+(2)Insufficient Distinction Between Similar UI Icons: This error arises when multiple similar UI
+icons are present on the screen, and the DC agent has not been sufficiently trained to differentiate
+between these icons, which leads to distinct results. The visual similarity confuses the agent, causing
+8Instruction:Use the camera to scan a barcode of a product to find it on Amazon.GUI Agent:thoughts: Click on the search bar at the top of the screen. actions: CLICK <point>[[546,97]]</point>
+(a) Inadequate Understanding of UI Icons
+Instruction:Favorite the content 'Edge of Dawn' to easily find it later.GUI Agent:actions:\nCLICK <point>[[63,394]]</point>
+(b) Insufficient Distinction Between Similar UI Icons
+Instruction:Add the selected pizza to the cart and review the cart contents before proceeding to checkout.GUI Agent:actions: CLICK <point>[[770,652]]</point>
+(d) Failure to Learn Topological Relationships Between Actions
+Instruction:Sort the flight list to display flights starting from the lowest price to find the most affordable option.GUI Agent:thoughts: Click on the sort filter at the bottom of the screenactions:CLICK <point>[[856,941]]</point>
+(c) Inaccurate Positioning
+Instruction:Cancel 'Salt' for the shopping list and prepare to update the list.GUI Agent:thoughts: Click on the 'Update' button at the top right of the screenactions:CLICK <point>[[859,290]]</point>
+(e) Incorrect Environmental State Awareness:Figure 5: Five types of errors are illustrated through representative examples. A green pointer
+indicates the correct action, while a red pointer denotes the incorrect action.
+it to make incorrect choices that affect task completion. In Figure 5(b), the intention is to like “Edge
+of Dawn” to express appreciation, but the DC agent incorrectly clicks on the first post instead.
+(3)Inaccurate Positioning: Predominantly observed within the OS-Atlas series, this error results
+from the DC agents’ inadequate grounding capabilities, leading to incorrect positioning during task
+execution. In Figure 5(c), the objective is to find the cheapest flight, but the DC agent mistakenly
+clicks the wrong UI icon.
+(4)Failure to Learn Topological Relationships Between Actions: This error is due to a lack of
+examples illustrating these relationships in the training set trajectories. In certain task scenarios on
+specific pages, actions may have topological dependencies where action B must precede action A.
+This error is notably recurrent in the OS-Atlas series. In Figure 5(d), the instruction is to complete the
+customization of a pizza directly. However, the “Choose Your Medium Pizza” option wasn’t selected,
+and “Add” should only be executed after completing the “Choose Your Medium Pizza” step.
+(5)Incorrect Environmental State Awareness: This error occurs when the agent fails to correctly
+understand or perceive the environmental state necessary for task execution, resulting in redundant
+or incorrect actions. This issue might arise from a deficiency in the agent’s contextual awareness,
+limiting its ability to adjust to dynamic changes or state requirements. In Figure 5(e), the goal is to
+remove “Salt” before the update, but the DC agent fails to notice that “Salt” is already added and
+proceeds with the update action instead.
+5 Conclusion
+This study introduces an evaluation method termed XBOUND. Building upon the Android Control
+benchmark, we expand the original test set and develop a novel “pseudo” Trajectory Tree Test
+Set. Utilizing this dataset, we evaluate OS-Atlas and UI-TARS series with XBOUND, assessing
+five DC agents across two dimensions—width and depth—to delineate their capability boundaries.
+Additionally, we analyze five distinct app tasks to uncover agent-specific limitations and manually
+curate representative cases to illustrate the common shortcomings of current DC agents.
+9References
+Achiam, J., Adler, S., Agarwal, S., Ahmad, L., Akkaya, I., Aleman, F. L., Almeida, D., Altenschmidt,
+J., Altman, S., Anadkat, S., et al. (2023). Gpt-4 technical report. arXiv preprint arXiv:2303.08774 .
+Anil, R., Dai, A. M., Firat, O., Johnson, M., Lepikhin, D., Passos, A., Shakeri, S., Taropa, E., Bailey,
+P., Chen, Z., et al. (2023). Palm 2 technical report. arXiv preprint arXiv:2305.10403 .
+Bai, C., Zang, X., Xu, Y ., Sunkara, S., Rastogi, A., Chen, J., et al. (2021). Uibert: Learning generic
+multimodal representations for ui understanding. arXiv preprint arXiv:2107.13731 .
+Burns, A., Arsan, D., Agrawal, S., Kumar, R., Saenko, K., and Plummer, B. A. (2022). A dataset
+for interactive vision-language navigation with unknown command feasibility. In European
+Conference on Computer Vision , pages 312–328. Springer.
+Chen, J., Yuen, D., Xie, B., Yang, Y ., Chen, G., Wu, Z., Yixing, L., Zhou, X., Liu, W., Wang, S., et al.
+(2024). Spa-bench: A comprehensive benchmark for smartphone agent evaluation. In NeurIPS
+2024 Workshop on Open-World Agents .
+Cheng, K., Sun, Q., Chu, Y ., Xu, F., Li, Y ., Zhang, J., and Wu, Z. (2024). Seeclick: Harnessing gui
+grounding for advanced visual gui agents. arXiv preprint arXiv:2401.10935 .
+Deka, B., Huang, Z., Franzen, C., Hibschman, J., Afergan, D., Li, Y ., Nichols, J., and Kumar, R.
+(2017). Rico: A mobile app dataset for building data-driven design applications. In Proceedings of
+the 30th annual ACM symposium on user interface software and technology , pages 845–854.
+Deng, S., Xu, W., Sun, H., Liu, W., Tan, T., Liu, J., Li, A., Luan, J., Wang, B., Yan, R., et al.
+(2024). Mobile-bench: An evaluation benchmark for llm-based mobile agents. arXiv preprint
+arXiv:2407.00993 .
+Deng, X., Gu, Y ., Zheng, B., Chen, S., Stevens, S., Wang, B., Sun, H., and Su, Y . (2023). Mind2web:
+Towards a generalist agent for the web. Advances in Neural Information Processing Systems ,
+36:28091–28114.
+Gou, B., Wang, R., Zheng, B., Xie, Y ., Chang, C., Shu, Y ., Sun, H., and Su, Y . (2024). Navigating
+the digital world as humans do: Universal visual grounding for gui agents. arXiv preprint
+arXiv:2410.05243 .
+Hong, W., Wang, W., Lv, Q., Xu, J., Yu, W., Ji, J., Wang, Y ., Wang, Z., Dong, Y ., Ding, M., et al.
+(2024). Cogagent: A visual language model for gui agents. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition , pages 14281–14290.
+Li, G. and Li, Y . (2022). Spotlight: Mobile ui understanding using vision-language models with a
+focus. arXiv preprint arXiv:2209.14927 .
+Li, W., Bishop, W. E., Li, A., Rawles, C., Campbell-Ajala, F., Tyamagundlu, D., and Riva, O. (2024a).
+On the effects of data scale on ui control agents. Advances in Neural Information Processing
+Systems , 37:92130–92154.
+Li, Y ., He, J., Zhou, X., Zhang, Y ., and Baldridge, J. (2020). Mapping natural language instructions
+to mobile ui action sequences. arXiv preprint arXiv:2005.03776 .
+Li, Y ., Zhang, C., Yang, W., Fu, B., Cheng, P., Chen, X., Chen, L., and Wei, Y . (2024b). Appagent v2:
+Advanced agent for flexible mobile interactions. arXiv preprint arXiv:2408.11824 .
+Lu, Q., Shao, W., Liu, Z., Meng, F., Li, B., Chen, B., Huang, S., Zhang, K., Qiao, Y ., and Luo, P.
+(2024). Gui odyssey: A comprehensive dataset for cross-app gui navigation on mobile devices.
+arXiv preprint arXiv:2406.08451 .
+Ma, X., Zhang, Z., and Zhao, H. (2024). Coco-agent: A comprehensive cognitive mllm agent for
+smartphone gui automation. arXiv preprint arXiv:2402.11941 .
+Qin, Y ., Ye, Y ., Fang, J., Wang, H., Liang, S., Tian, S., Zhang, J., Li, J., Li, Y ., Huang, S., et al. (2025).
+Ui-tars: Pioneering automated gui interaction with native agents. arXiv preprint arXiv:2501.12326 .
+10Rawles, C., Clinckemaillie, S., Chang, Y ., Waltz, J., Lau, G., Fair, M., Li, A., Bishop, W., Li, W.,
+Campbell-Ajala, F., et al. (2024). Androidworld: A dynamic benchmarking environment for
+autonomous agents. arXiv preprint arXiv:2405.14573 .
+Rawles, C., Li, A., Rodriguez, D., Riva, O., and Lillicrap, T. (2023). Androidinthewild: A large-
+scale dataset for android device control. Advances in Neural Information Processing Systems ,
+36:59708–59728.
+Sun, L., Chen, X., Chen, L., Dai, T., Zhu, Z., and Yu, K. (2022). Meta-gui: Towards multi-modal
+conversational agents on mobile gui. arXiv preprint arXiv:2205.11029 .
+Sun, Q., Cheng, K., Ding, Z., Jin, C., Wang, Y ., Xu, F., Wu, Z., Jia, C., Chen, L., Liu, Z., et al. (2024).
+Os-genesis: Automating gui agent trajectory construction via reverse task synthesis. arXiv preprint
+arXiv:2412.19723 .
+Wang, J., Xu, H., Jia, H., Zhang, X., Yan, M., Shen, W., Zhang, J., Huang, F., and Sang, J. (2024).
+Mobile-agent-v2: Mobile device operation assistant with effective navigation via multi-agent
+collaboration. arXiv preprint arXiv:2406.01014 .
+Wu, Z., Wu, Z., Xu, F., Wang, Y ., Sun, Q., Jia, C., Cheng, K., Ding, Z., Chen, L., Liang, P. P.,
+et al. (2024). Os-atlas: A foundation action model for generalist gui agents. arXiv preprint
+arXiv:2410.23218 .
+Xie, T., Zhang, D., Chen, J., Li, X., Zhao, S., Cao, R., Hua, T. J., Cheng, Z., Shin, D., Lei, F.,
+et al. (2024). Osworld: Benchmarking multimodal agents for open-ended tasks in real computer
+environments. Advances in Neural Information Processing Systems , 37:52040–52094.
+Yan, A., Yang, Z., Zhu, W., Lin, K., Li, L., Wang, J., Yang, J., Zhong, Y ., McAuley, J., Gao, J., et al.
+(2023). Gpt-4v in wonderland: Large multimodal models for zero-shot smartphone gui navigation.
+arXiv preprint arXiv:2311.07562 .
+Yang, H., Yue, S., and He, Y . (2023). Auto-gpt for online decision making: Benchmarks and
+additional opinions. arXiv preprint arXiv:2306.02224 .
+Zhang, J., Wu, J., Teng, Y ., Liao, M., Xu, N., Xiao, X., Wei, Z., and Tang, D. (2024a). Android in the
+zoo: Chain-of-action-thought for gui agents. arXiv preprint arXiv:2403.02713 .
+Zhang, S., Zhang, Z., Chen, K., Ma, X., Yang, M., Zhao, T., and Zhang, M. (2024b). Dynamic
+planning for llm-based graphical user interface automation. arXiv preprint arXiv:2410.00467 .
+Zhang, Z. and Zhang, A. (2023). You only look at screens: Multimodal chain-of-action agents. arXiv
+preprint arXiv:2309.11436 .
+Zheng, B., Gou, B., Kil, J., Sun, H., and Su, Y . (2024). Gpt-4v (ision) is a generalist web agent, if
+grounded. arXiv preprint arXiv:2401.01614 .
+Zhou, S., Xu, F. F., Zhu, H., Zhou, X., Lo, R., Sridhar, A., Cheng, X., Ou, T., Bisk, Y ., Fried, D., et al.
+(2023). Webarena: A realistic web environment for building autonomous agents. arXiv preprint
+arXiv:2307.13854 .
+11A Appendix / supplemental material
+A.1 Limitations
+The data presented in this paper is generated using GPT4o-mini and has not been executed in a real
+environment. Although various data evaluation methods have been applied for filtering, there may
+still be issues within this data. These include instances where the generated actions fail to successfully
+achieve the high-level instructions or cases where the UI icons selected by GPT4o-mini are incorrect.
+Ultimately, the primary focus of this work is on introducing the new evaluation method, XBOUND,
+and its application to DC agents.
+A.2 The Number of Instructions
+We have tallied the number of instructions associated with each screenshot and the action distribution,
+with detailed information presented in Figure 6 and Figure 7.
+Figure 6: Instructions per screenshot distribu-
+tion
+ Figure 7: Action distribution
+A.3 The Distribution of the Explore Metric scores
+Figure 8 and Figure 9 provide the distribution overview of the Explore Metric.
+Figure 8: The distribution of the Explore Metric scores for different DC agents in the width dimension.
+12Figure 9: The distribution of the Explore Metric scores for different DC agents in the depth dimension.
+A.4 Explore Metric performance of various DC agents
+Figure 10 depicts the four stages of different DC agents in the width dimension.
+Figure 11 depicts the four stages of different DC agents in the depth dimension.
+13(a) The proportion of OS-Atlas-4B-Pro across the four stages within the width dimension.
+(b) The proportion of OS-Atlas-7B-Pro across the four stages within the width dimension.
+(c) The proportion of UI-TARS-7B-SFT across the four stages within the width dimension.
+(d) The proportion of OS-Atlas-7B-Pro across the four stages within the width dimension.
+(e) The proportion of UI-TARS-7B-SFT across the four stages within the width dimension.
+Figure 10: The proportion of various DC agents across the four stages within the width dimension.
+14(a) The proportion of OS-Atlas-4B-Pro across the four stages within the depth dimension.
+(b) The proportion of OS-Atlas-7B-Pro across the four stages within the depth dimension.
+(c) The proportion of UI-TARS-7B-SFT across the four stages within the depth dimension.
+(d) The proportion of OS-Atlas-7B-Pro across the four stages within the depth dimension.
+(e) The proportion of UI-TARS-7B-SFT across the four stages within the depth dimension.
+Figure 11: The proportion of various DC agents across the four stages within the depth dimension.
+15A.5 Prompts
+Prompt for constructing the trajectory tree dataset.
+You are a mobile expert who excels at interacting with elements on mobile screens to
+complete tasks. I have a task for you, and I hope you can use your extensive
+knowledge to identify interactive elements on mobile screens. I will provide
+you with the following information:
+1. The type of action currently being executed, which can be one of five types:
+CLICK, SCROLL, TYPE, PRESS_BACK, and LONG_PRESS. You need to choose an action
+that can interact with the current screen.
+2. Analysis of the mobile screen, which corresponds to the marked boxes in the
+images.
+Your task is to identify five interactive elements on the current mobile screen. The
+output should include four parts:
+1. Sub-Instruction: Identify the interactive elements and generate natural language
+instructions for interacting with these elements. The instructions should be
+concise, clear, and executable, and must include critical details such as
+filenames, times, or other content as they appear on the screen. For example: "
+Scroll left to open the app drawer, displaying all installed applications on
+the device", "Click the chat interface, allowing the user to view and
+participate in conversation", "Type the username ’Agent’, preparing for the
+next step in logging into the account".
+2. Analysis: Analyze possible subsequent operations based on the current interface
+and action instructions. This analysis should involve step-by-step reasoning,
+considering potential changes on the screen and actions that can be taken after
+these changes. For example: "After clicking the plus button, a dropdown menu
+appears with an option to create a document. I can select this option to create
+a new document. First, I need to name the document, then enter content into
+the document, and finally save the document and exit".
+3. High-Level Instruction: Based on the analysis results, envision a high-level task
+that can be completed within the current interface. There are two types of
+High-Level Instructions: Task-Oriented: Completing a series of operations to
+achieve a specific goal. Question-Oriented: Performing a series of operations
+and deriving an answer to a specific question. For example: Share my favorite
+Book \"the Queen\\’s Gambit\" to my Friend Natalie larson over her gmail
+address -natalie.larson1998@gmail.com from the PocketBook app. Ensure that the
+High-Level Instruction is executable by including all critical specifics, such
+as filenames, relevant timings, or required details.
+4. UI item: Based on the current page parsed result and action instructions,
+identify the corresponding UI item and provide the specific number.
+You only need to return a dictionary formatted as follows:
+{
+"Sub-Instruction": "xxx",
+"Analysis": "xxx",
+"High-Level-Instruction": "xxx",
+"UI item": x
+}
+Current screen analysis:
+Prompt for reasoning the correct golden action.
+You are a GUI task expert, I will provide you with a low-level instruction, a golden
+ui with its corresponding ID.
+Low-level instruction:
+UI ID:
+Please generate the action for the next step.
+Candidate Actions:
+"action_type": "click", "ui": <ui_idx>
+"action_type": "long_press", "ui": <ui_idx>
+16"action_type": "type", "text": <text_input>
+"action_type": "scroll", "direction": <up, down, left, or right>
+"action_type": "navigate_home"
+"action_type": "navigate_back"
+"action_type": "open_app", "app_name": <app_name>
+"action_type": "wait"
+"action_type": "status", "goal_status": <"successful","infeasible">
+You need to generate a script in the form: actions: {ACTION}\nMake sure to consider
+the details in the screenshot and the task requirements to create an accurate
+and functional script."
+Prompt for evaluating whether actions correctly execute low-level instructions. It is used to filter out
+high-quality data in the width dimension.
+You are a mobile expert who excels at interacting with elements on mobile screens to
+complete tasks. I have a task for you, and I hope you can use your extensive
+knowledge to identify interactive elements on mobile screens. I will provide
+you with the following information:
+1. A low-level instruction, which we will follow to perform actions on the current
+screen.
+2. The type of action currently being executed, which can be one of two types: CLICK
+or LONG_PRESS. You need to determine whether this action can fulfill the
+current low-level instruction.
+3. The current screen environment, with the position where the action(click and
+long_press) needs to be executed marked by a red box.
+I will provide you with a screenshot, along with the low-level instructions and the
+action to be executed. Your task is to determine whether the current action
+brings us closer to achieving the low-level instruction. If the current action
+contributes to the realization of the low-level instruction, answer "Yes";
+otherwise, answer "No".
+You only need to return a dictionary formatted as follows:
+{
+"Analysis": "xxx",
+"Correct": Yes/No
+}
+Prompt for evaluating whether low-level instructions solve high-level instructions. It is used to filter
+out high-quality data in the depth dimension.
+You are a mobile expert who excels at interacting with elements on mobile screens to
+complete tasks. I have a task for you, and I hope you can use your extensive
+knowledge to identify interactive elements on mobile screens. I will provide
+you with the following information:
+1. A high-level instruction, which is our ultimate goal to be executed.
+2. A low-level instruction, which we will follow to perform actions on the current
+screen.
+3. The current screen environment, with the position where the action needs to be
+executed marked by a red dot.
+I will provide you with a screenshot, along with the high-level and low-level
+instructions to be executed. Your task is to determine whether the current low-
+level instruction brings us closer to achieving the high-level instruction. If
+the current low-level instruction contributes to the realization of the high-
+level instruction, answer "Yes"; otherwise, answer "No".
+You only need to return a dictionary formatted as follows:
+{
+"Analysis": "xxx",
+"Correct": Yes/No
+17}
+Prompt for classifying trajectories into specific app tasks.
+You are a GUI agent. I’ll give you a total goal, a screenshot, and some categories
+of apps, and I’ll ask you to choose the closest to the general goal among those
+categories.
+## Output Format
+You only need to return a dictionary formatted as follows:
+{
+"Analysis": "xxx",
+"Categories": "xxx"
+}
+## APP Categories
+1. Shopping
+2. Productivity & Office
+3. Other
+4. Files
+5. Transportation
+6. Health & Fitness
+7. Recipes
+8. Flights
+9. Clock & Alarms
+10. Reminders
+11. Voice recording
+12. Education
+13. Books
+14. Email
+15. Calendar
+16. Notes & Todos
+17. Maps
+18. Videos
+19. News
+20. Meditation
+21. Weather
+22. Finance
+23. Art & crafts
+24. Gardening
+25. Contacts
+26. Drawing
+27. Music
+28. Real estate
+29. Messaging
+## Total Goal
+18

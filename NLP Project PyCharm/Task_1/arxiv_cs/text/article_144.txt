@@ -1,0 +1,1937 @@
+arXiv:2505.20686v1  [cs.LG]  27 May 2025Accelerating RL for LLM Reasoning with
+Optimal Advantage Regression
+Kianté Brantley1∗, Mingyu Chen2, Zhaolin Gao3,
+Jason D. Lee4, Wen Sun3, Wenhao Zhan4, Xuezhou Zhang2
+1Harvard University,2Boston University,3Cornell University,4Princeton University
+Abstract
+Reinforcement learning (RL) has emerged as a powerful tool for fine-tuning large
+language models (LLMs) to improve complex reasoning abilities. However, state-
+of-the-art policy optimization methods often suffer from high computational over-
+head and memory consumption, primarily due to the need for multiple generations
+per prompt and the reliance on critic networks or advantage estimates of the current
+policy. In this paper, we propose A⋆-PO, a novel two-stage policy optimization
+framework that directly approximates the optimal advantage function and enables
+efficient training of LLMs for reasoning tasks. In the first stage, we leverage
+offline sampling from a reference policy to estimate the optimal value function V⋆,
+eliminating the need for costly online value estimation. In the second stage, we
+perform on-policy updates using a simple least-squares regression loss with only a
+single generation per prompt. Theoretically, we establish performance guarantees
+and prove that the KL-regularized RL objective can be optimized without requiring
+complex exploration strategies. Empirically, A⋆-PO achieves competitive perfor-
+mance across a wide range of mathematical reasoning benchmarks, while reducing
+training time by up to 2 ×and peak memory usage by over 30% compared to PPO,
+GRPO, and REBEL [Gao et al., 2024a]. Implementation of A⋆-PO can be found at
+https://github.com/ZhaolinGao/A-PO .
+1 Introduction
+Recent advances in large language models (LLMs), including OpenAI-o1 [OpenAI, 2024], DeepSeek-
+R1 [DeepSeek-AI, 2025], and Kimi-1.5 [Team, 2025], have demonstrated remarkable reasoning
+capabilities. These models excel at producing long Chain-of-Thought (CoT) [Wei et al., 2023,
+DeepSeek-AI, 2025, Zeng et al., 2025] responses when tackling complex tasks and exhibit advanced,
+reflection-like reasoning behaviors [Gandhi et al., 2025]. A key factor driving these improvements is
+reinforcement learning (RL) with rule-based rewards derived from ground-truth answers [Lambert
+et al., 2025, DeepSeek-AI, 2025, Team, 2025], where models receive binary feedback indicating
+whether their final answers are correct.
+Substantial efforts have been devoted to refining RL algorithms, such as PPO [Schulman et al., 2017]
+and GRPO [Shao et al., 2024], to further improve performance and training stability [Richemond et al.,
+2024, Wang et al., 2024, Ji et al., 2024, Liu et al., 2024, Yu et al., 2025, Liu et al., 2025b]. However,
+these methods either require explicit critic networks to estimate value functions or advantages, or
+rely on multiple generations per prompt, leading to substantial computational overhead and memory
+consumption. These limitations make it challenging to scale to long-context reasoning tasks and
+larger model sizes. This naturally raises the question: Can we develop simpler and more efficient RL
+algorithms for long context reasoning?
+∗Authors are listed in alphabetical order of their last names.
+Correspondence to mingyuc@bu.edu ,zg292@cornell.edu ,wenhao.zhan@princeton.edu
+Preprint. Under review.GRPOonline𝑦𝑦𝑦∼𝜋!(⋅|𝑥)…PPOonline𝑦∼𝜋!(⋅|𝑥)𝑉(𝑥,𝑦)𝐴∗-PO                  offline𝑦𝑦𝑦∼𝜋"#$(⋅|𝑥)…𝑦~𝜋!(⋅|𝑥)online
+Figure 1: We present A⋆-PO, an efficient, regression-based approach for LLM post-training. Prior
+methods such as GRPO and PPO incur high computational costs, either due to requiring multiple
+samples per prompt or maintaining an explicit value network. In contrast, A⋆-PO simplifies the
+training process by estimating the optimal value function using offline generations from πrefand
+requiring only a single response per prompt during online RL. As a result, A⋆-PO reduces training
+time by up to 2 ×compared to GRPO and PPO.
+Our answer is A⋆-PO, Policy Optimization via Optimal Advantage Regression, a policy optimization
+algorithm that uses only a single sample per prompt during online RL. Instead of relying on an
+explicit value network or multiple online generations to estimate the advantage of the current policy
+during training, our approach directly approximates the fixed optimal value function in an offline
+manner. We observe that the value function of the optimal policy of the KL-regularized RL can
+be expressed as an expectation under the reference policy. Based on this insight, the first stage of
+the algorithm performs offline sampling from the reference policy to estimate the optimal values
+for all prompts in the training set. This stage is highly parallelizable and can efficiently leverage
+fast inference libraries without requiring gradient computations. In the second stage, we perform
+on-policy updates via regressing optimal advantages via least square regression, where the advantages
+are constructed using the optimal values from the first stage. The on-policy updates only use a single
+generation per prompt, which drastically reduces both the computational and memory overhead
+associated with RL training. Thus, algorithmically, A⋆-PO eliminates heuristics such as clipping
+and response-wise reward normalization, resulting an extremely simple algorithm .
+Theoretically, we establish formal performance guarantees for A⋆-PO, showing that it achieves
+near-optimal performance. Notably, our theoretical analysis reveals that, without sophisticated
+exploration, A⋆-PO learns a near-optimal policy with polynomial sample complexity, as long
+as the base model’s probability of solving a math question is lower bounded above zero .
+Experimentally, we evaluate A⋆-PO extensively across a range of reasoning benchmarks, including
+GSM8K [Cobbe et al., 2021], MATH [Hendrycks et al., 2021], and competition-level datasets such
+as AMC, AIME, and HMMT. Across multiple model sizes, including Qwen2.5-1.5B, 3B, and 7B,
+our approach consistently achieves comparable or superior results to strong baselines such as PPO,
+GRPO, and REBEL [Gao et al., 2024a], while achieving the lowest KL-divergence to the base model,
+and reducing training time by up to 2 ×and peak memory usage by over 30%.
+2 Preliminary
+In this work, we denote xas a prompt (e.g., a math question) and yas a generation (e.g., a reasoning
+chain plus a solution for a given math question). Consider the following KL-regularized RL objective:
+max
+πEx,y∼π(·|x)r(x, y)−βKL(π(·|x)|πref(·|x)).
+We mainly consider the setting where ris binary: r(x, y) = 1 if the generation ycontains
+the correct answer and 0otherwise. It is well known that the optimal policy is π⋆(y|x)∝
+πref(y|x) exp( r(x, y)/β). We also denote V⋆(x)as the optimal value function of the KL-regularized
+RL objective above. It can be shown that V⋆has the following closed-form expression:
+∀x:V⋆(x) =βlnEy∼πref(·|x)[exp( r(x, y)/β)]. (1)
+Note that the expectation in V⋆is under πref, which indicates a simple way of estimating V⋆: we
+can generate multiple i.i.d. responses from πrefand take the average to estimate V⋆. We will show
+that under realistic conditions, the bias and variance of such an estimator are well under control. We
+aim to learn a policy that can maximize the expected reward (e.g., maximize the average accuracy).
+Particularly, our theoretical results will model the performance gap between our learned policy and π⋆
+– the optimal policy of the KL-regularized RL objective, in terms of maximizing the expected reward.
+2Algorithm 1 A⋆-PO: Policy Optimization via Optimal Advantage Regression
+Require: Training prompts set X, reference policy πref, temperature β, sample size N, iterations T
+Ensure: Learned policy πT
+1:### Stage 1: Estimating V⋆(x)for all training prompts xinX
+2:for all x∈ X do
+3: Draw Ni.i.d. samples {yi}N
+i=1∼πref(·|x)
+4: Compute bV⋆(x)←βln
+1
+NPN
+i=1exp 
+r(x, yi)/β
+.
+5:end for
+6:(Optional: eliminate all training prompts whose N solutions are all wrong)
+7:### Stage 2: On-policy Update with one rollout per prompt
+8:fort= 1toTdo
+9: Collect a batch of training samples D:={(x, y)}withx∈ X andy∼πt(·|x)
+10: Update policy πttoπt+1by performing SGD on the following least square loss ℓt(π)
+ℓt(π) :=X
+(x,y)∈D
+βlnπ(y|x)
+πref(y|x)−
+r(x, y)−bV⋆(x)2
+11:end for
+3 Algorithm
+The algorithm consists of two stages. The first stage collects data from πrefand estimates V⋆(x)for
+allxin the training set. Particularly, for every xin the training set, we generate Ni.i.d responses
+y1, . . . , y N, and estimate V⋆(x)as:bV⋆(x) =βlnPN
+i=1exp(r(x, yi)/β)/N
+. Note that in general
+bV⋆is a biased estimate of V⋆due to the nonlinearity of the lnfunction. However, we will show that
+as long as vref(x)–the probability of πrefgenerating a correct solution at x, is lower bounded above
+zero, then the bias |bV⋆(x)−V⋆(x)|can be well controlled and shrinks quickly as Nincreases. We
+emphasize that while this stage requires generating Nresponses per prompt xfrom πref,it can be
+done completely offline, the data can be collected efficiently in parallel without any gradient
+computation, and any off-shelf faster inference library can be used for this stage.
+The second stage performs the on-policy update. Specifically, at iteration t, given the current policy
+πt, we optimize the following loss:
+ℓt(π) :=Ex,y∼πt(·|x)
+βlnπ(y|x)
+πref(y|x)−
+r(x, y)−bV⋆(x)2
+,
+where the expectation is taken under the current policy πtandr(x, y)−bV⋆(x)approximates the
+optimal advantage A⋆(x, y) =r(x, y)−V⋆(x)in the bandit setting as Q(x, y) =r(x, y)—hence the
+name A⋆-PO. To estimate the least-squares loss ℓt(π), we collect a batch of online samples {(x, y)}
+withy∼πt(·|x)and perform a small number of stochastic gradient descent steps, starting from πt,
+to obtain the updated policy πt+1as outlined in Algorithm 1. Notably, during this online stage, we
+generate only a single sample yper prompt x, significantly accelerating the training.
+The motivation behind the above loss is that when bV⋆(x) =V⋆(x), the optimal policy π⋆for the
+KL-regularized RL objective is the global minimizer of the least-squares regression loss, regardless
+of the distribution under which the expectation is defined (i.e., MSE is always zero under π⋆).
+Unlike popular RL algorithms such as PPO [Schulman et al., 2017] and GRPO [Shao et al., 2024],
+we do not apply a clipping mechanism to constrain πt+1from deviating too far from πt. Instead,
+we introduce a single regularization term based on the KL divergence to the fixed reference policy
+πref. Furthermore, while PPO and GRPO rely on the advantage of the current policy , defined as
+Aπt:=r(x, y)−Vπt(x), we instead use the optimal advantage A⋆. A key benefit of using V⋆is
+that it can be pre-computed efficiently using a large number of samples from πref(Eq. (1)), whereas
+Vπtmust be estimated on the fly, requiring either multiple generations during training (e.g., GRPO
+or RLOO [Kool et al., 2019]) or maintaining an explicit critic network (e.g., PPO). Since A⋆-PO
+only generates one response per prompt, it also eliminates the heuristic of response-wise reward
+35 10 15 20
+Training Time (hours)7580859095Test Accuracy
+40 60 80 100
+Peak Memory Usage (%)7580859095
+0.2 0.3 0.4
+KL(||ref)
+7580859095
+PPO
+GRPO
+REBEL
+A*
+1.5B
+3B
+7BFigure 2: Test accuracy versus training time, peak memory usage, and KL divergence across
+four baselines and three model sizes on GSM8K. Our approach (orange) can achieve comparable
+performance (accuracy) to baselines GRPO and PPO, while being 2x faster, more memory efficient,
+and achieving a smaller KL divergence. Note that for A⋆-PO, the training time includes the time
+from both stages (i.e., offline data collection from πrefand online RL training).
+normalization. Finally, most existing policy optimization algorithms—including PG [Williams,
+1992], TRPO [Schulman et al., 2015], GRPO, PPO, and REBEL [Gao et al., 2024a]—follow the idea
+of approximate policy iteration [Bertsekas and Tsitsiklis, 1996, Kakade and Langford, 2002] where
+πt+1is designed to approximately optimize the advantage function of the current policy Aπt, subject
+to an implicit or explicit constraint that prevents it from deviating too far from πt. The consequence
+of relying on such an approximate policy iteration style update is that it requires additional strong
+structural condition such as policy completeness [Bhandari and Russo, 2024]. In contrast, A⋆-PO
+does not follow the approximate policy iteration paradigm. It places no explicit constraints on keeping
+πt+1close to πt. Instead, it directly aims to learn π⋆by regressing on the optimal advantages.
+4 Experiments
+Our implementation of A⋆-PO closely follows the pseudocode in Algorithm 1, with the only mod-
+ification of using two different KL-regularization coefficients, β1andβ2, during stages 1 and 2
+respectively. In stage 1, we employ a relatively large β1to ensure a smoother estimation of V⋆(x).
+In contrast, a smaller β2is used in stage 2 to relax the KL constraint to πref, encouraging the learned
+policy πto better optimize the reward. Although this introduces an additional hyperparameter, we
+find that the same set of β1andβ2works well across different datasets and model sizes, and therefore,
+we keep them fixed throughout all experiments. In stage 1, we sample N= 8responses per prompt
+to estimate the optimal value function with β1= 1/2. At stage 2, we collect a dataset D= (x, y)
+withx∈ X andy∼πt(· |x), and optimize the least-squares regression objective using gradient
+descent with AdamW [Loshchilov and Hutter, 2017] and β2= 1e−3. We empirically evaluate the
+performance of A⋆-PO across various reasoning datasets, model sizes, and evaluation benchmarks.
+Additional details are provided in Appendix A, and qualitative analysis is shown in Appendix B.
+4.1 Basic Reasoning on GSM8K
+Training Details. We conduct experiments on the GSM8K dataset [Cobbe et al., 2021], which
+consists of grade school-level math problems. We compare A⋆-PO against several baseline RL
+algorithms, including PPO [Schulman et al., 2017], GRPO [Shao et al., 2024], and REBEL [Gao
+et al., 2024a]. Simpler policy gradient methods such as REINFORCE with Leave-One-Out (RLOO)
+[Kool et al., 2019] are not included, as prior work has shown that REBEL consistently outperforms
+RLOO in performance with similar computational efficiency [Gao et al., 2024a]. We sample two
+generations per prompt for GRPO and use a model of the same size as the policy for the critic in PPO.
+Following the DeepSeek-R1 training recipe [DeepSeek-AI, 2025], we perform RL directly on the base
+model without any prior supervised fine-tuning (SFT). We report results using three different model
+sizes—1.5B, 3B, and 7B—based on the pre-trained Qwen2.5 models [Qwen, 2025] with a maximum
+context length of 1,024. A rule-based reward function is used, assigning +1 for correct answers and 0
+for incorrect ones. All experiments are implemented using the VERL framework [Sheng et al., 2025].
+4ModelMethodTime Memory KLMATH500Minerva Olympiad AMC 23
+Size (hrs) (%) (π||πref) Math Bench Avg@32
+1.5Bbase / / / 45.8 16.91 17.66 20.55
+PPO 10.84 42.64 0.151 57.0 21.69 20.92 29.84
+GRPO 15.01 42.19 0.091 58.0 22.79 21.07 32.19
+REBEL 10.33 63.34 0.098 57.8 20.22 23.15 31.67
+A⋆-PO 6.92 41.59 0.069 57.8 22.43 22.26 31.88
+3Bbase / / / 50.8 23.16 23.74 29.77
+PPO 13.59 54.95 0.111 65.8 23.90 26.71 34.68
+GRPO 18.26 49.75 0.102 66.0 25.00 28.93 34.61
+REBEL 12.88 74.32 0.099 67.0 27.57 28.19 36.33
+A⋆-PO 8.78 49.28 0.082 66.2 25.74 28.04 35.47
+7Bbase / / / 62.8 22.43 30.56 39.61
+PPO 20.53 92.81 0.133 74.4 30.88 33.98 55.47
+GRPO 20.15 77.82 0.172 73.2 33.46 33.98 55.86
+REBEL 14.67 98.77 0.124 74.6 34.56 34.72 56.88
+A⋆-PO 11.01 76.57 0.078 76.2 34.56 34.27 56.25
+Table 1: Results on MATH. For each metric, the best-performing method is highlighted in bold, and
+the second-best is underlined .
+Evaluation. We evaluate each method based on its trade-off between accuracy and KL-divergence
+on the validation set, assessing the effectiveness of each algorithm in optimizing the KL-regularized
+RL objective. Additionally, we report the peak GPU memory usage (as a percentage of total available
+memory) during backpropagation, as well as the total training time (in hours) for each method. Both
+runtime and memory usage are measured using 4 H100 GPUs under the same hyperparameter settings
+detailed in Appendix A.5. The training time for A⋆-PO also includes the offline generation time in
+stage 1 . Peak memory usage is averaged over 100 batches.
+A⋆-PO is faster, more memory-efficient, and better optimizes the KL-constrained RL objective.
+Figure 2 presents the training time, peak memory usage, and KL divergence to πrefacross four
+methods and three model sizes. While all methods achieve similar test accuracy, they exhibit
+substantial differences in the other three metrics. Although REBEL achieves comparable training time
+asA⋆-PO, it requires significantly more memory due to processing two generations simultaneously
+during each update. GRPO shows similar peak memory usage but requires two generations per
+prompt and performs twice as many updates as A⋆-PO, leading to approximately 2 ×longer training
+time. PPO incurs both higher computational cost and memory usage due to its reliance on an explicit
+critic. By consistently updating with respect to πref,A⋆-PO maintains the smallest KL divergence to
+the reference policy. Overall, A⋆-PO achieves the fastest training time, lowest peak memory usage,
+and smallest KL divergence compared to all baselines with similar test accuracy.
+4.2 Advanced Reasoning on MATH
+Training Details. In this section, we evaluate on the more advanced MATH dataset [Hendrycks et al.,
+2021], which consists of challenging problems from high school math competitions. Following the
+original experimental setup, we use 7,500questions for training and randomly select 1,000questions
+for validation. We adopt the same model and hyperparameter settings as the previous section.
+Evaluation. Following prior work [Zeng et al., 2025], we evaluate model performance on stan-
+dard mathematical reasoning benchmarks, including MATH500 [Hendrycks et al., 2021], Minerva
+Math [Lewkowycz et al., 2022], and OlympiadBench [He et al., 2024], as well as the competition-
+level AMC 2023 benchmark. For AMC 2023, due to the small size of the benchmark (40 questions),
+we report average accuracy over 32 generations to reduce variance.
+A⋆-PO achieves higher accuracy, is fastest and generalizes effectively across benchmarks.
+Table 1 presents the results, where the best-performing method is highlighted in bold and the second-
+best is underlined . As shown, A⋆-PO consistently ranks as either the best or second-best method
+across various benchmarks and model sizes, while being faster than baselines, especially PPO and
+GRPO, when model size is large (e.g., 2x faster than PPO and GRPO for 7B model size). A⋆-PO
+is also the most memory efficient and achieves the smallest KL divergence to the base mdoel πref.
+For in-distribution test set MATH500, A⋆-PO achieves similar performance to baselines on smaller
+5MethodAIME 24 AIME 25 HMMT Feb 24 HMMT Feb 25 Average
+Avg@32 Pass@32 Avg@32 Pass@32 Avg@32 Pass@32 Avg@32 Pass@32 Avg@32 Pass@32
+base 21.25 60.00 21.15 43.33 9.48 36.67 8.85 30.00 15.21 42.50
+PPO 30.94 80.00 25.12 46.67 15.94 43.33 14.06 50.00 21.52 55.00
+GRPO 30.00 73.33 25.00 43.33 15.63 40.00 13.23 40.00 20.97 49.17
+A⋆-PO 29.17 70.00 26.67 46.67 16.77 43.33 13.65 43.33 21.57 50.83
+Table 2: Long-context reasoning results using the DeepSeek Distilled 1.5B Model. For each
+metric, the best-performing method is highlighted in bold .
+Figure 3: Ablation results with different number of Nfor estimating V⋆.Solid lines indicate the
+moving average with window size 100. (Left) Squared regression loss per step of A⋆-PO. (Middle)
+Training reward per step. (Right) Model performance on MATH500 with varying values of N.
+model sizes (1.5B and 3B), but outperforms on the larger model size (7B). One may wonder if
+explicitly pre-computing V⋆for all training prompts would result overfitting to the training set.
+When evaluating on the out-of-domain benchmarks, A⋆-PO also demonstrates strong generalization
+capabilities.
+4.3 Long-context Reasoning with DeepSeek-distilled Qwen
+Training Details. In this section, we assess the ability of A⋆-PO to train with long context lengths.
+We use the DeepSeek-R1 distilled Qwen-1.5B model [DeepSeek-AI, 2025] with a context length of
+16,384, training on a randomly selected subset of 5,000problems from the VGS-AI/OpenR1-Cleaned
+dataset [Wang et al., 2025]. We limit training to a subset of the dataset due to the large scale of the
+original corpus and the significant computational cost of data generation and training on academic
+hardware. We exclude results for REBEL , as it runs out of memory under this long-context setting.
+The same hyperparameter configurations from the previous section are used.
+Evaluation. We evaluate on competition-level AIME and HMMT benchmarks from 2024 and 2025,
+reporting both Avg@32 and Pass@32 metrics.
+A⋆-PO outperforms baselines and effectively scales to long-context reasoning. The results are
+presented in Table 2, with the best-performing method highlighted in bold. A⋆-PO achieves the
+highest performance on AIME 2025 and HMMT February 2024, and performs comparably to GRPO
+and PPO on AIME 2024 and HMMT February 2025. Averaged over these 4 math competition
+benchmarks, A⋆-PO achieves the best performance (measured under the metric of Avg@32). These
+results demonstrate that estimating V⋆using 8 generations remains effective even in long-context
+reasoning scenarios, and that A⋆-PO can be successfully applied to such settings. Unsurprisingly,
+A⋆-PO remains the most efficient method, requiring only 49 hours of training time, compared to 88
+hours for PPO and 90 hours for GRPO.
+4.4 Ablations
+Number of Generations. We conduct an ablation on the number of generations Nused during stage
+1 to estimate V⋆on the MATH dataset with the 3B model, varying Nfrom 1 to 32. The results are
+shown in Figure 3. We observe that the squared regression loss consistently decreases as Nincreases,
+62 4 8 16 32
+/glyph1197036912Stage 2 Training Time/glyph1197ot Filtered Stage 2 Training Time
+6465666768
+MATH500Filtered Not FilteredFigure 4: Ablation Results on Filtering Hard Prompts. (Green) Training time of Stage 2 for differ-
+ent values of N. The dashed line indicates the training time without filtering. (Purple) Performance
+on MATH500 with and without filtering.
+Figure 5: Ablation results with different β1for estimating V⋆.Solid lines indicate the moving
+average with window size 100. (Left) Squared regression loss per step of A⋆-PO. (Middle) Training
+reward per step. (Right) Model performance on MATH500 with varying values of β1.
+indicating that larger values of Nlead to more accurate estimations of V⋆. The accuracy of this
+estimation significantly affects both the training reward and downstream evaluation metrics, such as
+performance on MATH500. Notably, the training reward increases almost monotonically with larger
+N, and a similar trend is observed for performance on MATH500, which begins to plateau at N= 8.
+We provide a discussion of the plateau behavior in Appendix C.
+Filtering Out Hard Problems. For fair comparison to the baselines, our main result did not filter out
+hard questions where pass@N is zero. In this section, we explore whether training efficiency can be
+further improved by filtering out problems whose pass@N is zero. Note that pass@N can be easily
+estimated using the N samples generated from phase 1 of A⋆-PO. The intuition is that problems the
+reference policy πrefis unable to solve (i.e., with near-zero success probability) are unlikely to be
+solved through RL post-training. Our method naturally supports this filtering mechanism, as we
+already estimate V⋆during the offline stage. We conduct an ablation study varying Nfrom 2 to
+32, filtering out problems where all Nsampled responses are incorrect. The results are shown in
+Figure 4. Filtering significantly reduces training time by reducing the effective size of the training set,
+as illustrated by the green bars compared to the dashed baseline. When Nis small, filtering removes
+more problems since it is more likely that none of the Nresponses are correct, further accelerating
+training. In terms of performance, the MATH500 evaluations for filtered and unfiltered runs remain
+closely aligned. Notably, the filtered run with N= 8achieves the highest accuracy, even surpassing
+the unfiltered baseline while reducing training time by 28%.
+β1for Estimating V⋆.The parameter β1controls the level of smoothness when estimating V⋆. As
+β1→0, the estimated V⋆’s value approaches Pass@N (computed using the collected Nresponses),
+while as β1→ ∞ , it estimates Vπref. Proofs of these limiting cases are provided in Appendix D. We
+ablate β1from∞to1/8, and the results are shown in Figure 5. From the squared regression loss,
+we observe that smaller values of β1lead to higher initial training loss. But the final training loss
+decreases monotonically as β1decreases, until reaching β1= 1/8. A similar trend is observed for
+both the training reward and MATH500 performance, which improve monotonically with smaller
+7β1values up to β1= 1/8. Further decreasing β1may produce an overly optimistic estimate of V⋆,
+which the model cannot realistically achieve, ultimately hindering performance.
+5 Theory
+In this section, we present a theoretical analysis of a more general variant of Algorithm 1 and
+demonstrate that the output policy achieves near-optimal expected performance against π⋆— the
+optimal policy of the KL-regularized RL objective — with polynomial complexity. Surprisingly,
+we will see that under reasonable conditions of πref, we can achieve the above goal without
+explicit exploration . Denote p(x)as the probability of πrefreturning a correct solution and assume
+minxp(x)≥vref>0, the key message of this section is that:
+KL-regularized RL with β >0andvref>0can be solved without any sophisticated
+exploration (e.g., optimism in the face of uncertainty) .
+We demonstrate the above key message via a reduction to no-regret online learning. Specifically,
+we assume access to a possibly stochastic no-regret oracle NR. In each iteration, the oracle is invoked
+with the historical estimated losses bℓ1:t−1and policy class Πto compute a distribution qt∈∆(Π)
+over policies for the next iteration: qt=NR(bℓ1:t−1,Π). We then sample a policy πt∼qtand use
+it to generate a prompt-response pair where xt∼ρandyt∼πt(·|xt).2Here ρis the distribution
+of the prompts in the dataset. Given the pair (xt, yt), we construct the following least square loss bℓt:
+bℓt(π) :=
+βlnπ(yt|xt)
+πref(yt|xt)−
+r(xt, yt)−bV⋆(xt)2
+.
+Algorithm 1 indeed is a specific instance of the above algorithm that leverages online gradient
+descent ( OGD ) [Hazan et al., 2016] as the oracle NR. We use Reg(T)to denote the cumulative
+regret of NRoverTiterations:
+Reg(T) :=TX
+t=1Eπ∼qth
+bℓt(π)i
+−min
+π∈ΠTX
+t=1bℓt(π).
+Remark. When the policy class and loss functions are convex, deterministic no-regret oracles such
+as OGD and mirror descent [Hazan et al., 2016] can guarantee a regret bound of Reg(T) =O(√
+T).
+In more general settings, stochastic oracles like follow-the-perturbed-leader ( FTPL ) [Suggala and
+Netrapalli, 2020] are also capable of achieving√
+Tregret.
+Due to the possible randomness of NR, we will utilize the decoupling coefficient (DC), a standard
+complexity measure in contextual bandits [Zhang, 2022, 2023, Li et al., 2024], to characterize the
+difficulty of learning over the policy class Π:
+Definition 1. The decoupling coefficient DC(Π)is defined as the smallest d >0such that for all
+distribution qonΠ:
+Eπ∼q,x,y∼π(·|x)[lnπ(y|x)−lnπ⋆(y|x)]≤q
+d·Eπ∼q,π′∼q,x,y∼π′(·|x)[(lnπ(y|x)−lnπ⋆(y|x))2].
+DCis perhaps the most general structural condition known in the contextual bandit and RL theory
+literature, and is known to be much more general than other popular measures such as Eluder
+dimension [Zhang, 2023] which cannot easily capture non-linear structures in the problems.
+Our analysis relies on some standard assumptions. We first assume that the policy class is realizable.
+Assumption 1. Suppose that π⋆∈Π.
+Next, we assume the loss function is bounded.
+Assumption 2. Suppose that ∥rπ∥∞≤Clwhere rπ(x, y) :=βlnπ(y|x)
+πref(y|x)for all π∈Π.
+The above assumption mainly ensures that our predictor lnπ/π refhas bounded outputs, a standard
+assumption that is used in least squares regression analysis. These assumptions are commonly
+2For simplicity, we just assume at each iteration t, our on-policy batch only contains one (xt, yt)pair.
+8adopted in the policy optimization literature as well [Rosset et al., 2024, Xie et al., 2024, Gao et al.,
+2024a,b, Huang et al., 2024].
+Recall that our loss uses bV⋆to approximate V⋆. We introduce a simple and reasonable condition
+which can ensure the bias |bV⋆−V⋆|is small.
+Assumption 3. Suppose that we have Ey∼πref(·|x)[r(x, y)]≥vref>0for all x.
+Assumption 3 is practically reasonable, which intuitively says that we hope πrefhas non-zero Pass@k
+value at x. For example, consider vref= 0.05. One can show that with probability greater than
+90%, πref’s Pass@50 on xis one. In practice, we typically do not expect RL post-training can solve
+problems whose Pass@50 under πrefis zero anyway.
+Now we are ready to present a bound on the performance gap between the output policies and π⋆.
+Theorem 1. Suppose that Assumptions 1 to 3 hold true. With probability at least 1−δ, we have
+Ex,y∼π⋆r(x, y)−1
+TTX
+t=1Eπ∼qt[Ex,y∼πr(x, y)]≲DC(Π)Reg(T)
+Tβ21
+4
++DC(Π)C2
+lln(1/δ)
+Tβ21
+4
++ 
+min
+exp1
+β
+−1,1
+vref2DC(Π) ln( |X|/δ)
+N!1
+4
+. (2)
+Theorem 1 shows that the performance gap decays with rates O
+Reg(T)1
+4T−1
+4
+andO
+N−1
+4
+,
+implying that a near-optimal policy can be learned with polynomial sample complexity as long
+asReg(T)is sublinear. Based on this theoretical guarantee, our algorithm exhibits two notable
+advantages over existing provable online policy optimization methods:
+•Only realizability. Our approach optimizes sequence of loss functions constructed from on-policy
+samples. Unlike other on-policy policy optimization approaches (e.g., PG [Bhandari and Russo,
+2024] and its variants PPO [Schulman et al., 2017], REBEL [Gao et al., 2024a]) which often
+relies on a stronger condition called policy completeness, our approach relies on a much weaker
+realizability condition.
+•No exploration. Our method does not incorporate any explicit exploration mechanism such as
+optimism in the face of uncertainty or reset to some exploratory distribution. As a result, it is
+conceptually simpler and more computationally efficient. For instance, the loss function bℓtis just
+a least square regression loss. Treating lnπas a predictor, then the loss bℓtis a convex functional
+with respect to lnπas a whole. In contrast, prior work that relies on explicit exploration (e.g.,
+optimism in the face of uncertainty) requires bi-level optimization which often leads to non-convex
+loss functionals [Cen et al., 2024, Xie et al., 2024].
+Case study: log-linear policies. We present the learning guarantee for log-linear policies as a
+special case where we show that our simple regression loss indeed can be optimized via simple SGD.
+Consider the following log-linear policy class:
+Π =(
+πθ:πθ(y|x) =exp (⟨θ, ϕ(x, y)⟩)P
+y′exp (⟨θ, ϕ(x, y′)⟩), θ∈Θ)
+, (3)
+where Θ⊆Rdis the parameter space and ϕ:X × Y → Rdrepresents predefined feature vectors.
+First, instantiating the learning oracle NRasFTPL [Suggala and Netrapalli, 2020], we can achieve
+sublinear regret when learning log-linear policies:
+Corollary 1 (log-linear policies with FTPL, Informal ).Consider the log-linear policy class Πdefined
+in Eq. (3). Suppose Assumptions 1 to 3 hold true and use FTPL as the NRoracle. Then we have the
+following regret with probability at least 1−δ:
+Ex,y∼π⋆r(x, y)−1
+TTX
+t=1Eπ∼qt[Ex,y∼πr(x, y)]≲ 
+d5
+2Cl
+T1
+2β!1
+4
++dC2
+lln(1/δ)
+Tβ21
+4
++ 
+min
+exp1
+β
+−1,1
+vref2dln(|X|/δ)
+N!1
+4
+.
+9Alternatively, we can select OGD asNR, following the practical implementation in Algorithm 1. In
+this case, our analysis requires an additional assumption, which states that the Fisher information
+matrix remains full-rank throughout the algorithm’s runtime.
+Assumption 4. Suppose there exists λ >0such that we have A(θt)⪰λIfor all twhere A(θ)is the
+Fisher information matrix:
+A(θ) =Ex,y∼πθ(·|x)[ϕ(x, y)ϕ(x, y)⊤]−Ex,y∼πθ(·|x)[ϕ(x, y)]Ex,y∼πθ(·|x)[(ϕ(x, y))⊤].
+Under Assumption 4, we can show that OGD is able to learn π⋆with a O(T−1
+2)convergence rate:
+Theorem 2 (log-linear policies with OGD, Informal ).Consider the log-linear policy class Πdefined
+in Eq. (3). Suppose Assumptions 1, 2 and 4 hold true and use OGD as the NRoracle. Then we have
+with probability at least 1−δthat:
+Ex,y∼π⋆r(x, y)−Ex,y∼πT+1[r(x, y)]≲B2
+T+C2
+lln(T/δ)
+β2λ2T+ClBln(1/δ)
+βλT1
+2
+.
+This theorem suggests that Algorithm 1 has three key strengths over existing policy optimization
+methods [Gao et al., 2024a, Cen et al., 2024, Xie et al., 2024] for log-linear policies:
+•Last-iterate convergence. Unlike existing methods that output a mixture of all the online policies,
+Algorithm 1 ensures that the final policy πT+1is close to π⋆, which is more favorable in practice.
+•Dimension-free learning rate. The learning rate of Algorithm 1 is independent of the parameter
+space dimension d, making it scalable for high-dimensional function classes.
+•Computational efficiency. OGD is computationally efficient and trackable in practice.
+More details are presented in Appendices E and F.
+6 Related Work
+RL for LLM Reasoning Reinforcement learning (RL) has become a standard approach for post-
+training large language models (LLMs). The most prominent example is Reinforcement Learning
+from Human Feedback (RLHF), popularized by Christiano et al. [2017] and Touvron et al. [2023],
+which has garnered significant attention from both industry and academia due to its remarkable
+success in aligning LLM behavior with human preferences. While this two-stage framework has
+achieved impressive results, it remains computationally inefficient, requiring separate training of
+both a reward model and a policy model. To mitigate this overhead, recent work has focused on
+developing one-stage algorithms, including SLiC [Zhao et al., 2023], DPO [Rafailov et al., 2024],
+REBEL [Gao et al., 2024a], and its variants such as IPO [Azar et al., 2024], SPO [Swamy et al.,
+2024], SPPO [Wu et al., 2024], and DRO [Richemond et al., 2024]. Building on recent advances
+from OpenAI O1 [OpenAI, 2024] and DeepSeek R1 [DeepSeek-AI, 2025], Reinforcement Learning
+with Verifiable Rewards (RLVR) has gained traction as an effective approach for improving LLM
+reasoning capabilities, particularly in domains such as mathematics and programming. Notable
+examples include GRPO [Shao et al., 2024], DR-GRPO [Liu et al., 2025a], DAPO [Liu et al., 2024],
+OREO [Wang et al., 2024], DQO [Ji et al., 2024], and RAFT++ [Xiong et al., 2025]. Similar to
+OREO, DAPO, DQO, and DRO, A⋆-PO operates efficiently by requiring only a single response per
+prompt and regressing the log ratio of πandπrefto the advantage. However, unlike these methods,
+A⋆-PO eliminates the need to train an explicit critic for value estimation, further improving its
+computational efficiency.
+Exploration in RL Exploration is a critical component of reinforcement learning, particularly in
+complex reasoning tasks where large language models must navigate vast response spaces to discover
+correct solutions and learn from them [Dwaracherla et al., 2024]. In classic online RL methods such
+as PPO [Schulman et al., 2017] and GRPO [Shao et al., 2024], exploration is typically encouraged
+through entropy regularization. By maximizing policy entropy, these methods discourage overly
+deterministic behavior, promoting more diverse outputs. However, this heuristic approach often leads
+to suboptimal policies and slow convergence due to increased objective complexity. To address these
+limitations, recent works have explored active exploration strategies [Xiong et al., 2024, Ye et al.,
+2024, Xie et al., 2024, Cen et al., 2024, Zhang et al., 2024, Bai et al., 2025, Chen et al., 2025a],
+which estimate environment uncertainty from historical data and plan optimistically. While these
+10methods provide theoretical guarantees on sample efficiency, they often rely on complex exploration
+mechanisms or strong assumptions—such as reward linearity—making them difficult to implement
+and resulting in unstable empirical performance.
+In contrast, A⋆-PO does not perform explicit exploration, resulting a much simpler algorithm. A⋆-PO
+is designed for a more realistic setting, where we do not expect RL post-training can help solve
+problems of which pass@K values are zero for some large K under πref. Recent studies [Zhao et al.,
+2025, Yue et al., 2025] suggest that existing RL algorithms struggle to incentivize capabilities that
+go beyond the knowledge boundaries of the pretrained model—failing, for instance, to surpass the
+Pass@K performance achievable by the base model πref. As shown in Section 5, we prove that as
+long as we do not wish RL post-training to solve problems where πrefhaszero probability of solving,
+even without any explicit exploration mechanism, A⋆-PO provably converges to π⋆with polynomial
+sample complexity. In this regard, A⋆-PO achieves both training efficiency and optimality under a
+realistic setting.
+Prior work Q# [Zhou et al., 2025] also leverages such a condition to achieve a near optimal regret
+bound for the KL-regularized RL objective at token level without performing any exploration. The
+difference is that Q# operates at the token level and learns a critic Q function to guide the base model
+to perform controllable generation at test time. A⋆-PO is a direct policy optimization approach.
+Another subtle difference in theory is that by operating at the trajectory-level, A⋆-PO’s sample
+complexity does not have a polynomial dependence on the size of the vocabulary. This is because
+when we operate at the trajectory-level, we can query the ground truth reward model to get a perfect
+reward for a given trajectory (e.g., whether the response is correct).
+The idea of directly regressing optimal advantage A⋆is motivated from the classic imitation learning
+algorithm AggreVaTe(d) [Ross and Bagnell, 2014, Sun et al., 2017] where these algorithm aim to
+learn a policy that greedily selects actions by maximizing the expert policy’s advantage function. The
+difference is that A⋆-PO operates in the pure RL setting where one does not have an expert to query
+for feedback.
+7 Conclusion
+We introduced A⋆-PO, a simple and efficient policy optimization algorithm that directly regresses
+the estimated optimal advantage function, removing the need for critics and multiple generations per
+prompt. It also completely removes heuristics such as clipping and trajectory reward normalization.
+A⋆-PO enables faster and more memory-efficient training, achieves smaller KL-divergences to the
+base model, and consistently achieves competitive or superior performance on reasoning benchmarks,
+with strong theoretical guarantees.
+Acknowledgements
+KB acknowledge: This work has been made possible in part by a gift from the Chan Zuckerberg
+Initiative Foundation to establish the Kempner Institute for the Study of Natural and Artificial
+Intelligence. ZG is supported by LinkedIn under the LinkedIn-Cornell Grant. WS acknowledges
+fundings from NSF IIS-2154711, NSF CAREER 2339395, DARPA LANCER: LeArning Network
+CybERagents, Infosys Cornell Collaboration, and Sloan Research Fellowship.
+11References
+Mohammad Gheshlaghi Azar, Zhaohan Daniel Guo, Bilal Piot, Remi Munos, Mark Rowland, Michal
+Valko, and Daniele Calandriello. A general theoretical paradigm to understand learning from
+human preferences. In International Conference on Artificial Intelligence and Statistics , pages
+4447–4455. PMLR, 2024.
+Kazuoki Azuma. Weighted sums of certain dependent random variables. Tohoku Mathematical
+Journal, Second Series , 19(3):357–367, 1967.
+Chenjia Bai, Yang Zhang, Shuang Qiu, Qiaosheng Zhang, Kang Xu, and Xuelong Li. Online prefer-
+ence alignment for language models via count-based exploration. arXiv preprint arXiv:2501.12735 ,
+2025.
+Dimitri Bertsekas and John N Tsitsiklis. Neuro-dynamic programming . Athena Scientific, 1996.
+Alina Beygelzimer, John Langford, Lihong Li, Lev Reyzin, and Robert Schapire. Contextual bandit
+algorithms with supervised learning guarantees. In Proceedings of the Fourteenth International
+Conference on Artificial Intelligence and Statistics , pages 19–26. JMLR Workshop and Conference
+Proceedings, 2011.
+Jalaj Bhandari and Daniel Russo. Global optimality guarantees for policy gradient methods. Opera-
+tions Research , 72(5):1906–1927, 2024.
+Shicong Cen, Jincheng Mei, Katayoon Goshvadi, Hanjun Dai, Tong Yang, Sherry Yang, Dale
+Schuurmans, Yuejie Chi, and Bo Dai. Value-incentivized preference optimization: A unified
+approach to online and offline rlhf. arXiv preprint arXiv:2405.19320 , 2024.
+Mingyu Chen, Yiding Chen, Wen Sun, and Xuezhou Zhang. Avoiding exp(rmax) scaling in rlhf
+through preference-based exploration. arXiv preprint arXiv:2502.00666 , 2025a.
+Zhipeng Chen, Yingqian Min, Beichen Zhang, Jie Chen, Jinhao Jiang, Daixuan Cheng, Wayne Xin
+Zhao, Zheng Liu, Xu Miao, Yang Lu, Lei Fang, Zhongyuan Wang, and Ji-Rong Wen. An empirical
+study on eliciting and improving r1-like reasoning models, 2025b. URL https://arxiv.org/
+abs/2503.04548 .
+Paul F Christiano, Jan Leike, Tom Brown, Miljan Martic, Shane Legg, and Dario Amodei. Deep
+reinforcement learning from human preferences. Advances in neural information processing
+systems , 30, 2017.
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser,
+Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al. Training verifiers to solve
+math word problems. arXiv preprint arXiv:2110.14168 , 2021.
+Thomas M Cover. Elements of information theory . John Wiley & Sons, 1999.
+DeepSeek-AI. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning,
+2025. URL https://arxiv.org/abs/2501.12948 .
+Vikranth Dwaracherla, Seyed Mohammad Asghari, Botao Hao, and Benjamin Van Roy. Efficient
+exploration for llms. arXiv preprint arXiv:2402.00396 , 2024.
+Kanishk Gandhi, Ayush Chakravarthy, Anikait Singh, Nathan Lile, and Noah D. Goodman. Cognitive
+behaviors that enable self-improving reasoners, or, four habits of highly effective stars, 2025. URL
+https://arxiv.org/abs/2503.01307 .
+Zhaolin Gao, Jonathan Chang, Wenhao Zhan, Owen Oertell, Gokul Swamy, Kianté Brantley, Thorsten
+Joachims, Drew Bagnell, Jason D Lee, and Wen Sun. Rebel: Reinforcement learning via regressing
+relative rewards. Advances in Neural Information Processing Systems , 37:52354–52400, 2024a.
+Zhaolin Gao, Wenhao Zhan, Jonathan D Chang, Gokul Swamy, Kianté Brantley, Jason D Lee, and
+Wen Sun. Regressing the relative future: Efficient policy optimization for multi-turn rlhf. arXiv
+preprint arXiv:2410.04612 , 2024b.
+12Elad Hazan et al. Introduction to online convex optimization. Foundations and Trends ®in Optimiza-
+tion, 2(3-4):157–325, 2016.
+Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen Leng Thai, Junhao Shen, Jinyi Hu,
+Xu Han, Yujie Huang, Yuxiang Zhang, Jie Liu, Lei Qi, Zhiyuan Liu, and Maosong Sun. Olympiad-
+bench: A challenging benchmark for promoting agi with olympiad-level bilingual multimodal
+scientific problems, 2024. URL https://arxiv.org/abs/2402.14008 .
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song,
+and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset, 2021. URL
+https://arxiv.org/abs/2103.03874 .
+Audrey Huang, Wenhao Zhan, Tengyang Xie, Jason D Lee, Wen Sun, Akshay Krishnamurthy, and Dy-
+lan J Foster. Correcting the mythos of kl-regularization: Direct alignment without overoptimization
+via chi-squared preference optimization. arXiv preprint arXiv:2407.13399 , 2024.
+Kaixuan Ji, Guanlin Liu, Ning Dai, Qingping Yang, Renjie Zheng, Zheng Wu, Chen Dun, Quanquan
+Gu, and Lin Yan. Enhancing multi-step reasoning abilities of language models through direct
+q-function optimization. arXiv preprint arXiv:2410.09302 , 2024.
+Sham Kakade and John Langford. Approximately optimal approximate reinforcement learning. In
+Proceedings of the nineteenth international conference on machine learning , pages 267–274, 2002.
+Wouter Kool, Herke van Hoof, and Max Welling. Buy 4 reinforce samples, get a baseline for free!
+DeepRLStructPred@ICLR , 2019.
+Nathan Lambert, Jacob Morrison, Valentina Pyatkin, Shengyi Huang, Hamish Ivison, Faeze Brahman,
+Lester James V . Miranda, Alisa Liu, Nouha Dziri, Shane Lyu, Yuling Gu, Saumya Malik, Victoria
+Graf, Jena D. Hwang, Jiangjiang Yang, Ronan Le Bras, Oyvind Tafjord, Chris Wilhelm, Luca
+Soldaini, Noah A. Smith, Yizhong Wang, Pradeep Dasigi, and Hannaneh Hajishirzi. Tulu 3:
+Pushing frontiers in open language model post-training, 2025. URL https://arxiv.org/abs/
+2411.15124 .
+Aitor Lewkowycz, Anders Andreassen, David Dohan, Ethan Dyer, Henryk Michalewski, Vinay
+Ramasesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, Yuhuai Wu, Behnam
+Neyshabur, Guy Gur-Ari, and Vedant Misra. Solving quantitative reasoning problems with language
+models, 2022. URL https://arxiv.org/abs/2206.14858 .
+Xuheng Li, Heyang Zhao, and Quanquan Gu. Feel-good thompson sampling for contextual dueling
+bandits. arXiv preprint arXiv:2404.06013 , 2024.
+Jiacai Liu, Chaojie Wang, Chris Yuhao Liu, Liang Zeng, Rui Yan, Yiwen Sun, Yang Liu, and Yahui
+Zhou. Improving multi-step reasoning abilities of large language models with direct advantage
+policy optimization. arXiv preprint arXiv:2412.18279 , 2024.
+Zichen Liu, Changyu Chen, Wenjun Li, Penghui Qi, Tianyu Pang, Chao Du, Wee Sun Lee, and Min
+Lin. Understanding r1-zero-like training: A critical perspective. arXiv preprint arXiv:2503.20783 ,
+2025a.
+Zichen Liu, Changyu Chen, Wenjun Li, Penghui Qi, Tianyu Pang, Chao Du, Wee Sun Lee, and
+Min Lin. Understanding r1-zero-like training: A critical perspective, 2025b. URL https:
+//arxiv.org/abs/2503.20783 .
+Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. arXiv preprint
+arXiv:1711.05101 , 2017.
+OpenAI. Learning to reason with llms. OpenAI Blog Post , 2024.
+Qwen. Qwen2.5 technical report, 2025. URL https://arxiv.org/abs/2412.15115 .
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea
+Finn. Direct preference optimization: Your language model is secretly a reward model. Advances
+in Neural Information Processing Systems , 36, 2024.
+13Pierre Harvey Richemond, Yunhao Tang, Daniel Guo, Daniele Calandriello, Mohammad Gheshlaghi
+Azar, Rafael Rafailov, Bernardo Avila Pires, Eugene Tarassov, Lucas Spangher, Will Ellsworth,
+et al. Offline regularised reinforcement learning for large language models alignment. arXiv
+preprint arXiv:2405.19107 , 2024.
+Stephane Ross and J Andrew Bagnell. Reinforcement and imitation learning via interactive no-regret
+learning. arXiv preprint arXiv:1406.5979 , 2014.
+Corby Rosset, Ching-An Cheng, Arindam Mitra, Michael Santacroce, Ahmed Awadallah, and
+Tengyang Xie. Direct nash optimization: Teaching language models to self-improve with general
+preferences. arXiv preprint arXiv:2404.03715 , 2024.
+John Schulman, Sergey Levine, Pieter Abbeel, Michael Jordan, and Philipp Moritz. Trust region
+policy optimization. In International conference on machine learning , pages 1889–1897. PMLR,
+2015.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+optimization algorithms. arXiv preprint arXiv:1707.06347 , 2017.
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+Mingchuan Zhang, YK Li, Y Wu, et al. Deepseekmath: Pushing the limits of mathematical
+reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024.
+Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng,
+Haibin Lin, and Chuan Wu. Hybridflow: A flexible and efficient rlhf framework. In Proceedings of
+the Twentieth European Conference on Computer Systems , EuroSys ’25, page 1279–1297. ACM,
+March 2025. doi: 10.1145/3689031.3696075. URL http://dx.doi.org/10.1145/3689031.
+3696075 .
+Yuda Song, Yifei Zhou, Ayush Sekhari, J Andrew Bagnell, Akshay Krishnamurthy, and Wen Sun.
+Hybrid rl: Using both offline and online data can make rl efficient. arXiv preprint arXiv:2210.06718 ,
+2022.
+Arun Sai Suggala and Praneeth Netrapalli. Online non-convex learning: Following the perturbed
+leader is optimal. In Aryeh Kontorovich and Gergely Neu, editors, Proceedings of the 31st
+International Conference on Algorithmic Learning Theory , volume 117 of Proceedings of Machine
+Learning Research , pages 845–861. PMLR, 08 Feb–11 Feb 2020. URL https://proceedings.
+mlr.press/v117/suggala20a.html .
+Wen Sun, Arun Venkatraman, Geoffrey J Gordon, Byron Boots, and J Andrew Bagnell. Deeply
+aggrevated: Differentiable imitation learning for sequential prediction. In International conference
+on machine learning , pages 3309–3318. PMLR, 2017.
+Gokul Swamy, Christoph Dann, Rahul Kidambi, Zhiwei Steven Wu, and Alekh Agarwal. A minimaxi-
+malist approach to reinforcement learning from human feedback. arXiv preprint arXiv:2401.04056 ,
+2024.
+Kimi Team. Kimi k1.5: Scaling reinforcement learning with llms, 2025. URL https://arxiv.
+org/abs/2501.12599 .
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2: Open foundation
+and fine-tuned chat models. arXiv preprint arXiv:2307.09288 , 2023.
+Huaijie Wang, Shibo Hao, Hanze Dong, Shenao Zhang, Yilin Bao, Ziran Yang, and Yi Wu. Offline
+reinforcement learning for llm multi-step reasoning. arXiv preprint arXiv:2412.16145 , 2024.
+Kaiwen Wang, Jin Peng Zhou, Jonathan Chang, Zhaolin Gao, Nathan Kallus, Kianté Brantley, and
+Wen Sun. Value-guided search for efficient chain-of-thought reasoning, 2025. URL https:
+//arxiv.org/abs/2505.17373 .
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed Chi, Quoc Le,
+and Denny Zhou. Chain-of-thought prompting elicits reasoning in large language models, 2023.
+URL https://arxiv.org/abs/2201.11903 .
+14Ronald J Williams. Simple statistical gradient-following algorithms for connectionist reinforcement
+learning. Machine learning , 8:229–256, 1992.
+Yue Wu, Zhiqing Sun, Huizhuo Yuan, Kaixuan Ji, Yiming Yang, and Quanquan Gu. Self-play
+preference optimization for language model alignment. arXiv preprint arXiv:2405.00675 , 2024.
+Tengyang Xie, Dylan J Foster, Akshay Krishnamurthy, Corby Rosset, Ahmed Awadallah, and
+Alexander Rakhlin. Exploratory preference optimization: Harnessing implicit q*-approximation
+for sample-efficient rlhf. arXiv preprint arXiv:2405.21046 , 2024.
+Wei Xiong, Hanze Dong, Chenlu Ye, Ziqi Wang, Han Zhong, Heng Ji, Nan Jiang, and Tong Zhang.
+Iterative preference learning from human feedback: Bridging theory and practice for rlhf under
+kl-constraint. In Forty-first International Conference on Machine Learning , 2024.
+Wei Xiong, Jiarui Yao, Yuhui Xu, Bo Pang, Lei Wang, Doyen Sahoo, Junnan Li, Nan Jiang, Tong
+Zhang, Caiming Xiong, et al. A minimalist approach to llm reasoning: from rejection sampling to
+reinforce. arXiv preprint arXiv:2504.11343 , 2025.
+Chenlu Ye, Wei Xiong, Yuheng Zhang, Nan Jiang, and Tong Zhang. A theoretical analysis of
+nash learning from human feedback under general kl-regularized preference. arXiv preprint
+arXiv:2402.07314 , 2024.
+Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Tiantian Fan, Gaohong
+Liu, Lingjun Liu, Xin Liu, et al. Dapo: An open-source llm reinforcement learning system at scale.
+arXiv preprint arXiv:2503.14476 , 2025.
+Yang Yue, Zhiqi Chen, Rui Lu, Andrew Zhao, Zhaokai Wang, Shiji Song, and Gao Huang. Does
+reinforcement learning really incentivize reasoning capacity in llms beyond the base model? arXiv
+preprint arXiv:2504.13837 , 2025.
+Weihao Zeng, Yuzhen Huang, Qian Liu, Wei Liu, Keqing He, Zejun Ma, and Junxian He. Simplerl-
+zoo: Investigating and taming zero reinforcement learning for open base models in the wild, 2025.
+URL https://arxiv.org/abs/2503.18892 .
+Shenao Zhang, Donghan Yu, Hiteshi Sharma, Han Zhong, Zhihan Liu, Ziyi Yang, Shuohang Wang,
+Hany Hassan, and Zhaoran Wang. Self-exploring language models: Active preference elicitation
+for online alignment. arXiv preprint arXiv:2405.19332 , 2024.
+Tong Zhang. Feel-good thompson sampling for contextual bandits and reinforcement learning. SIAM
+Journal on Mathematics of Data Science , 4(2):834–857, 2022.
+Tong Zhang. Mathematical Analysis of Machine Learning Algorithms . Cambridge University Press,
+2023. doi: 10.1017/9781009093057.
+Rosie Zhao, Alexandru Meterez, Sham Kakade, Cengiz Pehlevan, Samy Jelassi, and Eran Malach.
+Echo chamber: Rl post-training amplifies behaviors learned in pretraining. arXiv preprint
+arXiv:2504.07912 , 2025.
+Yao Zhao, Rishabh Joshi, Tianqi Liu, Misha Khalman, Mohammad Saleh, and Peter J Liu. Slic-hf:
+Sequence likelihood calibration with human feedback. arXiv preprint arXiv:2305.10425 , 2023.
+Jin Peng Zhou, Kaiwen Wang, Jonathan Chang, Zhaolin Gao, Nathan Kallus, Kilian Q Weinberger,
+Kianté Brantley, and Wen Sun. q♯: Provably optimal distributional rl for llm post-training. arXiv
+preprint arXiv:2502.20548 , 2025.
+15A Experiment Details
+A.1 Dataset Details
+Table 3: Dataset split, maximum prompt length, and maximum generation length
+Dataset Huggingface Dataset Card Train - Val Prompt Length Generation Length
+GSM8K openai/gsm8k 7.47k - 1.32k 256 1,024
+MATH xDAN2099/lighteval-MATH 7.5k - 1k 256 1,024
+OpenR1-Math-220K open-r1/OpenR1-Math-220k 5k - / 256 16,384
+Table 4: Dataset prompt format
+Dataset Prompt Format
+GSM8K {prompt} Let’s think step by step and output the final answer after "####".
+MATH {prompt} Let’s think step by step and output the final answer within \boxed{}.
+OpenR1-Math-220K <|begin_of_sentence|><|User|> {prompt} <|Assistant|><think>
+A.2 Model Details
+For GSM8K and MATH, we use Qwen2.5 model series with size 1.5B (model card: Qwen/Qwen2.5-
+1.5B), 3B (model card: Qwen/Qwen2.5-3B), and 7B (model card: Qwen/Qwen2.5-7B) with full
+parameter training on 4 H100 GPUs. For OpenR1, we use DeepSeek-distilled Qwen model (model
+card: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B) with full parameter training on 8 H100 GPUs.
+For PPO, we use the same model as the policy for the critic.
+A.3 Reward Details
+We use a rule-based reward function based solely on the correctness of the response, assigning +1
+for correct answers and 0 for incorrect ones. Recent studies [Chen et al., 2025b] have proposed
+incorporating format-based rules into reward calculations to encourage models to follow specific
+output formats. However, in our experiments, we observed no significant difference in performance
+with or without such format-based rewards. Therefore, for simplicity, we exclude them from our
+implementation.
+A.4 KL and Entropy penalty
+For PPO, to ensure that the learned policy πremains close to the reference policy πref, an additional
+KL penalty is applied to the reward:
+r(x, y)−γKL(lnπ(y|x)−lnπref(y|x)), (4)
+where r(x, y)is the rule-based reward for prompt xand response y, and γKLcontrols the strength
+of the KL penalty. For GRPO, we adopt the same KL penalty as in [Shao et al., 2024], also
+parameterized by γKL. To further encourage exploration in PPO and GRPO, we apply standard
+entropy regularization by subtracting the policy entropy, computed over the generated responses in
+the batch, from the loss. This term is weighted by a coefficient γentropy .Note that A⋆-PO does not
+require these additional penalties, highlighting the simplicity of our algorithm.
+16A.5 Hyperparameter Details
+Setting Parameters
+Generation (train) temperature: 1.0 top p: 1
+Generation (validation) temperature: 0
+PPO batch size: 256
+mini batch size: 128
+micro batch size: 1
+policy learning rate: 1e-6
+critic learning rate: 1e-5
+train epochs: 25γentropy : 1e-3
+γKL: 1e-4
+gaeγ: 1
+gaeλ: 1
+clip ratio: 0.2
+GRPO batch size: 256
+mini batch size: 128
+micro batch size: 1
+policy learning rate: 1e-6
+critic learning rate: 1e-5
+train epochs: 25γentropy : 1e-3
+γKL: 1e-4
+num rollout: 2
+REBEL batch size: 256
+mini batch size: 128
+micro batch size: 2
+policy learning rate: 1e-6
+critic learning rate: 1e-5
+train epochs: 25γentropy : 0
+γKL: 0
+num rollout: 2
+η: 1e3
+A⋆-PO batch size: 256
+mini batch size: 128
+micro batch size: 1
+policy learning rate: 1e-6
+critic learning rate: 1e-5
+train epochs: 25β1: 1/2
+β2: 1e-3
+A.6 Evaluation Details
+We evaluate each method based on the trade-off between accuracy and KL divergence on the test
+set, assessing the effectiveness of each algorithm in optimizing the KL-regularized RL objective.
+Additionally, we report the peak GPU memory usage (as a percentage of total available memory)
+during backpropagation, as well as the total training time (in hours) for each method. Both runtime
+and memory usage are measured using 4 H100 GPUs under the same hyperparameter settings detailed
+in Appendix A.5. The reported training time for A⋆-PO includes the offline generation time in stage
+1. Peak memory usage is averaged over 100 batches.
+Following prior work [Zeng et al., 2025], we evaluate model performance on standard mathematical
+reasoning benchmarks, including MATH500 [Hendrycks et al., 2021], Minerva Math [Lewkowycz
+et al., 2022], and OlympiadBench [He et al., 2024], as well as competition-level benchmarks such as
+AMC 2023 and AIME/HMMT from 2024 and 2025. For competition-level benchmarks, due to their
+small size (30–40 questions), we report average accuracy over 32 generations to reduce evaluation
+variance.
+For benchmarks other than competition-level benchmarks, we use greedy decoding with temperature
+set to 0. For competition-level benchmarks, we sample with a temperature of 0.6 and a top- pvalue of
+0.95.
+17B Qualitative Analysis
+In this section, we qualitatively demonstrate that, after training with A⋆-PO, the model exhibits
+cognitive behaviors that are essential for effective reasoning, including verification, subgoal setting
+and backtracking, as identified by Gandhi et al. [2025].
+B.1 Verification
+Prompt: If−6≤a≤ − 2and3≤b≤5, what is the greatest possible value of
+a+1
+b 1
+b−a
+? Express your answer
+as a common fraction. Let’s think step by step and output the final answer within \boxed{}.
+Qwen2.5-7B Generation: To find the greatest possible value of the expression 
+a+1
+b  1
+b−a
+, we can start by simplifying
+the expression. Notice that the expression is a difference of squares:
+
+a+1
+b 1
+b−a
+=1
+b2
+−a2=1
+b2−a2
+Given the ranges for aandb: -−6≤a≤ − 2-3≤b≤5
+To maximize1
+b2−a2, we need to maximize1
+b2and minimize a2.
+1. The maximum value of1
+b2occurs when bis at its minimum value, which is 3. So,1
+b2=1
+32=1
+9.
+2. The minimum value of a2occurs when ais at its maximum value, which is -2. So, a2= (−2)2= 4.
+Therefore, the greatest possible value of the expression is:
+1
+9−4 =1
+9−36
+9=1−36
+9=−35
+9
+So, the greatest possible value of the expression is −35
+9.
+Qwen2.5-7B after A⋆-PO Generation: To find the greatest possible value of the expression 
+a+1
+b  1
+b−a
+, we start by
+simplifying it. Notice that the expression is in the form of a difference of squares:
+
+a+1
+b 1
+b−a
+=1
+b2
+−a2=1
+b2−a2.
+Given the ranges for aandb:
+−6≤a≤ − 2and 3≤b≤5,
+we need to maximize1
+b2−a2.
+1. The term1
+b2is maximized when bis minimized. Since 3≤b≤5, the minimum value of bis 3. Therefore, the maximum
+value of1
+b2is1
+32=1
+9.
+2. The term −a2is maximized when a2is minimized. Since −6≤a≤ − 2, the minimum value of a2is(−2)2= 4.
+Therefore, the maximum value of −a2is−4.
+Combining these, the greatest possible value of the expression is:
+1
+9−4 =1
+9−36
+9=−35
+9.
+However, we need to check if this is indeed the maximum value by considering the boundary conditions. Let’s verify by
+calculating the expression at the boundary values:
+1. When a=−6andb= 3: 
+−6 +1
+3 1
+3+ 6
+=
+−17
+3 19
+3
+=−323
+9.
+2. When a=−2andb= 3: 
+−2 +1
+3 1
+3+ 2
+=
+−5
+3 7
+3
+=−35
+9.
+3. When a=−6andb= 5: 
+−6 +1
+5 1
+5+ 6
+=
+−29
+5 31
+5
+=−899
+25.
+4. When a=−2andb= 5: 
+−2 +1
+5 1
+5+ 2
+=
+−9
+5 11
+5
+=−99
+25.
+From these calculations, we see that the greatest possible value is indeed achieved when a=−2andb= 3, giving us:
+−35
+9.
+In this example, Qwen2.5-7B after A⋆-PO exhibits verification behavior where it performs systematic
+error-checking after arriving at the answer.
+18B.2 Subgoal Setting
+Prompt: Letaandbbe positive real numbers such that ab2= 5.Find the minimum value of a4+b8.Let’s think step by step
+and output the final answer within \boxed{}.
+Qwen2.5-7B Generation: To find the minimum value of a4+b8given that ab2= 5, we can use the method of Lagrange
+multipliers or substitution. Here, we will use substitution.
+Given:
+ab2= 5
+We want to minimize:
+f(a, b) =a4+b8
+First, express ain terms of busing the constraint:
+a=5
+b2
+Substitute this into the function f(a, b):
+f(b) =5
+b24
++b8
+f(b) =625
+b8+b8
+Now, we need to find the critical points by taking the derivative of f(b)with respect to band setting it to zero:
+f′(b) =−5000
+b9+ 8b7
+Set the derivative equal to zero:
+−5000
+b9+ 8b7= 0
+8b16= 5000
+b16=5000
+8
+b16= 625
+b=16√
+625
+b= 51/4
+Now, substitute b= 51/4back into the expression for a:
+a=5
+(51/4)2
+a=5
+51/2
+a= 51/2
+Now, substitute a= 51/2andb= 51/4into the function f(a, b):
+f(51/2,51/4) = (51/2)4+ (51/4)8
+f(51/2,51/4) = 52+ 52
+f(51/2,51/4) = 25 + 25
+f(51/2,51/4) = 50
+Thus, the minimum value of a4+b8is50.
+19Qwen2.5-7B after A⋆-PO Generation: To find the minimum value of a4+b8subject to the constraint ab2= 5, we can use
+the method of substitution. From the constraint, we can express ain terms of b:
+a=5
+b2.
+Now, substitute this expression for ainto the function a4+b8:
+a4=5
+b24
+=625
+b8.
+So, the expression a4+b8becomes:
+625
+b8+b8.
+Let’s denote x=b8. Then, the expression becomes:
+625
+x+x.
+We need to find the minimum value of this expression. To do this, we can take the derivative with respect to xand set it to
+zero:
+d
+dx625
+x+x
+=−625
+x2+ 1.
+Setting the derivative equal to zero, we get:
+−625
+x2+ 1 = 0 = ⇒x2= 625 = ⇒x= 25 ( since x=b8>0).
+Now, we need to verify that this critical point is a minimum by checking the second derivative:
+d2
+dx2625
+x+x
+=1250
+x3+ 1.
+Atx= 25 , the second derivative is:
+1250
+253+ 1 =1250
+15625+ 1 =100
+1250+ 1 =2
+25+ 1 =2
+25+25
+25=27
+25>0,
+which confirms that x= 25 is a minimum. Therefore, the minimum value of625
+x+xoccurs at x= 25 . Substituting x= 25
+back into the expression, we get:
+625
+25+ 25 = 25 + 25 = 50 .
+Finally, we need to express bin terms of x. Since x=b8, we have b8= 25 , sob= 251/8. And since a=5
+b2, we have
+a=5
+(251/8)2=5
+251/4=5
+51/2=5√
+5=√
+5.
+So, the minimum value of a4+b8is:
+50.
+From this example, A⋆-PO enables the model to perform more comprehensive subgoal setting, where
+it decomposes problems into manageable steps, and verification to check intermediate results.
+20B.3 Backtracking
+Prompt: Leta, b, c, d be distinct complex numbers such that |a|=|b|=|c|=|d|= 1anda+b+c+d= 0.Find the
+maximum value of
+|(a+b)(a+c)(a+d)(b+c)(b+d)(c+d)|.
+Let’s think step by step and output the final answer within \boxed{}.
+Qwen2.5-7B Generation: We can utilize Python to solve this problem numerically, but first, let’s explore the mathematical
+properties and constraints.
+Given that |a|=|b|=|c|=|d|= 1, these complex numbers lie on the unit circle in the complex plane. Additionally,
+a+b+c+d= 0is a constraint on their sum.
+Since a, b, c, d are distinct complex numbers on the unit circle, we can represent them as eiθa, eiθb, eiθc, eiθdfor some angles
+θa, θb, θc, θd.
+The constraint a+b+c+d= 0implies that these complex numbers are arranged symmetrically around the origin on the
+unit circle.
+We want to maximize the magnitude of the expression |(a+b)(a+c)(a+d)(b+c)(b+d)(c+d)|.
+Given the symmetry and the unit circle constraint, a possible configuration that meets the criteria is: - a=eiπ
+3-b=ei2π
+3-
+c=eiπ-d=ei4π
+3
+This configuration ensures that |a|=|b|=|c|=|d|= 1anda+b+c+d= 0.
+Let’s compute |(a+b)(a+c)(a+d)(b+c)(b+d)(c+d)|using Python for this configuration.
+We’ll start by calculating the values and then compute the desired magnitude. Let’s proceed with the calculations. “‘python
+import numpy as np
+Define the complex numbers on the unit circle a = np.exp(1j * np.pi / 3) b = np.exp(1j * 2 * np.pi / 3) c = np.exp(1j * np.pi) d
+= np.exp(1j * 4 * np.pi / 3)
+Calculate the products ab = (a + b) ac = (a + c) ad = (a + d) bc = (b + c) bd = (b + d) cd = (c + d)
+Compute the magnitude of the product of these terms result = np.abs(ab * ac * ad * bc * bd * cd) print(result) “‘ “‘output
+4.999999999999999 “‘ After calculating the magnitude of the expression |(a+b)(a+c)(a+d)(b+c)(b+d)(c+d)|using
+the specific configuration on the unit circle, we obtain approximately 5.
+Therefore, the maximum value of the given expression is 5.
+Qwen2.5-7B after A⋆-PO Generation: Given that a, b, c, d are distinct complex numbers with |a|=|b|=|c|=|d|= 1
+anda+b+c+d= 0, we need to find the maximum value of the expression |(a+b)(a+c)(a+d)(b+c)(b+d)(c+d)|.
+First, we can use the fact that |a|=|b|=|c|=|d|= 1to express a, b, c, anddin terms of their arguments. Let’s denote the
+arguments of a, b, c, anddbyα, β, γ, andδrespectively. Then, we can write:
+a=eiα, b =eiβ, c =eiγ, d =eiδ.
+Given that a+b+c+d= 0, we can use the symmetry and properties of complex numbers on the unit circle to find a suitable
+configuration. One useful configuration is when a, b, c, anddare the vertices of a square on the unit circle. Without loss of
+generality, we can assume:
+a= 1, b =ei2π
+4, c =ei4π
+4=−1, d =ei6π
+4=ei3π
+2.
+This configuration ensures that a+b+c+d= 1 + ei2π
+4−1 +ei3π
+2=eiπ
+2+ei3π
+2=i−i= 0.
+Now, let’s compute the expression |(a+b)(a+c)(a+d)(b+c)(b+d)(c+d)|:
+1.a+b= 1 + eiπ
+2= 1 + i2.a+c= 1−1 = 0 3.a+d= 1−i4.b+c=i−15.b+d=i−i= 06.c+d=−1−i
+So, the expression becomes:
+|(a+b)(a+c)(a+d)(b+c)(b+d)(c+d)|=|(1 +i)·0·(1−i)·(i−1)·0·(−1−i)|= 0.
+This configuration does not yield the maximum value. Let’s consider another configuration, such as when a, b, c, anddare the
+vertices of a regular tetrahedron on the unit sphere. However, for simplicity, let’s consider another symmetric configuration,
+such as when a, b, c, anddare the roots of a polynomial with specific properties.
+Given the symmetry and the condition a+b+c+d= 0, a useful configuration is when a, b, c, anddare the roots of the
+polynomial x4+ 1 = 0 . The roots of this polynomial are:
+a=eiπ
+4, b =ei3π
+4, c =ei5π
+4, d =ei7π
+4.
+Now, let’s compute the expression |(a+b)(a+c)(a+d)(b+c)(b+d)(c+d)|:
+1.a+b=eiπ
+4+ei3π
+42.a+c=eiπ
+4+ei5π
+43.a+d=eiπ
+4+ei7π
+44.b+c=ei3π
+4+ei5π
+45.b+d=ei3π
+4+ei7π
+46.
+c+d=ei5π
+4+ei7π
+4
+Using the properties of complex numbers, we can simplify these expressions. For example, eiθ+ei(θ+2π
+4)=eiθ(1 +eiπ
+2) =
+eiθ(1 +i).
+After simplifying, we find that the maximum value of the expression is achieved when the configuration is such that the terms
+do not cancel each other out. The maximum value is found to be 16.
+So, the final answer is:
+16.
+Although the answers for both models are incorrect, the model after A⋆-PO exhibits backtracking
+behavior where it abandons failing approaches and reconsiders another method.
+21C Pass@K Evaluations
+Figure 10 presents the Pass@K accuracies across all three model sizes and two datasets. The orange
+line indicates the Pass@1 performance of the model after RL training. We hypothesize that this
+convergence behavior at N= 8is due to the relationship between Nand the Pass@K performance
+of the model. The final performance of the models after training falls between Pass@4 and Pass@8
+ofπref. This suggests that the optimal value function V⋆should, at a minimum, approximate Pass@4
+performance. With N= 8 samples, the estimated V⋆becomes sufficiently accurate, leading to
+convergence in performance.
+MATHGSM8KQwen2.5-1.5BQwen2.5-3BQwen2.5-7B
+Figure 10: Pass@K Evaluations for different models and datasets.
+22D Limiting Cases of β
+Case 1: β→0— Recovering the Maximum. We start from the expression:
+ˆV⋆(x) =βln 
+1
+NNX
+i=1expr(x, yi)
+β!
+.
+LetM= max ir(x, yi). Then,
+NX
+i=1expr(x, yi)
+β
+= expM
+βNX
+i=1expr(x, yi)−M
+β
+.
+Taking the logarithm:
+ˆV⋆(x) =βln 
+1
+NexpM
+βNX
+i=1expr(x, yi)−M
+β!
+=M+βln 
+1
+NNX
+i=1expr(x, yi)−M
+β!
+.
+Since r(x, yi)≤M,
+lim
+β→0βln 
+1
+NNX
+i=1expr(x, yi)−M
+β!
+= 0
+Therefore,
+lim
+β→0ˆV⋆(x) =M= Pass@N for x .
+Case 2: β→ ∞ — Recovering the Mean. We start from the expression:
+ˆV⋆(x) =βln 
+1
+NNX
+i=1expr(x, yi)
+β!
+.
+We want
+lim
+β→∞ˆV⋆(x) = lim
+β→∞βln 
+1
+NNX
+i=1expr(x, yi)
+β!
+= lim
+β→0ln
+1
+NPN
+i=1exp (r(x, yi)β)
+β.
+Apply L’Hôpital’s rule:
+lim
+β→0ln
+1
+NPN
+i=1exp (r(x, yi)β)
+β= lim
+β→01
+NPN
+i=1r(x, yi) exp ( r(x, yi)β)
+1
+NPN
+i=1exp (r(x, yi)β)=1
+NNX
+i=1r(x, yi).
+Thus, as β→ ∞ :
+ˆV⋆(x)→1
+NNX
+i=1r(x, yi).
+Summary:
+ˆV⋆(x) =
+
+max
+ir(x, yi),ifβ→0,
+1
+NNP
+i=1r(x, yi),ifβ→ ∞ .
+23E Log-linear Policies With FTPL
+In this section, we characterize the learning regret of log-linear policies with FTPL. We study bounded
+parameters and feature vectors:
+∥θ∥2≤B,∥ϕ(x, y)∥2≤1,∀x, y.
+We still assume Πis realizable and let π⋆=πθ⋆. Note that we can indeed bound the DC of this
+log-linear policy class as follows.
+Lemma 1. For the log-linear policy class Πdefined in Eq. (3), we have DC(Π)≤d+ 1.
+FTPL. We instantiate NRto be FTPL [Suggala and Netrapalli, 2020]. That is, in t-th iteration we
+generate i.i.d. random variables from an exponential distribution, σt,j∼EXP(η)for1≤j≤d. Let
+σtdenote the vector whose j-th entry is σt,j, then FTPL computes πθtas follows:
+θt= arg min
+θ∈Θt−1X
+i=1bℓi(πθ)− ⟨σt, θ⟩.
+From the literature, we have the following guarantee of FTPL.
+Lemma 2 ([Suggala and Netrapalli, 2020, Theorem 1]) .LetDdenote the diameter of Θ, i.e.,
+D:= supθ,θ′∈Θ∥θ−θ′∥∞. Suppose the loss functions are L-Lipschitz w.r.t. ℓ1-norm, i.e., |bℓt(πθ)−
+bℓt(πθ′)| ≤L∥θ−θ′∥1for all θ, θ′∈Θ, t. Then we can bound the regret of FTPL as:
+Reg(T)≲ηd2DL2T+dD
+η.
+Given Lemmas 1 and 2, we can bound the regret of learning log-linear policies with FTPL using
+Theorem 1:
+Corollary 2 (log-linear policies with FTPL) .Consider the log-linear policy class Πdefined in Eq. (3).
+Suppose Assumptions 1 to 3 hold true and use FTPL as the NRoracle with η= 1/(βCl√
+Td). Then
+we have the following regret with probability at least 1−δ:
+Ex,y∼π⋆r(x, y)−1
+TTX
+t=1Eπ∼qt[Ex,y∼πr(x, y)]≲ 
+d5
+2BCl
+T1
+2β!1
+4
++dC2
+lln(1/δ)
+Tβ21
+4
++ 
+min
+exp1
+β
+−1,1
+vref2dln(|X|/δ)
+N!1
+4
+.
+Proof. To utilize Theorem 1, we only need to bound the diameter Dof the parameter space and
+Lipschitz constant L. First note that
+D= sup
+θ,θ′∈Θ∥θ−θ′∥∞≤sup
+θ,θ′∈Θ∥θ−θ′∥2≤2B.
+On the other hand, fix any t, θ∈Θand we can compute the j-th entry of the loss gradient:
+
+∇θbℓt
+j= 2β
+βlnπ(yt|xt)
+πref(yt|xt)−
+r(xt, yt)−bV⋆(xt)
+ 
+(ϕ(xt, yt))j−P
+y′exp (⟨θ, ϕ(x, y′)⟩) (ϕ(xt, y′))jP
+y′exp (⟨θ, ϕ(x, y′)⟩)!
+From Assumption 2 and the fact that ∥ϕ(x, y)∥2≤1we have
+∇θbℓt
+∞≤4β(Cl+ 1),
+which implies that (via Holder’s inequality)
+L≤4β(Cl+ 1).
+24Now combine Theorem 1 with Lemmas 1 and 2, and we can obtain the final bound:
+Ex,y∼π⋆r(x, y)−1
+TTX
+t=1Eπ∼qt[Ex,y∼πr(x, y)]≲ 
+d5
+2BCl
+T1
+2β!1
+4
++dC2
+lln(1/δ)
+Tβ21
+4
++ 
+min
+exp1
+β
+−1,1
+vref2dln(|X|/δ)
+N!1
+4
+.
+E.1 Proof of Lemma 1
+Note that for any πθ∈Π, we can write lnπθas
+lnπθ(y|x) =⟨θ, ϕ(x, y)⟩ −lnX
+y′exp (⟨θ, ϕ(x, y′)⟩)
+=*
+θ,−lnX
+y′exp (⟨θ, ϕ(x, y′)⟩)
+,[ϕ(x, y),1]+
+.
+Let us use f(θ, x)∈Rd+1andϕ(x, y)∈Rd+1to denote the extended vectors:
+f(θ, x) :=
+θ,−lnX
+y′exp (⟨θ, ϕ(x, y′)⟩)
+,ϕ(x, y) := [ ϕ(x, y),1].
+In addition, we define A(q, x)to be the expected feature covariance matrix,
+A(q, x) :=Eθ∼q,y∼πθ(x)h
+ϕ(x, y)ϕ⊤(x, y)i
+.
+Letθ⋆denote the optimal parameter, i.e., π⋆=πθ⋆. Then from Cauchy-Schwartz inequality, we
+have for all λ >0that
+Ex∼ρ,θ∼q,y∼πθ(x)[lnπθ(y|x)−lnπ⋆(y|x)]
+=Ex∼ρ,θ∼q,y∼πθ(x)
+f(θ, x)−f(θ⋆, x),ϕ(x, y)
+≤r
+Ex∼ρ,θ∼qh
+∥f(θ, x)−f(θ⋆, x)∥2
+A(q,x)+λIi
+Ex∼ρ,θ∼q,y∼πθ(x)hϕ(x, y)2
+(A(q,x)+λI)−1i
+For the first term, we have
+Ex∼ρ,θ∼qh
+∥f(θ, x)−f(θ⋆, x)∥2
+A(q,x)+λIi
+=Ex∼ρ,θ∼q,θ′∼q,y∼πθ′(x)
+(lnπθ(y|x)−lnπ⋆(y|x))2
++λB2(1 + ln |Y).
+For the second term, we have
+Ex∼ρ,θ∼q,y∼πθ(x)hϕ(x, y)2
+(A(q,x)+λI)−1i
+=Ex∼ρ
+Tr((A(q, x) +λI)−1A(q, x))
+≤d+ 1.
+Therefore, let λ→0, we have DC(Π)≤d+ 1.
+25F Log-linear Policies With OGD
+In this section, we investigate the learning guarantee of OGD on log-linear policies.
+Quasi-quadratic Loss. Recall that the population loss in iteration tis:
+ℓt(θ) =Ex,y∼πθt(·|x)
+βlnπθ(y|x)
+πref(y|x)−
+r(x, y)−bV⋆(x)2
+.
+For log-linear policies, we can show that lt(θ)is quasi-quadratic in terms of gradients, as shown in
+the following lemma:
+Lemma 3. We have
+∇θℓt(θt) = 2 β2A(θt)(θt−θ⋆).
+Recall that A(θ)denote the Fisher information matrix:
+A(θ) =Ex,y∼πθ(·|x)[ϕ(x, y)ϕ(x, y)⊤]−Ex,y∼πθ(·|x)[ϕ(x, y)]Ex,y∼πθ(·|x)[(ϕ(x, y))⊤].
+Online gradient descent. Inspired by Lemma 3, we instantiate NRto be online gradient descent
+[Hazan et al., 2016] for log-linear policy learning. Specifically, in t-th iteration, we compute θt+1as
+follows:
+θt+1=ProjΘ(θt−ηt∇θbℓt(θt)),
+where ηtis the stepsize in iteration tandProjΘ(·)is the projection onto Θw.r.t. l2norm. Recall that
+online gradient descent is exactly what we utilize in our practical implementation of Algorithm 1.
+Next we show that our algorithm enjoys a last-iterate convergence to θ⋆with a rate eO(p
+1/T)given
+that the Fisher information matrix is full-rank Assumption 4.
+Theorem 3 (log-linear policies with OGD) .Suppose Assumptions 1, 2 and 4 hold true. Set any
+η0≥1
+β2λ. Then with probability at least 1−δ, we have
+Ex,y∼π⋆r(x, y)−Ex,y∼πθT+1[r(x, y)]≲r
+B2+η2
+0β2C2
+llnT+ (η0C2
+l/λ) ln(1 /δ) +η0βClBln(1/δ)
+T.
+Proof. Letθt+1denote θt−ηt∇θbℓt(θt). From the definition of π⋆, we know
+ℓt(θ) =Ex,y∼πθt(·|x)
+βlnπθ(y|x)
+π⋆(y|x)−
+V⋆(x)−bV⋆(x)2
+,
+bℓt(θ) =
+βlnπ(yt|xt)
+π⋆(yt|xt)−
+V⋆(xt)−bV⋆(xt)2
+.
+We use ξtto denote ∇θℓt(θt)− ∇ θbℓt(θt). Then from Assumption 2, we know ∥ξt∥ ≤8βClfor all t.
+From the update of online gradient descent, we have
+θt+1−θ⋆=θt−ηt∇θℓt(πθt) +ηtξt−θ⋆.
+By Lemma 3, this implies that
+θt+1−θ⋆= 
+I−2ηtβ2A(θt)
+(θt−θ⋆) +ηtξt.
+With Assumption 4 and the property of projection, we have
+∥θt+1−θ⋆∥2≤ ∥θt+1−θ⋆∥2≤(1−2ηtβ2λ)∥θt−θ⋆∥2+ 2ηt⟨zt, ξt⟩+ 64η2
+tβ2C2
+l,
+where zt:= 
+I−2ηtβ2A(θt)
+(θt−θ⋆). Let ηt=η0
+t+1. Denote by c1= 2η0β2λandc2=
+64η2
+0β2C2
+l, we have
+∥θt+1−θ⋆∥2≤
+1−c1
+t+ 1
+∥θt−θ⋆∥2+2η0⟨zt, ξt⟩
+t+ 1+c2
+(t+ 1)2.
+26This implies that
+(t+ 1)∥θt+1−θ⋆∥2−t∥θt−θ⋆∥2≤(1−c1)∥θt−θ⋆∥2+ 2η0⟨zt, ξt⟩+c2
+t+ 1.
+By induction, we have
+∥θT+1−θ⋆∥2≤∥θ1−θ⋆∥2+c2(1 + ln T)
+T+ 1+1−c1
+T+ 1TX
+t=1∥θt−θ⋆∥2+2η0
+T+ 1TX
+t=1⟨zt, ξt⟩
+≤2B2+ 64η2
+0β2C2
+l(lnT+ 1)
+T+ 1+(1−c1)PT
+t=1∥θt−θ⋆∥2+ 2η0PT
+t=1⟨zt, ξt⟩
+T+ 1.
+LetFtdenote the filtration generated by {x1, y1,···, xt−1, yt−1}. Denote by ζt=⟨zt, ξt⟩, it can
+be observed that E[ζt| Ft] = 0 and|ζt| ≤8βCl∥θt−θ⋆∥a.s. conditioned on Ft. To proceed, we
+utilize the following form of Freedman’s inequality from the literature [Beygelzimer et al., 2011]:
+Lemma 4 (Freedman’s inequality [Beygelzimer et al., 2011]) .Let{U1, . . . , U T}be a martingale
+adapted to filtration {Ft}. Further, suppose that |Ut| ≤Rfor all t. Then, for any δ >0and
+γ∈[0,1
+2R], we have with probability at least 1−δthat,
+TX
+t=1Ut≤γTX
+t=1E[U2
+t| Ft] +ln(2/δ)
+γ.
+Applying Lemma 4 with Ut=ζtandR= 16βBC l, we have with probability at least 1−δthat for
+anyγ≤1
+32βBC l
+TX
+t=1ζt≤γTX
+t=1E[ζ2
+t| Ft] +ln(2/δ)
+γ
+≤64γβ2C2
+lTX
+t=1∥θt−θ⋆∥2+ln(2/δ)
+γ.
+Therefore, we have
+(1−c1)TX
+t=1∥θt−θ⋆∥2+ 2η0TX
+t=1⟨zt, ξt⟩ ≤(1−c1+ 128 γβ2C2
+lη0)TX
+t=1∥θt−θ⋆∥2+2η0ln(2/δ)
+γ.
+Choose γ= min {λ
+128C2
+l,1
+32βBC l}, we have
+(1−c1)TX
+t=1∥θt−θ⋆∥2+ 2η0TX
+t=1⟨zt, ξt⟩ ≤(1−c1/2)TX
+t=1∥θt−θ⋆∥2
++256C2
+lη0ln(2/δ)
+λ+ 64βBC lη0ln(2/δ).
+Choose η0≥1/(β2λ), we have with probability at least 1−δthat
+(1−c1)TX
+t=1∥θt−θ⋆∥2+ 2η0TX
+t=1⟨zt, ξt⟩≲C2
+lη0ln(2/δ)
+λ+βBC lη0ln(2/δ).
+This leads to
+∥θT+1−θ⋆∥2≲B2+η2
+0β2C2
+llnT+ (η0C2
+l/λ) ln(1 /δ) +η0βClBln(1/δ)
+T. (5)
+Now we start to bound the reward regret. Notice that
+Ex,y∼π⋆[r(x, y)]−Ex,y∼πθT+1[r(x, y)]≤Ex
+∥πθT+1(·|x)−π⋆(·|x)∥1
+=Ex"X
+yexp(⟨θT+1, ϕ(x, y)⟩)P
+y′exp(⟨θT+1, ϕ(x, y′)⟩)−exp(⟨θ⋆, ϕ(x, y)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩)#
+.
+27For∥θT+1−θ⋆∥ ≤1/2, It suffices to note that
+exp(⟨θT+1, ϕ(x, y)⟩)P
+y′exp(⟨θT+1, ϕ(x, y′)⟩)≤exp(2∥θT+1−θ⋆∥)exp(⟨θ⋆, ϕ(x, y)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩)
+≤(1 + 4∥θT+1−θ⋆∥)exp(⟨θ⋆, ϕ(x, y)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩).
+and
+exp(⟨θT+1, ϕ(x, y)⟩)P
+y′exp(⟨θT+1, ϕ(x, y′)⟩)≥exp(−2∥θT+1−θ⋆∥)exp(⟨θ⋆, ϕ(x, y)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩)
+≥(1−4∥θT+1−θ⋆∥)exp(⟨θ⋆, ϕ(x, y)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩).
+Thus
+Ex,y∼π⋆[r(x, y)]−Ex,y∼πθT+1[r(x, y)]
+≤Ex"X
+yexp(⟨θT+1, ϕ(x, y)⟩)P
+y′exp(⟨θT+1, ϕ(x, y′)⟩)−exp(⟨θ⋆, ϕ(x, y)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩)#
+≤Ex"X
+y4∥θT+1−θ⋆∥exp(⟨θ⋆, ϕ(x, y)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩)#
+=Ex"
+4∥θT+1−θ⋆∥X
+yπ⋆(y|x)#
+= 4∥θT+1−θ⋆∥≲r
+B2+η2
+0β2C2
+llnT+ (η0C2
+l/λ) ln(1 /δ) +η0βClBln(1/δ)
+T.
+On the other hand, by (5), with probability at least 1−δ, we know ∥θT+1−θ⋆∥ ≤ 1/2for
+T≳B2+η2
+0β2C2
+llnT+ (η0C2
+l/λ) ln(1 /δ) +η0βClBln(1/δ). For T≤B2+η2
+0β2C2
+llnT+
+(η0C2
+l/λ) ln(1 /δ) +η0βClBln(1/δ), it suffices to note that
+Ex,y∼π⋆[r(x, y)]−Ex,y∼πθT+1[r(x, y)]
+≤1≲r
+B2+η2
+0β2C2
+llnT+ (η0C2
+l/λ) ln(1 /δ) +η0βClBln(1/δ)
+T,
+which completes the proof.
+28F.1 Proof of Lemma 3
+Recall
+Ex,y∼πθt(·|x)
+βlnπθ(y|x)
+πref(y|x)−
+r(x, y)−bV⋆(x)2
+=Ex,y∼πθt(·|x)
+βlnπθ(y|x)
+π⋆(y|x)−
+V⋆(x)−bV⋆(x)2
+.
+We have
+∇θℓt(θt) = 2 βEx,y∼πθt(·|x)"
+βlnπθt(y|x)
+π⋆(y|x)+bV⋆(x)−V⋆(x) 
+ϕ(x, y)−P
+y′exp(⟨θt, ϕ(x, y′)⟩ϕ(x, y′))P
+y′exp(⟨θt, ϕ(x, y′)⟩)!#
+= 2βEx,y∼πθt(·|x)
+
+βlnπθt(y|x)
+π⋆(y|x)+bV⋆(x)−V⋆(x)
+ϕ(x, y)−X
+y′πθt(y′|x)ϕ(x, y′)
+
+
+= 2βEx,y∼πθt(·|x)
+βlnπθt(y|x)
+π⋆(y|x)+bV⋆(x)−V⋆(x)
+ϕ(x, y)−Ey′∼πθt(·|x)[ϕ(x, y′)]
+= 2β2Ex,y∼πθt(·|x)
+lnπθt(y|x)
+π⋆(y|x)
+ϕ(x, y)−Ey′∼πθt(·|x)[ϕ(x, y′)]
+= 2βEx,y∼πθt(·|x)" 
+⟨θt−θ⋆, ϕ(x, y)⟩ −lnP
+y′exp(⟨θt, ϕ(x, y′)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩)!
+ϕ(x, y)−Ey′∼πθt(·|x)[ϕ(x, y′)]#
+= 2β2Ex,y∼πθt(·|x)h
+(⟨θt−θ⋆, ϕ(x, y)⟩)
+ϕ(x, y)−Ey′∼πθt(·|x)[ϕ(x, y′)]i
+= 2β2
+Ex,y∼πθt(·|x)
+ϕ(x, y)ϕ(x, y)⊤
+−Ex,y∼πθt(·|x)[ϕ(x, y)]Ex,y∼πθ(·|x)[ϕ(x, y)]⊤
+(θt−θ⋆)
+= 2β2A(θt)(θt−θ⋆).
+The fourth and sixth equalities are because
+Ex,y∼πθt(·|x)h
+bV⋆(x)−V⋆(x)
+ϕ(x, y)−Ey′∼πθt(·|x)[ϕ(x, y′)]i
+=Exh
+bV⋆(x)−V⋆(x)
+Ey∼πθt(·|x)
+ϕ(x, y)−Ey′∼πθt(·|x)[ϕ(x, y′)]i
+= 0
+and
+Ex,y∼πθt(·|x)"
+lnP
+y′exp(⟨θt, ϕ(x, y′)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩)
+ϕ(x, y)−Ey′∼πθt(·|x)[ϕ(x, y′)]#
+=Ex"
+lnP
+y′exp(⟨θt, ϕ(x, y′)⟩)P
+y′exp(⟨θ⋆, ϕ(x, y′)⟩)Ey∼πθt(·|x)
+ϕ(x, y)−Ey′∼πθt(·|x)[ϕ(x, y′)]#
+= 0.
+29G Proof of Theorem 1
+Our proof consists of three steps. First, we characterize the estimation error of bV⋆. Second, with
+the learning guarantee of NR, we derive an upper bound on the average KL divergence between the
+output policies and the optimal policy π⋆with DC. Finally, we apply Pinsker’s inequality [Cover,
+1999] to relate the KL divergence to the performance gap, completing the proof.
+Step 1. To begin with, we can quantify the estimation error with Lemma 5:
+Lemma 5. With probability at least 1−δ/2, we have for all xthat
+
+bV⋆(x)−V⋆(x)2
+≲
+βmin
+exp1
+β
+−1,1
+vref2ln(|X|/δ)
+N.
+The proof is deferred to Appendix G.1.
+Step 2. We first boundPT
+t=1bℓt(π⋆)with Lemma 5. From the definition of π⋆, we know
+bℓt(π⋆) =
+bV⋆(xi)−V⋆(xi)2
+.
+LetFtdenote the filtration induced by {x1, y1,···, xt−1, yt−1}. Note that we have
+Eh
+bℓt(π⋆)Fti
+=Ex∼ρ
+bV⋆(x)−V⋆(x)2
+,
+E
+bℓt(π⋆)2Ft
+=Ex∼ρ
+bV⋆(x)−V⋆(x)4
+≤Ex∼ρ
+bV⋆(x)−V⋆(x)2
+=Eh
+bℓt(π⋆)Fti
+. (6)
+Next we utilize the following form of Freedman’s inequality [Song et al., 2022] from the literature:
+Lemma 6 (Freedman’s inequality [Song et al., 2022]) .Let{Z1, . . . , Z T}be a sequence of non-
+negative random variables where ztis sampled from a distribution depending on z1:t−1, i.e., zt∼
+Pt(z1:t−1). Further, suppose that |Zt| ≤Rfor all t. Then, for any δ >0andλ∈[0,1
+2R], we have
+with probability at least 1−δthat,
+TX
+t=1Zt−E[Zt|Pt]≤λTX
+t=1 
+2RE[Zt|Pt] +E[Z2
+t|Pt]
++ln(2/δ)
+λ.
+Therefore, applying Freedman’s inequality with Eq. (6), we have with probability at least 1−δ/4that
+TX
+t=1
+bV⋆(xi)−V⋆(xi)2
+≲2TEx∼ρ
+bV⋆(x)−V⋆(x)2
++ ln(1 /δ).
+From Lemma 5, this implies we have with probability at least 1−δ/4that
+TX
+t=1bℓt(π⋆)≲
+βmin
+exp1
+β
+−1,1
+vref2Tln(|X|/δ)
+N. (7)
+On the other hand, from the definition of π⋆, we have
+Eπ∼qth
+bℓt(π)i
+=Eπ∼qt"
+βlnπ(yt|xt)
+π⋆(yt|xt)+
+bV⋆(xt)−V⋆(xt)2#
+.
+Note that we have
+Eh
+Eπ∼qth
+bℓt(π)iFti
+=Ex∼ρ,π′∼qt,y∼π′(·|x)Eπ∼qt"
+βlnπ(y|x)
+π⋆(y|x)+
+bV⋆(x)−V⋆(x)2#
+,
+E
+Eπ∼qth
+bℓt(π)i2Ft
+≤Ex∼ρ,π′∼qt,y∼π′(·|x)Eπ∼qt"
+βlnπ(y|x)
+π⋆(y|x)+
+bV⋆(x)−V⋆(x)4#
+.
+30Note that from Assumption 2, we knowβlnπ(y|x)
+π⋆(y|x)+
+bV⋆(x)−V⋆(x)≤Cl+ 1.
+This implies that
+E
+Eπ∼qth
+bℓt(π)i2Ft
+≤(Cl+ 1)2Eh
+Eπ∼qth
+bℓt(π)iFti
+.
+Therefore, with Freedman’s inequality, we have with probability 1−δ/4that
+TX
+t=1Ex∼ρ,π′∼qt,y∼π′(·|x)Eπ∼qt"
+βlnπ(y|x)
+π⋆(y|x)+
+bV⋆(x)−V⋆(x)2#
+≲2TX
+t=1Eπ∼qth
+bℓt(π)i
++C2
+lln(1/δ). (8)
+Combining Eqs. (7) and (8) with the guarantee of no-regret oracle NR, we have with probability at
+least1−δthat
+1
+TTX
+t=1Ex∼ρ,π′∼qt,y∼π′(·|x)Eπ∼qt"
+βlnπ(y|x)
+π⋆(y|x)+
+bV⋆(x)−V⋆(x)2#
+≲
+βmin
+exp1
+β
+−1,1
+vref2ln(|X|/δ)
+N+Reg(T)
+T+C2
+lln(1/δ)
+T.
+Note that from AM-GM inequality, we have for all πthat
+Ex∼ρ,π′∼qt,y∼π′(·|x)"
+βlnπ(y|x)
+π⋆(y|x)+
+bV⋆(x)−V⋆(x)2#
+=β2Ex∼ρ,π′∼qt,y∼π′(·|x)"
+lnπ(y|x)
+π⋆(y|x)2#
++ 2βEx∼ρ,π′∼qt,y∼π′(·|x)
+lnπ(y|x)
+π⋆(y|x)
+bV⋆(x)−V⋆(x)
++Ex∼ρ
+bV⋆(x)−V⋆(x)2
+≥β2
+2Ex∼ρ,π′∼qt,y∼π′(·|x)"
+lnπ(y|x)
+π⋆(y|x)2#
+−Ex∼ρ
+bV⋆(x)−V⋆(x)2
+.
+Therefore we have with probability at least 1−δthat
+1
+TTX
+t=1Ex∼ρ,π∼qt,π′∼qt,y∼π′(·|x)"
+βlnπ(y|x)
+π⋆(y|x)2#
+≲
+βmin
+exp1
+β
+−1,1
+vref2ln(|X|/δ)
+N+Reg(T)
+T+C2
+lln(1/δ)
+T. (9)
+From the definition of decoupling coefficient (Definition 1), we know that
+1
+TTX
+t=1Eπ∼qtEx∼ρ[KL(π(·|x), π⋆(·|x))] =1
+TTX
+t=1Ex∼ρ,π∼qt,y∼π(·|x)[lnπ(y|x)−lnπ⋆(y|x)]
+≤1
+TTX
+t=1vuutDC(Π)Ex∼ρ,π∼qt,π′∼qt,y∼π′(·|x)"
+lnπ(y|x)
+π⋆(y|x)2#
+.
+Apply Cauchy-Schwartz inequality and we have
+1
+TTX
+t=1Eπ∼qtEx∼ρ[KL(π(·|x), π⋆(·|x))]≤vuutDC(Π)
+TTX
+t=1Ex∼ρ,π∼qt,π′∼qt,y∼π′(·|x)"
+lnπ(y|x)
+π⋆(y|x)2#
+.
+(10)
+31Combine Eqs. (9) and (10) and we have with probability at least 1−δthat
+1
+TTX
+t=1Eπ∼qtEx∼ρ[KL(π(·|x), π⋆(·|x))]
+≲
+min
+exp1
+β
+−1,1
+vrefr
+DC(Π) ln( |X|/δ)
+N+s
+DC(Π)Reg(T)
+Tβ2+s
+DC(Π)C2
+lln(1/δ)
+Tβ2.
+(11)
+Step 3. Note that from Pinsker’s inequality [Cover, 1999], we have
+J(π⋆)−1
+TTX
+t=1Eπ∼qt[J(π)] =Ex∼ρ,y∼π⋆(·|x)[r(x, y)]−1
+TTX
+t=1Eπ∼qt,x∼ρ,y∼π(·|x)[r(x, y)]
+≤1
+TTX
+t=1Eπ∼qtEx∼ρ[∥π(·|x)−π⋆(·|x)∥1]≤1
+TTX
+t=1Eπ∼qtEx∼ρhp
+2KL(πt(x), π⋆(·|x))i
+.
+Therefore from Cauchy-Schwartz inequality, we have
+J(π⋆)−1
+TTX
+t=1Eπ∼qt[J(π)]≤vuut1
+TTX
+t=1Ex∼ρ[2KL(πt(x), π⋆(·|x))]. (12)
+Combine Eqs. (11) and (12) and we have with probability at least 1−δthat
+J(π⋆)−1
+TTX
+t=1Eπ∼qt[J(π)]≲DC(Π)Reg(T)
+Tβ21
+4
++DC(Π)C2
+lln(1/δ)
+Tβ21
+4
++ 
+min
+exp1
+β
+−1,1
+vref2DC(Π) ln( |X|/δ)
+N!1
+4
+.
+This concludes our proof.
+G.1 Proof of Lemma 5
+Letbp(x)denote the empirical average reward that πrefattains for prompt xin the offline estimation
+stage. Then we can observe that
+bV⋆(x) =βln ((1−bp(x)) +bp(x) exp(1 /β)).
+We also use p⋆(x)to denote Ey∼πref(x)[r(x, y)]. From Azuma-Hoeffding’s inequality [Azuma, 1967]
+and union bound over all x∈ X, with probability at least 1−δ/2, we have for all x∈ X that
+|bp(x)−p⋆(x)|≲r
+ln(|X|/δ)
+N.
+On the other hand, we know
+V⋆(x) =βln ((1−p⋆(x)) +p⋆(x) exp(1 /β)),∀x.
+From mean value theorem, we have
+bV⋆(x)−V⋆(x)≤β
+min
+exp1
+β
+−1,1
+vref
+|bp(x)−p⋆(x)|,∀x.
+Therefore, we have for all x∈ X
+
+bV⋆(x)−V⋆(x)2
+≲
+βmin
+exp1
+β
+−1,1
+vref2ln(|X|/δ)
+N.
+32H Rate of Convergence
+GSM8K 1.5BGSM8K 3BGSM8K 7B
+MATH 1.5BMATH 3BMATH 7B
+Figure 11: Training reward vs. steps over two datasets and three models.
+Fig. 11 shows the training reward of PPO, GRPO, REBEL , and A⋆-PO over MATH and GSM8K
+datasets at each step. We can see that all four methods have similar convergence behavior. Based
+on the plots, we can now safely conclude that A⋆-PO is the fastest method as it requires the least
+amount of time to complete the same number of training steps, while reaching convergence at the
+same step count as the other methods. To illustrate this more clearly, we also include a plot of training
+and generation time versus training reward below. Note that the A⋆-PO curves do not start at time
+zero, as they include the time required for data generation. Each line starts at the corresponding
+generation time for its dataset and model. While REBEL converges at a comparable rate in terms of
+time, it requires significantly more memory than A⋆-PO.
+GSM8K 1.5BGSM8K 3BGSM8K 7B
+MATH 1.5BMATH 3BMATH 7B
+Figure 12: Training reward vs. training and generation time over two datasets and three models.
+33

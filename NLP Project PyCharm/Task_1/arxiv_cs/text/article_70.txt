@@ -1,0 +1,1018 @@
+arXiv:2505.21097v1  [cs.CL]  27 May 2025Thinker: Learning to Think Fast and Slow
+Stephen Chung∗
+DualityRLWenyu Du∗
+DualityRLJie Fu
+Shanghai AI Lab
+Abstract
+Recent studies show that the reasoning capabilities of Large Language Models
+(LLMs) can be improved by applying Reinforcement Learning (RL) to question-
+answering (QA) tasks in areas such as math and coding. With a long context length,
+LLMs may learn to perform search, as indicated by the self-correction behavior
+observed in DeepSeek R1. However, this search behavior is often imprecise
+and lacks confidence, resulting in long, redundant responses and highlighting
+deficiencies in intuition and verification. Inspired by the Dual Process Theory in
+psychology, we introduce a simple modification to the QA task that includes four
+stages: Fast Thinking , where the LLM must answer within a strict token budget;
+Verification , where the model evaluates its initial response; Slow Thinking , where
+it refines the initial response with more deliberation; and Summarization , where
+it distills the refinement from the previous stage into precise steps. Our proposed
+task improves average accuracy from 24.9% to 27.9% for Qwen2.5-1.5B, and from
+45.9% to 49.8% for DeepSeek-R1-Qwen-1.5B. Notably, for Qwen2.5-1.5B, the
+Fast Thinking mode alone achieves 26.8% accuracy using fewer than 1000 tokens,
+demonstrating substantial inference efficiency gains. These findings suggest that
+intuition and deliberative reasoning are distinct, complementary systems benefiting
+from targeted training.
+1 Introduction
+Multiple studies have shown that the reasoning capabilities of Large Language Models (LLMs) can
+be enhanced by applying Reinforcement Learning (RL) to question-answering (QA) tasks [ 1,2,3],
+demonstrating impressive mathematical and coding performance across benchmarks. With long
+context lengths, an interesting emergent behavior is self-correction within the chain-of-thought
+(CoT), where the LLM learns to perform search, such as verifying its steps, backtracking, and trying
+alternative paths.
+However, it has been observed that this emergent search tends to be inefficient—the CoT is often
+long and redundant [ 4,5]. For example, Deepseek R1’s reasoning typically involves excessive
+backtracking and verification [ 1]. A likely cause is inefficient temporal credit assignment: for
+instance, in the GRPO algorithm used to train Deepseek R1, the entire generation sequence receives
+the same scalar advantage. That is, if the final answer is correct, the probability of the whole
+sequence is increased—regardless of which parts were actually useful. As a result, futile search
+paths and uncertain verifications are also rewarded, as long as the correct solution is eventually
+produced. Consequently, intuition —the ability to identify promising search paths rapidly—and
+verification —the ability to evaluate a search path confidently—are not explicitly trained and may
+therefore be underdeveloped.
+A typical RL solution to this issue is to use more precise temporal credit assignment, such as
+incorporating a critic to compute a more accurate advantage for each token, as in PPO [ 6]. However,
+studies show that PPO performs similarly to GRPO [ 7,2]—indicating that the critic may not be
+∗Equal contribution. Correspondence to: stephen.chung@dualityrl.com .
+Preprint. Under review.accurate enough for token-level credit assignment. Another approach is to use a lower discount rate or
+a shorter context length to encourage more efficient search; however, this may hinder the emergence
+of search behavior, as studies show that a long context length is necessary for strong performance
+[8, 9].
+System 1
+Fast ThinkingSystem 2
+Slow ThinkingPropose Initial Solution Rapidly
+Verify and Refine Solution Carefully
+Figure 1: Conceptual model of the in-
+teraction between Fast Thinking and
+Slow Thinking modes in the Thinker
+task, based on Dual Process Theory.To address this dilemma, we draw inspiration from how hu-
+man decision-making is modeled under Dual Process Theory
+[10]. According to this theory, humans possess two distinct
+but complementary cognitive systems: System 1, which op-
+erates quickly and intuitively based on heuristics but is prone
+to biases, and System 2, which is slower, more deliberate,
+and capable of reflective reasoning. Within this framework,
+a typical decision-making process unfolds as follows:
+1.System 1 rapidly generates a candidate option
+based on intuition.
+2.System 2 evaluates this option through mental sim-
+ulation.
+3.If the option passes verification, it is implemented;
+otherwise, System 2 attempts to refine it.
+4. If refinement fails, the process returns to System 1 for another option.
+Inspired by this decision-making process, we propose the Thinker task as an alternative to the standard
+QA task. In a typical QA task, the model receives a question and generates a final answer in a single
+pass. A binary reward is given based solely on the correctness of the final answer. In contrast, the
+Thinker task decomposes the response into a four-step process:
+1.Fast Thinking : The agent generates an initial answer using a small token budget.
+2.Verification : The agent evaluates the correctness of the initial answer using a large token
+budget. If verified, it is accepted as the final answer.
+3.Slow Thinking : If the initial answer fails verification, the agent can produce another final
+answer, using a large token budget.
+4.Summarization : The agent summarizes the reasoning from the slow thinking step into a
+concise summary that leads to the same final answer.
+We design distinct reward signals for each step, aiming to enhance different capabilities of the agent:
+intuition from Fast Thinking, evaluation from Verification, refinement from Slow Thinking, and
+integration from Summarization. Crucially, the reward signal for each task is restricted to that task
+alone. This separation allows for more precise temporal credit assignment by isolating learning
+signals for each task. For example, in the Fast Thinking task, the agent receives a binary reward
+based on the correctness of the initial answer, encouraging it to identify promising search paths under
+strict token budgets—thereby strengthening intuition. Meanwhile, the Slow Thinking task preserves
+the opportunity for the agent to learn a more general search strategy to refine previously incorrect
+answers.
+The design facilitates a virtuous loop between intuition and reasoning. Fast Thinking helps Slow
+Thinking by providing a promising initial search path, while Slow Thinking helps Fast Thinking by
+refining flawed intuition. This bidirectional refinement mirrors how expert human decision-making
+evolves through repeated interactions between intuition in System 1 and reasoning in System 2 [ 11].
+Experimental results validate our approach: relative to the QA task, the Thinker task yields consistent
+gains across diverse math benchmarks, with average relative performance gains of 11.9% for
+Qwen2.5-1.5B models and 8.50% for DeepSeek-R1-Distill-Qwen-1.5B models. Furthermore, our
+analysis reveals a notable reduction in reflection patterns, suggesting more direct reasoning. In
+summary, the proposed Thinker task offers the following key strengths:
+•Specialized Training : Dedicated sub-tasks and rewards are designed to explicitly train
+distinct agent capabilities, providing richer and more targeted learning signals.
+•General Applicability : The Thinker task can replace standard QA tasks without imposing
+constraints on the choice of RL algorithm or model architecture.
+2•Inference Efficiency : The Fast Thinking mode, requiring minimal token generation, can be
+deployed standalone for simpler tasks, offering a flexible trade-off between performance
+and computational cost during inference.
+•Strong Empirical Performance : Our experiments demonstrate that agents trained with
+the Thinker task consistently outperform those trained on standard QA tasks across various
+benchmarks.
+2 Background
+In a single-turn QA task, a question is sampled from a dataset, and the LLM generates a response
+to the question. Concretely, let the dataset be denoted as D={(x(i), y∗
+(i))}N
+i=1, where x(i)denotes
+thei-th question, y∗
+(i)is its corresponding ground-truth answer, and Nis the size of the dataset. Let
+πθ(· |x)denote the model’s policy, parameterized by θ. A response a∼πθ(· |x)is sampled for
+question x. The objective is to maximize:
+J(θ) =Ex,y∗∼D[R(a, y∗)], (1)
+where a∼πθ(· |x), and Ris the reward function, such as a binary function that returns 1if the
+extracted answer from amatches the ground-truth answer y∗, and 0otherwise.
+In a more general multi-turn task, we allow the dialogue to continue after the first response. Concretely,
+we denote xtandatas the prompt and model response at turn t. The initial prompt x0is randomly
+sampled from the dataset D. To generate the subsequent prompt xt, we define the transition function
+xt=g(x0:t−1, at−1)(with xa:bendpoint-inclusive), which determines the next prompt based on
+previous prompts and responses, or whether to terminate the episode. Thus, the objective in the
+multi-turn task becomes:
+J(θ) =Ex0,y∗∼D"TX
+t=0Rt(a0:t, y∗)#
+, (2)
+where at∼πθ(· |x0:t, a0:t−1), that is, the response is conditioned on all previous prompts and
+responses, and Tis the terminal step.
+3 Method
+In the proposed Thinker task, we decompose the QA task into four steps. The whole task occurs
+within a single dialogue, meaning that the agent receives all prompts and responses from previous
+steps in addition to the current prompt. An illustration of the Thinker task is shown in Figure 2.
+3.1 Task Description
+Step 1 - Fast Thinking. In the first step, the agent is prompted to answer the given question concisely
+within a strict token budget. The response in this step is restricted to a relatively short maximum
+generation length (e.g., 1000 tokens), meaning that the response will be truncated if it exceeds this
+length. The reward Rfastin this step is defined as a binary function based on the correctness of the
+extracted answer. Specifically, let yfastdenote the extracted answer; then Rfast= 1{yfast=y∗}. The
+agent always proceeds to the next step after the response.
+Motivation .The motivation of this step is to explicitly train the agent’s intuition. As the agent must
+generate a response under a strict token budget, it cannot search extensively. It is usually restricted to
+a few search paths, which are directly reinforced if one leads to the correct answer.
+Step 2 - Verification. In the second step, the agent is prompted to verify whether the fast answer
+yfastis correct, and must output either YesorNo. The response in this step is restricted to a relatively
+long maximum generation length (e.g., 6000 tokens). The reward Rverify in this step is defined as a
+weighted binary function based on the correctness of the verification. Specifically, let yverify denote
+the extracted answer; then:
+Rverify=(1−pfast-acc )·1{yverify=Yes}ifyfast=y∗,
+pfast-acc·1{yverify=No} otherwise ,(3)
+3Step 1: Fast Thinking
+User: Please answer the question concisely . This is the question : <Question>
+Response: Step 1… Step 2  … The answer is   yfast
+ 
+Long generation length 
+(e.g.  6000 tokens)Short generation length 
+(e.g.  1000 tokens)Step 2: Verification
+User: Is your above answer  correct?
+Response: Let me verify.  Step 1… Step 2  … The verification answer is  yverify
+Step 3: Slow Thinking
+User: Your initial answer is verified to be incorrect. Please try again.
+Response: Let me correct my mistake.  Step 1… Step 2  … The new answer is  yslow
+Step 4: Summarization
+User: Your final answer is correct. Please summarize the steps concisely .
+ This is the question:  <Question>
+Response: Step 1… Step 2  … The answer is  ysummaryTraining
+If yfast is incorrect
+Inference
+If yverify  is No
+Training
+If yslow is correct
+Inference
+Never proceedEither Yes  or NoTraining
+Always proceed
+Inference
+Always proceed
+Figure 2: The four-step Thinker task. Each stage involves a user prompt, model response, and specific
+rewards and transition conditions designed to train distinct agent capabilities (intuition, evaluation,
+refinement, and integration). Reward function details are in the main text.
+where pfast-acc denotes the trailing accuracy of the fast thinking step (averaged over the batch). This
+weighting is used to balance the two classes, so as to discourage the agent from always outputting
+YesorNowhen the accuracy of the fast thinking step is too high or too low.
+The transition function to the next step depends on whether the agent is in training or inference mode.
+In inference mode, if the agent answers Yes, then the fast answer is chosen as the final answer, and
+the episode terminates; otherwise, the agent proceeds to the next step. In training mode, if the fast
+answer is correct, then it is chosen as the final answer; otherwise, the agent proceeds to the next step.
+The distinction between training and inference mode aims to ensure that, during training, the Slow
+Thinking step primarily focuses on instances where the fast answer was incorrect. This prevents the
+agent from needing to re-verify an already correct fast answer in the Slow Thinking stage. However,
+during inference, we do not have access to the ground-truth answer, so we must rely on the agent’s
+verification.
+Motivation .The motivation of the second step is to explicitly train the agent’s evaluation capability.
+The agent receives a clear binary reward based on whether its verification result is correct. Verifying
+an answer is often easier than generating one. If the fast answer is already verified to be correct, there
+is no need to proceed further, thus saving computational cost.
+Step 3 - Slow Thinking. In the third step, the agent is prompted that the fast answer has been verified
+to be incorrect and is asked to try an alternative answer. The response in this step is restricted to
+a relatively long maximum generation length (e.g., 6000 tokens). The reward Rslowin this step is
+defined as a binary function based on the correctness of the extracted answer. Specifically, let yslow
+denote the extracted answer; then Rslow= 1{yslow=y∗}.
+In both inference and training modes, yslowis always chosen as the final answer if the Slow Thinking
+step is executed. In inference mode, the episode ends here. In training mode, the agent proceeds to
+the next step if the slow answer yslowis correct; otherwise, the episode ends. This distinction exists
+because the purpose of the next step—summarization—is to distill the long and correct response in
+this step to improve intuition, which is not applicable in inference mode.
+4Motivation .The motivation of this step is to encourage the agent to learn to refine incorrect fast
+answers for difficult questions. It should learn to use the reasoning from the verification step and
+revise errors to arrive at the correct answer. If such refinement is not possible, it should learn to try an
+alternative approach, leveraging the generous token budget for generation.
+Step 4 - Summarization. In the fourth step, the agent is prompted that the previous slow answer
+is correct and is asked to concisely summarize the steps leading to it. Crucially, the prompt for
+the Summarization step includes the original question again, mirroring its presentation in the Fast
+Thinking prompt. The response in this step is restricted to a relatively short maximum generation
+length (e.g., 1000 tokens). The reward Rsummary in this step is designed based on two criteria:
+1.Correctness : The extracted answer from the summary, ysummary , should be the same as the
+previous slow answer, meaning it should not produce a summary that leads to an incorrect
+answer.
+2.Consistency : The response should be consistent with what the model is expected to produce
+in the Fast Thinking mode—that is, its probability conditioned on the Fast Thinking prompt
+should not be unduly low. For example, directly outputting the final answer without
+intermediate steps is considered inconsistent, as the likelihood of producing the correct
+answer directly under Fast Thinking mode is typically very low.
+Combined, the reward function in this step is defined as:
+Rsummary = 1{ysummary =yslow}+clogP(asummary |xfast), (4)
+where xfastis the prompt in Fast Thinking step (i.e., the initial prompt), logP(asummary |xfast)is
+the log probability of the summary response under the Fast Thinking prompt, and cis a scalar
+hyperparameter. In experiments, we found that the agent sometimes still degenerates to give a very
+short answer despite the log probability term. To mitigate this, we gate the reward to 0if the length
+of the generated response is less than a low threshold (e.g., 300 tokens).
+Motivation .The motivation of the final step is to reinforce concise reasoning patterns by rewarding
+correct and consistent summaries. A key design element is that the original question is re-presented
+in the Summarization prompt, mirroring its appearance in the Fast Thinking step. The agent is trained
+to produce a concise reasoning trace that leads to the correct answer for this input. This encourages
+the model to form a strong association between the original question and a correct, concise solution
+path. We hypothesize that this targeted reinforcement distills the successful but lengthy reasoning
+from Slow Thinking into a compact form suited to the Fast Thinking mode—thereby improving the
+agent’s intuition. In addition to intuition, this step also trains the agent’s integration ability, as it must
+extract and condense key reasoning steps from the longer trace generated in the previous step.
+3.2 Training with the Thinker Task
+Training LLMs with the Thinker task requires particular considerations regarding reward propagation.
+Since the reward at each step is specific to that step alone, it should not be propagated backward to
+earlier steps. This implies that the discount factor between steps should be set to 0, while that within
+each step should be high (e.g., 1) to enable effective credit assignment over tokens. The Thinker task
+defines only the RL environment and imposes no restrictions on the choice of algorithm or model
+architecture, allowing compatibility with any standard RL method (e.g., PPO) and LLM.
+4 Related Work
+Environment Augmentation. OurThinker task is a form of environment augmentation for QA,
+inspired by Dual Process Theory and related to concepts like the Thinker MDP [ 12,13]. While
+Thinker MDP provides agents with a simulated world model for interaction before action, our task
+structures QA into stages where self-generated intermediate outcomes guide subsequent reasoning.
+This contrasts with multi-attempt tasks [ 14] that allow iterative revision but require ground-truth
+access during inference, a constraint our method avoids.
+RL and Reasoning in LLMs. A large number of studies have demonstrated the effectiveness of
+applying RL to enhance the reasoning capabilities of LLMs [ 1,2,3,9]. Our work builds on these
+efforts by decomposing the QA task into the four-step Thinker task. It has been observed that LLMs
+5trained with RL can produce inefficient CoT [ 4], leading to overthinking [15]. Our work relates to
+strategies for controlling generation length (often termed token budgets). Examples include dynamic
+token budgets that scale with problem complexity [ 5], or user-defined budgets [ 16,17]. For instance,
+Muennighoff et al. [ 18] utilize token budget controls during the generation of CoT data for supervised
+fine-tuning (SFT). While these approaches primarily focus on token budget control within a single
+response generation or for SFT data preparation, our method introduces a structured, multi-step RL
+task explicitly designed to train distinct agent abilities. In addition, our work is related to methods for
+encouraging self-correction in LLMs [ 19]. For instance, methods like Self-Refine [ 20] and Reflexion
+[21] primarily use prompt engineering and few-shot examples to enable agents to incorporate internal
+or external feedback for refining subsequent responses. However, unlike our work, these methods
+typically do not involve RL fine-tuning of the agent for these self-correction behaviors; instead, the
+correction capability is elicited at inference time through prompting.
+5 Experiments
+This section details the experiments conducted to assess whether the Thinker task can more effectively
+enhance LLM reasoning capabilities compared to a standard QA task. We focus on the mathematical
+reasoning domain here.
+5.1 Experimental Setup
+To evaluate the Thinker task, we fine-tune two publicly available models: Qwen2.5-1.5B (Q1.5B)
+[22] and DeepSeek-R1-Distill-Qwen-1.5B (R1.5B) [ 1]. While sharing a base architecture, R1.5B has
+undergone additional distillation using reasoning data from DeepSeek-R1, endowing it with stronger
+initial reasoning and search behaviors compared to the base Q1.5B. Training both models allows us
+to investigate the Thinker task’s impact on a model with foundational capabilities (Q1.5B) and its
+ability to further enhance a model already specialized for reasoning (R1.5B).
+We fine-tune these models using RL on both the Thinker task and a standard QA task (serving as our
+baseline). For all experiments, we employ PPO [ 6]. Key hyperparameters include a discount rate
+γ= 1, GAE lambda λ= 1, and a sampling temperature of 1. No KL penalty against a reference
+policy was applied. The Fast Thinking and Summarization stages use a 1000-token budget, while
+Verification and Slow Thinking use a 6000-token budget. Most other hyperparameters and training
+details mirror those in Open-Reasoner-Zero, with details provided in Appendix A.
+For the training data, we utilized the 129K math question-answering dataset provided by Open-
+Reasoner-Zero. Each training run for both the Thinker task and the baseline required approximately 7
+days on two compute nodes, each equipped with 8 A100 GPUs. Our implementation, adapted from
+the Open-Reasoner-Zero codebase [ 3], is publicly available at https://github.com/DualityRL/
+thinker-task .
+5.2 Training Dynamics and Evaluation Results
+The training performance is shown in Figure 3, measured by accuracy on questions in the training data.
+For the Thinker task, we plot the fast accuracy (the accuracy of the agent during the Fast Thinking
+step) and the final accuracy (the accuracy of the final answer). Note that this final accuracy is not
+directly comparable to that of the baseline, as the Thinker-task agent effectively has two attempts
+during training due to the transition function from Verification to Slow Thinking. Nonetheless, we
+observe that both its fast and final accuracy improve steadily, while the accuracy of the baseline
+plateaus rather quickly. This suggests that the Thinker-task agent is developing stronger underlying
+intuition for the task, potentially more so than just acquiring a generic search algorithm, which may
+contribute to its sustained improvement. We also observe that the fast accuracy exceeds the baseline’s
+accuracy in the Q1.5B model, indicating the effectiveness of the Fast Thinking mode.
+To evaluate the models, we consider the following common benchmarks: MATH500, AIME2024,
+AIME2025, GPQA Diamond, Olympiadbench, AMC23, and Minerva Math. We evaluate agent
+Pass@1 accuracy on these benchmarks every 50 training steps. The average performance across the
+benchmarks during training is shown in Figure 4. The trend is similar to the training performance,
+with the agent trained on the Thinker task surpassing the baseline. Detailed breakdowns for each
+benchmark are provided in Appendix B. Notably, for the R1.5B model, a moderate gap exists between
+60 200 400 600 800 1k 1.2k
+Training Steps0.00.10.20.30.40.5Accuracy
+Thinker (Final Acc)
+Thinker (Fast Acc)
+Baseline (Final Acc)(a) Qwen2.5-1.5B
+0 200 400 600 800 1k 1.2k
+Training Steps0.00.10.20.30.40.50.60.70.8Accuracy
+Thinker (Final Acc)
+Thinker (Fast Acc)
+Baseline (Final Acc) (b) DeepSeek-R1-Distill-Qwen-1.5B
+Figure 3: Accuracy on training set.
+0 200 400 600 800 1k 1.2k
+Training Steps0.160.180.200.220.240.26Accuracy
+Thinker (Final Acc)
+Thinker (Fast Acc)
+Baseline (Final Acc)
+(a) Qwen2.5-1.5B
+0 200 400 600 800 1k 1.2k
+Training Steps0.200.250.300.350.400.450.500.55Accuracy
+Thinker (Final Acc)
+Thinker (Fast Acc)
+Baseline (Final Acc) (b) DeepSeek-R1-Distill-Qwen-1.5B
+Figure 4: Evaluation performance across seven common benchmarks.
+its final accuracy and fast accuracy. This disparity is likely attributable to R1.5B’s strong inherent
+reasoning capabilities, enabling its Slow Thinking mode to effectively utilize the larger token budget
+for refining initial answers.
+The performance of the final models, evaluated on the aforementioned benchmarks and the additional
+CollegeMath benchmark, is detailed in Table 1. Due to the large number of questions in CollegeMath,
+we did not evaluate training checkpoints on this benchmark, only the final models. In addition to
+the Fast Accuracy and Final Accuracy of the Thinker-task agent and the accuracy of the fine-tuned
+baseline agent, Table 1 also includes results for: (1) the pretrained model (the model before any
+fine-tuning); (2) reported figures from Open-Reasoner-Zero [ 3] (labelled ‘ORZ’); and (3) reported
+figures from SimpleRL [ 2]. Both ORZ and SimpleRL utilize PPO to train agents on standard QA
+tasks.
+From Table 1, we observe that the Thinker-task agent consistently performs better than the other
+methods across almost all benchmarks . For the Q1.5B model, the Thinker-Fast agent’s performance
+already surpasses that of the baseline, while the full Thinker-task agent achieves a 11.9% relative
+performance gain on average compared to this baseline. For the R1.5B model, the Thinker-Fast agent
+performs slightly worse than the baseline but still significantly outperforms the pretrained model.
+This result for Thinker-Fast is notable, suggesting a substantial efficiency gain, as it only requires
+1000 token budget compared to the 8000 token budget of the pretrained model. The full Thinker-task
+model with R1.5B surpasses the baseline by an average relative increase of 8.50%. These results
+collectively suggest the benefits of decomposing the single-turn QA task into the proposed four-step
+Thinker task.
+5.3 Analysis and Case Study
+Reflection and Response Length. Beyond overall performance, we investigated whether the Thinker
+task encourages more direct reasoning with less overt self-reflection or self-doubt. We compiled a
+vocabulary list of terms commonly associated with self-reflection in Deepseek R1’s outputs (e.g.,
+"wait," "however," "alternatively") and measured the average occurrence of these reflection patterns
+7Table 1: Performance comparison across various mathematical reasoning benchmarks. Average
+(Avg.) scores are presented. All scores are Pass@1 accuracy (%) averaged over 16 samples. Top
+score in each benchmark column is bolded . Standard errors are provided in Appendix B.
+MethodMATH AIME AIME GPQA Olympiad AMC Minerva CollegeAvg.500 2024 2025 Diamond bench 23 Math Math
+Qwen2.5-1.5B (Q1.5B)
+Pretrained 9.05 0.00 0.00 4.55 3.09 4.06 2.30 7.40 3.81
+Baseline 57.98 3.33 3.33 21.46 24.54 34.38 17.78 36.21 24.88
+Thinker 64.25 6.25 2.50 23.74 28.11 40.62 19.03 38.33 27.85
+Thinker-Fast 61.60 6.25 2.50 26.39 24.78 35.94 18.66 37.85 26.75
+ORZ 58.00 3.50 1.00 16.80 - - - - -
+SimpleRL 59.00 4.20 - - 21.00 35.00 20.20 - -
+DeepSeek-R1-Distill-Qwen-1.5B (R1.5B)
+Pretrained 76.21 17.50 17.92 13.76 37.46 55.94 24.82 38.85 35.31
+Baseline 86.24 35.42 23.75 25.69 49.22 72.81 32.08 42.02 45.90
+Thinker 87.02 35.62 27.71 36.08 54.21 81.72 33.23 42.77 49.80
+Thinker-Fast 77.21 11.46 11.46 30.08 40.39 59.22 29.23 41.37 37.55
+during training, with results shown in Figure 5b. We observed that the Thinker-task agent tends to
+use fewer such reflection patterns in its reasoning trace, suggesting it may be learning to reason more
+directly.
+Paradoxically, despite reduced reflection patterns, the Thinker agent’s responses were generally longer
+than the baseline’s (Figure 5b). This increased length primarily stems from repeated self-verifications
+within the Verification step (e.g., "Let me check... Yes. Let me check again... Yes."), explaining
+the growing verification length in Figure 5b. This behavior is likely incentivized by our answer
+extraction focusing only on the last boxed output, encouraging reiteration and refinement if tokens
+remain. Future work could mitigate this by, for instance, permitting only a single boxed answer in the
+Verification step.
+0 200 400 600 800 1k 1.2k
+Training Steps0123456Reflection Pattern OccuranceThinker
+Baseline
+(a) Reflection Pattern
+0 200 400 600 800 1k 1.2k
+Training Steps02000400060008000Average T oken LengthThinker - Fast
+Thinker - Verify
+Thinker - Slow
+Thinker - T otal
+Baseline (b) Response Length
+Figure 5: Average reflection pattern count and response length for DeepSeek-R1-Distill-Qwen-1.5B
+(R1.5B) during training.
+Role of Summarization. Finally, we investigated the importance of the Summarization step through
+an ablation analysis. We trained a Q1.5B model using a modified Thinker task where the Sum-
+marization step was removed. The average reflection pattern count and response length for the
+Thinker task, both with and without the Summarization step, are presented in Figure 6. Without the
+Summarization step, the model exhibited a more frequent increase in reflection patterns, accompanied
+by highly fluctuating response lengths during training. This suggests that the Summarization step may
+contribute to stabilizing the learning process, potentially by discouraging degeneration into excessive
+reflection.
+Removing the Summarization step negatively impacted Fast Thinking: average Fast Accuracy
+on benchmarks dropped from 26.75% (with summarization) to 24.84% (without). This suggests
+summarization, by potentially distilling concise reasoning, enhances intuition for Fast Thinking.
+8Interestingly, final accuracy remained comparable (27.85% with vs. 27.84% without summarization),
+indicating that the Slow Thinking step could often compensate for the reduced fast accuracy. Detailed
+ablation results can be found in Appendix B.
+0 200 400 600 800 1k 1.2k 1.4k 1.6k 1.8k
+Training Steps0.000.050.100.150.200.250.30Reflection Pattern OccuranceThinker
+Thinker without Summarization
+(a) Reflection Pattern
+0 200 400 600 800 1k 1.2k 1.4k 1.6k 1.8k
+Training Steps0100020003000400050006000Average T oken LengthThinker
+Thinker without Summarization (b) Response Length
+Figure 6: Average reflection pattern count and response length for Qwen2.5-1.5B (Q1.5B) during
+training, with and without Summarization stage.
+Case Study. We conducted a case study to examine how the agent’s reasoning adapts across the
+Thinker task stages. Observations from representative outputs (see Appendix C for full examples)
+highlight the importance of the Fast Thinking mode. When an initial Fast Thinking output is incorrect,
+the agent first engages in a Verification stage to assess its own answer with clear reference to the steps
+given in the Fast Thinking mode. If errors are identified, the subsequent Slow Thinking stage involves
+a detailed refinement. During Slow Thinking, the agent explicitly scrutinizes the flawed reasoning
+from the Fast Thinking attempt and insights from its own Verification, endeavoring to generate a
+new, correct solution. Furthermore, after a successful correction, the agent learns to distill the long
+reasoning into concise explanations during the last Summarization stage.
+6 Limitation
+This study has several limitations. Firstly, our experiments were confined to two 1.5B parameter
+models, and we did not investigate the scalability of the Thinker task to larger models due to
+computational constraints. Secondly, hyperparameters, such as token limits for each task stage, were
+set heuristically without systematic tuning, suggesting our reported results may not be optimal. Lastly,
+agents trained with the Thinker task generally produce slightly longer responses than standard QA
+agents, potentially impacting computational efficiency at inference if all stages are utilized.
+7 Future Work and Conclusion
+In this paper, we introduced the Thinker task, a novel approach that decomposes the standard single-
+turn question-answering process into a structured four-stage task. This decomposition aims to provide
+more explicit reward signals for training distinct agent capabilities: intuition via Fast Thinking,
+evaluation via Verification, refinement via Slow Thinking, and integration via Summarization. Our
+experiments demonstrate significant performance improvements across a majority of mathematical
+reasoning benchmarks. Furthermore, our analysis indicates that agents trained with the Thinker task
+exhibit a reduction in overt reflection patterns during their reasoning process, suggesting more direct
+problem-solving.
+Beyond the specific application to question-answering, this work underscores the potential of en-
+vironment augmentation in RL. In RL, while significant attention is often devoted to algorithm
+development, the environment itself is typically treated as a given problem specification. However,
+as demonstrated by this paper and prior research such as the Thinker MDP, there is considerable
+untapped potential in designing environments that offer richer inputs, more structured interactions, or
+more nuanced reward signals. Future research could explore alternative methods for enriching RL
+environments, perhaps by developing more dynamic tasks that adapt to an agent’s learning state or
+that explicitly target the development of a wider array of cognitive capabilities. Such advancements
+in environment design could unlock new levels of performance and generalization in RL agents.
+9Acknowledgement
+Stephen Chung completed this work at the University of Cambridge, while Wenyu Du completed this
+work at the University of Hong Kong.
+References
+[1]Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+Shirong Ma, Peiyi Wang, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in
+llms via reinforcement learning. arXiv preprint arXiv:2501.12948 , 2025.
+[2]Weihao Zeng, Yuzhen Huang, Qian Liu, Wei Liu, Keqing He, Zejun Ma, and Junxian He.
+Simplerl-zoo: Investigating and taming zero reinforcement learning for open base models in the
+wild. arXiv preprint arXiv:2503.18892 , 2025.
+[3]Jingcheng Hu, Yinmin Zhang, Qi Han, Daxin Jiang, Xiangyu Zhang, and Heung-Yeung Shum.
+Open-reasoner-zero: An open source approach to scaling up reinforcement learning on the base
+model. arXiv preprint arXiv:2503.24290 , 2025.
+[4]Xingyu Chen, Jiahao Xu, Tian Liang, Zhiwei He, Jianhui Pang, Dian Yu, Linfeng Song, Qiuzhi
+Liu, Mengfei Zhou, Zhuosheng Zhang, et al. Do not think that much for 2+ 3=? on the
+overthinking of o1-like llms. arXiv preprint arXiv:2412.21187 , 2024.
+[5]Tingxu Han, Zhenting Wang, Chunrong Fang, Shiyu Zhao, Shiqing Ma, and Zhenyu Chen.
+Token-budget-aware llm reasoning. arXiv preprint arXiv:2412.18547 , 2024.
+[6]John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal
+policy optimization algorithms. arXiv preprint arXiv:1707.06347 , 2017.
+[7]Jian Hu. Reinforce++: A simple and efficient approach for aligning large language models.
+arXiv preprint arXiv:2501.03262 , 2025.
+[8]Edward Yeo, Yuxuan Tong, Morry Niu, Graham Neubig, and Xiang Yue. Demystifying long
+chain-of-thought reasoning in llms. arXiv preprint arXiv:2502.03373 , 2025.
+[9]Michael Luo, Sijun Tan, Justin Wong, Xiaoxiang Shi, William Y . Tang, Manan Roongta, Colin
+Cai, Jeffrey Luo, Li Erran Li, Raluca Ada Popa, and Ion Stoica. Deepscaler: Surpassing o1-
+preview with a 1.5b model by scaling rl. https://github.com/agentica-project/rllm ,
+2025. Notion Blog.
+[10] Daniel Kahneman. Thinking, fast and slow . macmillan, 2011.
+[11] Gary A Klein. Sources of power: How people make decisions . MIT press, 2017.
+[12] Stephen Chung, Ivan Anokhin, and David Krueger. Thinker: Learning to plan and act. Advances
+in Neural Information Processing Systems , 36:22896–22933, 2023.
+[13] Kevin A Wang, Jerry Xia, Stephen Chung, and Amy Greenwald. Dynamic thinker: Optimizing
+decision-time planning with costly compute. In The Seventeenth Workshop on Adaptive and
+Learning Agents .
+[14] Stephen Chung, Wenyu Du, and Jie Fu. Learning from failures in multi-attempt reinforcement
+learning. arXiv preprint arXiv:2503.04808 , 2025.
+[15] Yang Sui, Yu-Neng Chuang, Guanchu Wang, Jiamu Zhang, Tianyi Zhang, Jiayi Yuan, Hongyi
+Liu, Andrew Wen, Shaochen Zhong, Hanjie Chen, et al. Stop overthinking: A survey on
+efficient reasoning for large language models. arXiv preprint arXiv:2503.16419 , 2025.
+[16] Pranjal Aggarwal and Sean Welleck. L1: Controlling how long a reasoning model thinks with
+reinforcement learning. arXiv preprint arXiv:2503.04697 , 2025.
+[17] Yuhui Xu, Hanze Dong, Lei Wang, Doyen Sahoo, Junnan Li, and Caiming Xiong. Scalable
+chain of thoughts via elastic reasoning. arXiv preprint arXiv:2505.05315 , 2025.
+10[18] Niklas Muennighoff, Zitong Yang, Weijia Shi, Xiang Lisa Li, Li Fei-Fei, Hannaneh Hajishirzi,
+Luke Zettlemoyer, Percy Liang, Emmanuel Candès, and Tatsunori Hashimoto. s1: Simple
+test-time scaling. arXiv preprint arXiv:2501.19393 , 2025.
+[19] Ryo Kamoi, Yusen Zhang, Nan Zhang, Jiawei Han, and Rui Zhang. When can llms actually
+correct their own mistakes? a critical survey of self-correction of llms. Transactions of the
+Association for Computational Linguistics , 12:1417–1440, 2024.
+[20] Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler Hallinan, Luyu Gao, Sarah Wiegreffe, Uri
+Alon, Nouha Dziri, Shrimai Prabhumoye, Yiming Yang, et al. Self-refine: Iterative refinement
+with self-feedback. Advances in Neural Information Processing Systems , 36:46534–46594,
+2023.
+[21] Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao.
+Reflexion: Language agents with verbal reinforcement learning. Advances in Neural Information
+Processing Systems , 36:8634–8652, 2023.
+[22] An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan
+Li, Dayiheng Liu, Fei Huang, Haoran Wei, et al. Qwen2. 5 technical report. arXiv preprint
+arXiv:2412.15115 , 2024.
+[23] Jeff Rasley, Samyam Rajbhandari, Olatunji Ruwase, and Yuxiong He. Deepspeed: System
+optimizations enable training deep learning models with over 100 billion parameters. In
+Proceedings of the 26th ACM SIGKDD international conference on knowledge discovery &
+data mining , pages 3505–3506, 2020.
+[24] Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu,
+Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large lan-
+guage model serving with pagedattention. In Proceedings of the ACM SIGOPS 29th Symposium
+on Operating Systems Principles , 2023.
+[25] Philipp Moritz, Robert Nishihara, Stephanie Wang, Alexey Tumanov, Richard Liaw, Eric Liang,
+Melih Elibol, Zongheng Yang, William Paul, Michael I Jordan, et al. Ray: A distributed
+framework for emerging {AI}applications. In 13th USENIX symposium on operating systems
+design and implementation (OSDI 18) , pages 561–577, 2018.
+11A Experimental Details
+This section describes the details of the experiment in Section 5. Our implementation, adapted from
+the Open-Reasoner-Zero codebase [ 3], is publicly available at https://github.com/DualityRL/
+thinker-task .
+A.1 Hyperparameters
+We use the same hyperparameters as those provided in Open-Reasoner-Zero [ 3], except that we
+reduce the number of samples per prompt from 64 to 32 to save computational resources. One training
+step proceeds as follows: we first randomly sample 128 prompts (rollout batch size) from the training
+dataset and generate 32 samples per prompt, totaling 128×32 = 4 ,096samples. We then divide the
+generated samples into 1 (12) training batch for the actor (critic), where each training batch is used
+for one optimizer update.
+We tune the coefficient cinRsummary by searching over {1e-4,1e-3,1e-2}. Other Thinker-task-
+specific hyperparameters are selected using heuristics. We use a lower sampling temperature during
+summarization, as we observe that higher temperatures tend to produce less concise and consistent
+summaries.
+For the baseline model, we use similar hyperparameters, except with a generation length of 8,000
+tokens. We found that 8,000 tokens yield optimal baseline performance on R1.5B.
+Table 2: Hyperparameters used in experiments.
+Parameter Value
+PPO
+Rollout Batch Size 128
+Number of Samples Per Prompt 32
+Number of Epochs 1
+Actor Learning Rate 1e-6
+Number of Actor Update Steps 1
+Critic Learning Rate 5e-6
+Number of Critic Update Steps 12
+Discount Rate γ 1
+GAE Lambda λ 1
+Clip Ratio ϵ 0.2
+KL Loss None
+Sampling Temperature 1
+Sampling Temperature in Summarization 0.6
+Generation Length
+Fast Thinking 1,000
+Verification 6,000
+Slow Thinking 6,000
+Summarization 1,000
+Reward-specific
+Coefficient cinRsummary 1e-3
+Minimum Length for Summarization 300
+A.2 Prompt Templates
+The prompt templates used in the four stages of the Thinker task are illustrated in Box A.1. Note
+that not all prompts are necessarily used. For example, in training mode, if the agent’s fast answer is
+correct, the Slow Thinking and Summarization prompt will be skipped. Please refer to the main text
+for the termination conditions.
+12Box A.1: Prompt Templates for Thinker Task
+1. Fast Thinking
+User: Answer the below question with concise steps and output the final answer
+within \boxed{} . Limit your response below 1000 words.
+This is the problem: {question}
+Assistant: <Agent Response>
+2. Verification
+User: Is your answer above correct? Please verify each step and the answer care-
+fully. Output \boxed{Yes} if your answer is correct, or \boxed{No} if your answer is
+incorrect.
+Assistant: <Agent Response>
+3. Slow Thinking
+User: Your initial answer is incorrect. Now, think about the possible errors and consider
+alternative solutions. The reasoning process should be enclosed within <think> ...</think> .
+This is the problem: {question}
+Let’s think step by step and output the final answer within \boxed{} .
+Assistant: <think> <Agent Response>
+4. Summarization
+User: Your final answer is correct. Now summarize the steps leading to your final
+answer concisely and precisely, excluding internal reasoning. Limit your response between
+300 and 1000 words.
+This is the problem: {question}
+Assistant: <Agent Response>
+A.3 Computational Resources
+Each training run for both the Thinker task and the baseline required approximately 7 days on two
+compute nodes, each equipped with 8 A100 GPUs. We use the Deepspeed [ 23], vLLM [ 24], and
+Ray [25] library for distributed training.
+13B Result Details
+This section describes additional experimental results that were omitted from the main text due to
+length constraints.
+B.1 Evaluation Results
+Figure 7 and Figure 8 show the breakdown of Figure 4 from the main text, corresponding to the
+evaluation results of fine-tuning Q1.5B and R1.5B on the QA task or the Thinker task during training.
+The detailed evaluation results of the ablated run in which the Summarization step is removed can
+be found in Table 3, labeled as SkipSum . Table 4 presents the standard error corresponding to the
+results reported in Table 1.
+0 200 400 600 800 1k 1.2k
+Training Steps0.40.50.6Accuracy
+(a) MATH 500
+0 200 400 600 800 1k 1.2k
+Training Steps0.000.020.040.060.080.10Accuracy
+ (b) AIME 24
+0 200 400 600 800 1k 1.2k
+Training Steps0.000.020.040.060.080.10Accuracy
+ (c) AIME 25
+0 200 400 600 800 1k 1.2k
+Training Steps0.150.200.25Accuracy
+(d) GPQA Diamond
+0 200 400 600 800 1k 1.2k
+Training Steps0.100.150.200.25Accuracy
+ (e) Olympiad Bench
+0 200 400 600 800 1k 1.2k
+Training Steps0.10.20.30.4Accuracy
+ (f) AMC 23
+0 200 400 600 800 1k 1.2k
+Training Steps0.100.150.200.250.30Accuracy
+Thinker (Final Acc)
+Thinker (Fast Acc)
+Baseline (Final Acc)
+(g) Minerva Math
+Figure 7: Detailed evaluation results of Q1.5B fine-tuned using QA task or Thinker task on individual
+mathematical reasoning benchmarks.
+140 200 400 600 800 1k 1.2k
+Training Steps0.50.60.70.8Accuracy
+(a) MATH 500
+0 200 400 600 800 1k 1.2k
+Training Steps0.00.10.20.30.4Accuracy
+ (b) AIME 24
+0 200 400 600 800 1k 1.2k
+Training Steps0.00.10.20.3Accuracy
+ (c) AIME 25
+0 200 400 600 800 1k 1.2k
+Training Steps0.10.20.30.4Accuracy
+(d) GPQA Diamond
+0 200 400 600 800 1k 1.2k
+Training Steps0.20.30.40.5Accuracy
+ (e) Olympiad Bench
+0 200 400 600 800 1k 1.2k
+Training Steps0.20.40.60.8Accuracy
+ (f) AMC 23
+0 200 400 600 800 1k 1.2k
+Training Steps0.150.200.250.300.35Accuracy
+ Thinker (Final Acc)
+Thinker (Fast Acc)
+Baseline (Final Acc)
+(g) Minerva Math
+Figure 8: Detailed evaluation results of R1.5B fine-tuned using QA task or Thinker task on individual
+mathematical reasoning benchmarks.
+Table 3: Mathematical reasoning performance of the Thinker agent trained without the Summarization
+stage. Average (Avg.) scores are presented. All scores are Pass@1 accuracy (%) averaged over 16
+samples. Standard errors are provided in Table 4.
+MethodMATH AIME AIME GPQA Olympiad AMC Minerva CollegeAvg.500 2024 2025 Diamond bench 23 Math Math
+Qwen2.5-1.5B (Q1.5B)
+SkipSum 60.30 5.00 1.25 20.27 24.17 30.00 19.85 38.24 24.88
+SkipSum-Fast 64.30 9.17 4.17 18.62 29.11 37.50 20.82 39.42 27.89
+B.2 Ablation Study on Fast Thinking Mode
+To understand the importance of the Fast Thinking mode in the overall Thinker task, we experiment
+by using a less-trained agent to generate the Fast Thinking response, while still using the fully trained
+agent to generate responses for the remaining stages. This allows us to measure the impact of Fast
+Thinking quality on overall performance.
+Specifically, we use four earlier R1.5B Thinker-agent checkpoints (Step 0, which is the pretrained
+model; Step 200; Step 400; and Step 600) to generate the Fast Thinking response, and use the fully
+trained R1.5B Thinker-agent for the remaining stages. We evaluate final accuracy across the eight
+benchmarks, as in the main evaluation. The results are shown in Figure 9.
+We observe a general positive correlation between the Fast Thinking accuracy of a checkpoint and the
+final accuracy, suggesting that the Fast Thinking response has a substantial influence on subsequent
+stages. For instance, when we use the pretrained model (Step 0) to generate the Fast Thinking
+response, final accuracy drops significantly from 49.8% to 36.3%. However, we also observe that
+15Table 4: Standard error of performance on mathematical benchmarks in Table 1. All scores are in %.
+MethodMATH AIME AIME GPQA Olympiad AMC Minerva CollegeAvg.500 2024 2025 Diamond bench 23 Math Math
+Qwen2.5-1.5B (Q1.5B)
+Pretrained 0.36 0.00 0.00 0.40 0.15 0.91 0.19 0.09 0.14
+Baseline 0.33 0.61 0.86 0.47 0.34 1.20 0.50 0.11 0.24
+Thinker 0.19 0.67 0.57 0.39 0.09 1.32 0.13 0.08 0.17
+Thinker-Fast 0.19 0.52 0.57 0.46 0.27 0.85 0.43 0.11 0.10
+SkipSum 0.23 0.61 0.42 0.91 0.21 1.25 0.48 0.05 0.20
+SkipSum-Fast 0.39 0.57 0.71 0.51 0.22 1.37 0.22 0.09 0.12
+DeepSeek-R1-Distill-Qwen-1.5B (R1.5B)
+Pretrained 0.33 1.34 0.96 0.58 0.28 1.20 0.42 0.08 0.24
+Baseline 0.24 1.05 0.52 0.56 0.34 0.99 0.30 0.08 0.22
+Thinker 0.25 1.35 1.09 0.63 0.31 0.96 0.38 0.09 0.16
+Thinker-Fast 0.25 1.10 0.91 0.45 0.21 1.46 0.24 0.07 0.24
+this sensitivity diminishes as Fast Thinking performance improves. For example, using the Step
+200 model, which has a moderate Fast Thinking accuracy of 28.9%, leads to a final performance of
+49.18%—a minor drop from 49.8%.
+We conjecture that this is due to the robustness of the Slow Thinking mode: since it is trained
+specifically to handle incorrect Fast Thinking answers, it can often recover from slightly flawed
+initial intuition. However, if the Fast Thinking intuition is very poor (as in the pretrained model), the
+subsequent stages may fail to recover due to the lack of a meaningful starting point. A qualitative
+analysis of how the Fast Thinking stage interacts with subsequent stages can be found in the case
+study in Appendix C, which shows that the trained agent is able to correct flawed heuristics from the
+Fast Thinking mode during the Verification and Slow Thinking mode.
+Step 0 Step 200 Step 400 Step 600 Full Model
+Fast Thinking Checkpoint Step0102030405060Average Accuracy (%)
+ Final Accuracy
+Fast Accuracy of Checkpoint
+Figure 9: Final accuracy on the evaluation benchmarks of the Thinker agent (R1.5B) when its Fast
+Thinking stage is generated by model checkpoints at previous training steps. The original Fast
+Thinking accuracy of these respective checkpoints is also shown. All scores are Pass@1 accuracy (%)
+averaged over 16 samples. Error bars represent standard error, which are typically minor in this data.
+16C Case Study
+In this section, we present sampled responses from the fine-tuned R1.5B agent on the Thinker task,
+aiming to understand the behavior learned by the agent. Only responses with an incorrect fast answer
+are selected, so that the interaction between Fast Thinking and Slow Thinking can be observed.
+C.1 Case Study I: Identifying Flaws in Fast Thinking (Box C.1, Box C.2)
+This example demonstrates the Thinker task’s ability to guide the agent from an uncertain, flawed
+initial attempt to a correct, verified solution by structuring its reasoning process.
+Fast Thinking. The agent adopts a quick, System-1-like heuristic despite expressed uncertainty
+(“the side length of the larger hexagon is a+ 2·2 =a+ 4? Not sure.”) and proceeds with this
+flawed assumption ( S=a+ 4). This leads to an incorrect perimeter, 6√
+3−12, which is physically
+implausible as it results in a negative value.
+Verification. The agent directly confronts this flawed assumption. It explicitly questions the initial
+logic (“The side length of this larger hexagon might be s+ 4? Or is it s+ 2? Wait, reconsider. <...>
+the relationship isn’t straightforward.”). This critical re-evaluation leads to the correct geometric
+insight, yielding the relationship S=s+√
+3
+4. Based on this corrected understanding, the agent
+identifies the error in its initial reasoning and conclusion, stating, “The previously given answer was
+6√
+3−12. But that would not match. <...> Thus our initial approach is wrong.”
+Slow Thinking. The agent then leverages the insight from Verification. It explicitly focuses on the
+“difference in the apothems” to re-derive S=s+√
+3
+4. This demonstrates a clear adoption of the
+successful reasoning trace from Verification. The agent then systematically solves for the side length
+sand calculates the correct perimeter, 18−4√
+3. Notably, it independently performs a numerical
+check, showcasing a deeper level of deliberation and confidence in its refined answer.
+Summarization. The provided summary effectively distills the core mathematical steps for solving
+the problem into a clear, concise, and logically consistent sequence. It accurately establishes the
+relationship between the side lengths of the inner and outer hexagons, correctly formulates the
+equation for the path’s area, and finds the pool’s perimeter efficiently. Interestingly, it also employs a
+thinking block that reflects certain self-correction patterns observed in earlier steps.
+This case highlights the agent’s capacity for targeted error identification and conceptual correction.
+The progression shows a clear refinement of reasoning, moving from the System-1-like heuristic in
+Fast Thinking to a more rigorous, System-2-like approach in Verification and Slow Thinking. The
+explicit references between stages—Verification critiquing Fast Thinking’s “initial approach” and
+Slow Thinking building directly on Verification’s apothem insight—underscore the efficacy of the
+structured task in fostering coherent, self-correcting thought processes.
+C.2 Case Study II: Propagation of Error from Verification to Slow Thinking (Box C.3)
+This example provides a counterpoint to the previous successful error-correction cases. It demon-
+strates a scenario in which the agent arrives at an incorrect final answer due to error propagation and
+insufficient depth in later-stage reasoning.
+Fast Thinking. The agent, faced with a complex product of fractional parts, makes a guess. After
+calculating the first few terms and noting the initial product starts with 2·1
+2= 1, it states: “Since initial
+term is 2 and product involves fractions potentially leading to 1/2.” This leads to the incorrect answer
+D(1
+2), driven more by the available options and a superficial pattern than a rigorous derivation.
+Verification. This stage correctly identifies Fast Thinking’s answer as likely wrong. However, it
+introduces its own flawed heuristic: “Since each termak
+ak−1is less than 1, and multiple such terms
+multiplied, so perhaps the total product tends to zero.” While it correctly prompts a re-evaluation by
+concluding the original answer was incorrect, its reasoning toward an alternative answer (0) is based
+on a wrong heuristics without considering the specific structure of this sequence (which actually
+involves a telescoping product that simplifies toa1
+a98, leading to a final answer of 1).
+Slow Thinking. Instead of uncovering the correct algebraic simplification, Slow Thinking explicitly
+adopts and reinforces the flawed heuristic from Verification. After refining some calculations, it
+17reasons: “Alternatively, since the product seems to be approaching zero due to the product of many
+terms each less than 1. But given the options, perhaps it’s 0.” This echoes Verification’s logic and
+leads to the incorrect final answer B (0).
+This case demonstrates how flawed reasoning can persist within the Thinker task. While Verification
+correctly identified Fast Thinking’s initial guess as wrong, it unfortunately introduced its own plausible
+but incorrect heuristic. Subsequently, Slow Thinking, anchored on this flawed premise inherited
+from Verification, performing more calculations around it rather than challenging its validity. This
+highlights the possibility of an anchoring bias on an incorrect heuristic, and ultimately, superficial
+deliberation in the later stages that fails to correct the core flawed assumption.
+Box C.1: Example Response from Thinker Agent: Hexagon Path Problem
+Problem: A path 2 mwide and with an area of 36 m2has been built around a swimming
+pool in the shape of a regular hexagon. What is the perimeter of the pool?
+User: <Fast Thinking Prompt: Answer concisely...>
+Assistant:
+<Initial Reasoning Trace showing uncertainty about side length>
+3. <...> the side length of the larger hexagon is a+ 2·2 =a+ 4? Not sure.
+<Calculations based on the assumption S=a+ 4>
+13. So 8a= 8√
+3−16⇒a=√
+3−2.
+14. Perimeter of the hexagon is 6a= 6(√
+3−2) = 6√
+3−12.
+6√
+3−12
+User: <Verification Prompt: Is your answer above correct?>
+Assistant:
+<Reasoning Trace in Verification, questioning the S=s+ 4assumption ( arelabeled as s)>
+The side length of this larger hexagon might be s+ 4? Or is it s+ 2?
+Wait, reconsider. <...> the relationship isn’t straightforward.
+<Derivation of the correct relationship S=s+4√
+3based on apothems>
+<Calculations using the corrected S, leading to Perimeter = 18−4√
+3>
+The previously given answer was 6√
+3−12.
+But that would not match. So our approach seems incorrect.
+<...> Thus our initial approach is wrong. Therefore, the original answer is incorrect.
+<...> No
+User: <Slow Thinking Prompt: Your initial answer is incorrect. Now, think about errors...>
+Assistant: <think>
+<revisiting the core geometric error from Fast Thinking>
+When you add a path around the hexagon, the increase in side length can be found by
+considering the distance from the center . <...>
+The path is 2m wide, which I think refers to the distance from the pool to the path, that would
+mean the difference in the apothems is 2m. So:
+S√
+3
+2−s√
+3
+2= 2
+<Re-derivation of S=s+4√
+3, consistent with Verification’s insight>
+S=s+4√
+3
+<Systematic algebraic solution using the corrected S, leading to s= 3−2√
+3
+3>
+<Calculation of perimeter = 18−4√
+3, followed by numerical verification>
+Hence, the perimeter is 6s≈18−4√
+3meters. <...> Yes, that seems consistent.
+Final Answer. The perimeter of the pool is 18−4√
+3meters.
+</think>
+<Narrative solution in Slow Thinking, presenting the final corrected steps>
+18Box C.2: Example Summary from Thinker Agent: Hexagon Path Problem
+Problem: A path 2 mwide and with an area of 36 m2has been built around a swimming
+pool in the shape of a regular hexagon. What is the perimeter of the pool?
+User: <Summarization Prompt: Summarize concisely...>
+Assistant:
+<think>
+1. Let s be the side length of the original hexagonal pool. The path surrounds the pool and
+forms a larger hexagon. The width of the path is 2m, so the side length of the larger hexagon
+iss+ 2·(2/√
+3) = s+ 4/√
+3. Wait, actually, the relationship is more complex.
+2. The area of the path is the difference between the area of the larger hexagon and the
+smaller one. The area of a regular hexagon is (3√
+3/2)·(side length )2.
+3. Let s be the side length of the pool, then the side length of the larger hexagon is
+s+ 2·(2/√
+3) = s+ 4/√
+3. Wait, no, the correct relationship is that the side length increases
+by2·(2/√
+3) = 4 /√
+3.
+4. The area of the path is 36 = (3√
+3/2)·[(s+ 4/√
+3)2−s2].
+5. Simplifying the equation, we find that s= 3−(2√
+3)/3. The perimeter is 6·s= 18−4√
+3.
+Thus, the perimeter of the pool is 18−4√
+3meters.
+</think>
+Letsbe the side length of the original hexagonal pool. The path width is 2m. The side length
+of the larger hexagon (pool + path) is S=s+4√
+3. The area of the path is 36 m2, which is
+the difference between the areas of the larger and smaller hexagons.
+The area of a regular hexagon is3√
+3
+2×(side length )2. Therefore:
+3√
+3
+2 
+s+4√
+32
+−s2!
+= 36
+Simplifying the term inside the brackets:
+
+s+4√
+32
+−s2=s2+8s√
+3+16
+3−s2=8s√
+3+16
+3
+Substituting this back into the area equation:
+3√
+3
+28s√
+3+16
+3
+= 36
+Multiplying through by3√
+3
+2:
+3√
+3
+2·8s√
+3+3√
+3
+2·16
+3= 36
+12s+ 8√
+3 = 36
+Solving for s:
+12s= 36−8√
+3
+s=36−8√
+3
+12= 3−2√
+3
+3
+The perimeter of the pool is 6s:
+6 
+3−2√
+3
+3!
+= 18−4√
+3
+Thus, the perimeter of the pool is 18−4√
+3meters.
+19Box C.3: Example Response from Thinker Agent: Sequence Product Problem
+Problem: Define the sequence {an}:a1= 1, a2= 2, an+2=an+an+1, n∈N+, then
+findh
+a2
+a1i
+·n
+a3
+a2o
+·. . .·n
+a99
+a98o
+·h
+a98
+a2i
+. Options: A. 2, B. 0, C. 1, D.1
+2
+User: <Fast Thinking Prompt: Answer concisely...>
+Assistant:
+<Initial computation of sequence terms and first few product terms: [a2/a1] = 2 ,{a3/a2}=
+1/2>
+7. Notice that the product of fractional parts potentially telescopes or simplifies. However,
+it’s complex.
+8. Given the options A to D, and considering the pattern, likely answer is B.0 or C.1, but
+need to think carefully. Since initial term is 2 and product involves fractions potentially
+leading to 1/2.
+D
+User: <Verification Prompt: Is your answer above correct?>
+Assistant:
+<Re-evaluation of sequence and product structure, calculating [a2/a1] = 2 and
+[a98/a2]≈17>
+Wait, count the number of fractional parts: <...> 96 terms.
+<...> Since each term {ak/ak−1}is less than 1, and multiple such terms multiplied, so
+perhaps the total product tends to zero.
+Thus, the product is very small, so the overall expression would be close to zero. <...>
+Therefore, the original answer was incorrect, so the correct answer should be No, as the
+initial answer was incorrect.
+<...> now I think the final answer might be B.0.
+User: <Slow Thinking Prompt: Your initial answer is incorrect. Now, think about errors...>
+Assistant: <think>
+<Recalculates sequence terms, [a2/a1] = 2 . Identifies an=Fn+1and that F99is even,
+refining [a98/a2]toF99/2>
+Given that each ratio ak/ak−1approaches the golden ratio ϕ≈1.618.
+Thus, each {ak/ak−1}approaches ϕ−1 =ψ≈0.618.
+Thus, if each term {ak/ak−1}is about ψ≈0.618.
+Thus, product of 96 terms [error in count, should be 97]: ψ96.
+Therefore, product= 2·(ψ)96·floor(F99/2).
+<...> Alternatively, since the product seems to be approaching zero due to the product of
+many terms each less than 1. But given the options, perhaps it’s 0.
+Therefore, the answer is B.0.
+B
+</think>
+<Narrative solution, reinforcing the (incorrect) conclusion that the product is 0>
+20D Preliminary Experiments on Larger Models
+To understand the scalability of the Thinker task, we fine-tune DeepSeek-R1-Distill-Qwen-7B
+(R7B) [ 1], a larger version of R1.5B that also undergoes distillation using reasoning data from
+DeepSeek-R1. We use the same set of hyperparameters and training data as in the main experiments.
+The baseline corresponds to fine-tuning R7B on the standard QA task.
+The average evaluation accuracy across the seven benchmarks (excluding CollegeMath due to the
+large number of questions) during training is shown in Figure 10. Due to limited computational
+resources, we have not yet trained the Thinker agent to convergence, but we already observe its
+performance surpassing that of the baseline, which has plateaued. The detailed performance of the
+best checkpoints from both runs can be found in Table 5.
+Similar to the results observed in smaller models, we found that agents trained under the Thinker
+task consistently perform better than those trained on the baseline QA task across all benchmarks.
+The overall performance improved from 54.41% to 58.91%, representing a relative improvement of
+8.27%. This suggests that larger models also benefit from the Thinker task. Additionally, we note
+that Thinker-Fast performance improves from 37.55% in R1.5B to 45.45% in R7B, demonstrating
+that the Fast Thinking mode scales well with model size.
+0 200 400 600 800 1k
+Training Steps0.300.350.400.450.500.550.600.65Accuracy
+Thinker (Final Acc)
+Thinker (Fast Acc)
+Baseline (Final Acc)
+Figure 10: Evaluation performance of R7B averaged across seven common benchmarks.
+Table 5: Performance comparison across various mathematical reasoning benchmarks. Average
+(Avg.) scores are presented. All scores are Pass@1 accuracy (%) averaged over 16 samples. Top
+score in each benchmark column is bolded . Standard errors are provided in Table 6.
+MethodMATH AIME AIME GPQA Olympiad AMC Minerva CollegeAvg.500 2024 2025 Diamond bench 23 Math Math
+DeepSeek-R1-Distill-Qwen-7B (R7B)
+Pretrained 84.05 37.50 28.54 17.58 37.92 36.41 34.49 40.72 39.65
+Baseline 91.03 47.50 34.58 34.63 56.76 87.81 40.23 42.71 54.41
+Thinker 92.80 55.83 37.50 45.90 60.83 91.25 43.77 43.39 58.91
+Thinker-Fast 84.60 22.92 19.17 38.26 48.93 65.62 41.75 42.32 45.45
+Table 6: Standard error of performance on mathematical benchmarks in Table 5. All scores are in %.
+MethodMATH AIME AIME GPQA Olympiad AMC Minerva CollegeAvg.500 2024 2025 Diamond bench 23 Math Math
+DeepSeek-R1-Distill-Qwen-7B (R7B)
+Pretrained 0.43 1.08 0.86 0.70 0.45 4.37 0.80 0.12 0.48
+Baseline 0.19 1.62 1.29 1.00 0.31 0.79 0.27 0.07 0.39
+Thinker 0.13 1.54 1.27 0.53 0.15 0.85 0.31 0.06 0.32
+Thinker-Fast 0.25 0.52 0.57 0.67 0.19 1.24 0.36 0.06 0.21
+21

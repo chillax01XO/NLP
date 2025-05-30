@@ -1,0 +1,1244 @@
+arXiv:2505.20416v1  [cs.CL]  26 May 2025GraphGen: Enhancing Supervised Fine-Tuning for LLMs with
+Knowledge-Driven Synthetic Data Generation
+Zihong Chen1Wanli Jiang1Jinzhe Li1
+Zhonghang Yuan1Huanjun Kong1Wanli Ouyang1,3Nanqing Dong1,2*
+1Shanghai Artificial Intelligence Laboratory2Shanghai Innovation Institute
+3The Chinese University of Hong Kong
+Abstract
+Fine-tuning for large language models (LLMs)
+typically requires substantial amounts of high-
+quality supervised data, which is both costly
+and labor-intensive to acquire. While synthetic
+data generation has emerged as a promising
+solution, existing approaches frequently suffer
+from factual inaccuracies, insufficient long-tail
+coverage, simplistic knowledge structures, and
+homogenized outputs. To address these chal-
+lenges, we introduce GraphGen, a knowledge
+graph-guided framework designed for three key
+question-answering (QA) scenarios: atomic
+QA, aggregated QA, and multi-hop QA. It be-
+gins by constructing a fine-grained knowledge
+graph from the source text. It then identifies
+knowledge gaps in LLMs using the expected
+calibration error metric, prioritizing the gener-
+ation of QA pairs that target high-value, long-
+tail knowledge. Furthermore, GraphGen incor-
+porates multi-hop neighborhood sampling to
+capture complex relational information and em-
+ploys style-controlled generation to diversify
+the resulting QA data. Experimental results
+on knowledge-intensive tasks under closed-
+book settings demonstrate that GraphGen out-
+performs conventional synthetic data methods,
+offering a more reliable and comprehensive
+solution to the data scarcity challenge in su-
+pervised fine-tuning. The code and data are
+publicly available at https://github.com/
+open-sciencelab/GraphGen .
+1 Introduction
+The rapid advancement of large language models
+(LLMs) has created a growing need for fine-tuning
+general-purpose models to incorporate new knowl-
+edge efficiently. One widely adopted approach is
+supervised fine-tuning (SFT), which enables LLMs
+to learn domain-specific information from labeled
+training data (Parthasarathy et al., 2024; Lu et al.,
+2024). While SFT has proven effective in enhanc-
+ing model knowledge (Mecklenburg et al., 2024),
+*Corresponding author.its success heavily depends on access to large-scale,
+high-quality training datasets, which are expensive
+to curate and require substantial domain expertise.
+To mitigate this data bottleneck, researchers have
+explored LLM-based synthetic data generation (Liu
+et al., 2024), leveraging LLMs to autonomously
+generate training samples, such as question-answer
+(QA) pairs or textual knowledge snippets. Sev-
+eral existing methods (Zhang and Yang, 2023a;
+Maini et al., 2024) attempt to enhance domain
+adaptation by expanding training resources. How-
+ever, when applied to knowledge-intensive tasks in
+closed-book settings, these synthetic data genera-
+tion pipelines exhibit critical limitations:
+1.Factual Inaccuracy: LLMs often introduce fac-
+tual errors due to their tendency to hallucinate
+incorrect or non-factual knowledge (Long et al.,
+2024), leading to unreliable training data.
+2.Insufficient Coverage of Long-Tail Knowl-
+edge: Since LLMs are optimized for token pre-
+diction, they tend to prioritize generating high-
+frequency, common knowledge while failing to
+capture rare, domain-specific information (Li
+et al., 2024b). This results in inadequate cov-
+erage of long-tail knowledge, which is crucial
+for knowledge-intensive applications (Kandpal
+et al., 2023; Li et al., 2024a).
+3.Superficial Knowledge Representation: Exist-
+ing synthetic data pipelines generate simplistic
+QA pairs that do not effectively model complex
+knowledge structures, such as multi-hop reason-
+ing, where information must be linked across
+multiple sources to form a coherent answer.
+4.Homogenization and Overfitting Risks: Syn-
+thetic datasets often suffer from low diversity,
+with repetitive sentence templates and similar
+difficulty levels. This lack of variation can lead
+to overfitting, reducing the generalization abil-
+ity of fine-tuned models and, in extreme cases,
+causing catastrophic forgetting or model col-lapse (Shumailov et al., 2024).
+Recent efforts have attempted to improve syn-
+thetic data generation by incorporating Monte
+Carlo tree search and chain-of-thought reasoning
+(Zhao et al., 2024b; Wei et al., 2022). However,
+these methods primarily focus on logical problem-
+solving and do not effectively adapt to knowledge-
+intensive tasks in closed-book scenarios.
+To address these challenges, we propose Graph-
+Gen, a knowledge graph (KG)-calibrated data syn-
+thesis framework that systematically improves syn-
+thetic data quality through structured knowledge
+guidance. GraphGen is designed to enhance data
+generation in three key scenarios: atomic QA (cov-
+ering basic knowledge), aggregated QA (incorpo-
+rating complex, integrated knowledge), and multi-
+hop QA (extending to k-hop reasoning).
+Specifically, we first construct a fine-grained KG
+from a source corpus. We then compute the ex-
+pected calibration error (ECE) (Guo et al., 2017)
+for each triple in the KG to identify points where
+the model’s confidence does not align with its ac-
+tual accuracy, exposing potential knowledge blind
+spots . The framework prioritizes these high-ECE
+triples for targeted data augmentation. To ensure
+the contextual coherence of newly generated exam-
+ples, we employ a k-hop neighborhood subgraph
+sampler with structural constraints. Lastly, we em-
+ploy style-controlled generation to convert the sam-
+pled subgraphs into diverse QA pairs suited for
+SFT. Our experiments show that GraphGen consis-
+tently outperforms five established data synthesis
+baselines in the aforementioned three scenarios. In
+summary, our main contributions are:
+•We propose GraphGen, a KG-based data synthe-
+sis framework designed to preserve knowledge
+associations while addressing limitations in cov-
+erage, which is effective for scenarios of atomic
+QA, aggregated QA, and multi-hop QA.
+•We develop an ECE-driven module that identifies
+knowledge blind spots, enabling LLMs to focus
+on high-value, long-tail data.
+•Through extensive evaluations, we demonstrate
+that GraphGen leads to more effective SFT on
+knowledge-intensive tasks under closed-book
+conditions than existing state-of-the-art methods.
+2 Related Work
+2.1 Knowledge Graph-based Data Generation
+KGs provide structured representations of domain-
+specific information, enabling systematic modelingof entities and their relationships. Early KG-based
+data generation approaches relied on hand-crafted
+templates (Jia and Liang, 2016; Seyler et al., 2017),
+which, despite ensuring syntactic correctness, of-
+ten produced repetitive and rigid outputs, limiting
+linguistic diversity and scalability.
+To overcome these limitations, learning-based
+methods leveraging recurrent neural networks with
+attention mechanisms were introduced to generate
+fluent questions directly from KG triples (Indurthi
+et al., 2017; Du et al., 2017). More recent advance-
+ments, such as LFKQG (Fei et al., 2022), incorpo-
+rated controlled generation techniques to improve
+entity coverage while fine-tuning for adaptability.
+However, ensuring factual consistency and generat-
+ing high-quality text remain open challenges.
+2.2 LLM-based Data Generation
+LLMs have demonstrated remarkable generaliza-
+tion and reasoning capabilities across natural lan-
+guage tasks (Zhang and Yang, 2023a; Maini et al.,
+2024; Köksal et al., 2024). In the area of data
+generation, it has been proposed to generate data
+using large language models to train smaller mod-
+els (West et al., 2022). Unlike KG-driven methods,
+LLMs can generate diverse, human-like text with-
+out reliance on predefined templates (Liang et al.,
+2023). However, they often suffer from limited con-
+trollability and hallucination (Ji et al., 2023), lead-
+ing to factual inconsistencies. Also, some methods
+(Zhang and Yang, 2023b) rely on instructions syn-
+thesized solely by the model itself and lack a mech-
+anism for structured external knowledge injection.
+Consequently, they perform poorly on knowledge-
+intensive tasks where rich domain-specific knowl-
+edge is crucial.
+Efforts to mitigate these issues include multi-
+stage refinement pipelines such as Genie (Yehudai
+et al., 2024), which enhances factual accuracy and
+coherence. Despite these refinements, ensuring
+domain-specific precision at scale remains a chal-
+lenge for standalone LLMs.
+2.3 Combining LLMs and Knowledge Graphs
+To enhance factual consistency, hybrid approaches
+integrating LLMs with KGs have been explored
+(Guo et al., 2024a; Zhao et al., 2024a; Yang et al.,
+2024). These methods leverage KGs to guide text
+generation, improving reliability while maintaining
+fluency. However, most focus on general text gen-
+eration or question answering rather than synthetic
+data generation for SFT.Figure 1: Pipeline of GraphGen. GraphGen optimizes LLM’s performance by effectively organizing knowledge
+and identifying the specific data required for training the model. It comprises four core stages: Step 1 (a) : Initially,
+entities/relationships are extracted to build a KG. Step 2 (b) : Then, the Trainee Model’s understanding of knowledge
+points is evaluated by judging the correctness of given statements and calculating the comprehension loss accordingly.
+Step 3 (c) : Then, subgraphs are formed for efficient training. The composition of these subgraphs is controlled
+using various traversal strategies. Step 4 (d) : Finally, subgraphs are converted into QA pairs for the three scenarios:
+atomic QA, aggregated QA and multi-hop QA (see Section 4 for details).
+3 Problem Setup
+Synthesizing Data from Raw Corpora We fo-
+cus on approaches that transforms raw text corpora
+Dsource into structured synthetic data Dsynth. To
+achieve this, We propose a synthesis algorithm
+Asynth to generate data. Specifically, we utilize
+an algorithm Aorganize that performs constrained
+graph traversal to extract subgraphs. The system-
+atic workflow can be represented as follows:
+Asynth :DsourceAextract− − − − → KGAorganize− − − − → Dsynth (1)
+Evaluating the Quality of Synthetic Data The
+quality assessment of synthetic data necessitates
+both intrinsic quantitative analysis and validation
+through downstream tasks. We establish a set of
+multi-dimensional metrics Met ={Metric }n
+i=1for
+data quality estimation. Additionally, we construct
+unbiased evaluation datasets Devalto ensure task-
+specific validity. The performance on knowledge-
+intensive QA tasks under closed-book scenarios
+serves as critical evidence for testing whether the
+post-SFT model Mfhas effectively acquired the
+knowledge in its parameters. The composite quality
+metric is formalized as:
+QDsynth∝(s(Met, D synth), s(Deval, Mf)) (2)
+where s(Met, D synth)denotes the score of Dsynth
+on the metrics, and s(Deval, Mf)indicates the per-
+formance of MfonDeval.4 Method
+In this section, we present GraphGen, a data synthe-
+sis framework, as illustrated in Figure 1. GraphGen
+is designed to generate data across three scenar-
+ios: atomic QA, aggregated QA, and multi-hop
+QA. From a knowledge organization perspective,
+these scenarios exemplify the most representative
+knowledge-intensive tasks in the context of closed-
+book QA. The framework comprises a four-step
+workflow involving two interdependent LLMs: the
+Synthesizer Model ( Msynth) and the Trainee Model
+(Mtrain).Msynthpossesses advanced general capa-
+bilities, as it is tasked with knowledge extraction
+and rephrasing. In contrast, Mtrainserves as the
+target model that we aim to enhance in order to in-
+tegrate additional knowledge. Detailed information
+regarding the prompt templates utilized in Graph-
+Gen, intermediate examples, and implementation
+details can be found in Appendix B.
+STEP 1: Knowledge Construction Raw doc-
+uments are segmented into smaller, semantically
+coherent fragments through context-aware chunk-
+ing. Subsequently, Msynthare employed to extract
+various entities and their relationships from these
+fragments. The types of entities to be extracted are
+predefined, with general categories including dates,
+locations, and events, while domain-specific cate-
+gories encompass concepts such as genes. During
+the extraction process, if the same entity or rela-
+tionship appears in multiple fragments, their de-scriptions will be automatically combined together.
+Finally, cross-fragment entities and relationships
+are aggregated into a KG G= (E, R ). The com-
+bination of LLMs and KGs interrelates the atomic
+knowledge, addressesing challenges like long-text
+processing, format noise, and scattered knowledge
+distribution, while also ensuring a low rate of hal-
+lucination in the generated content (Ibrahim et al.,
+2024; Gillani et al., 2024). The specific implemen-
+tation of STEP 1 is modified from the previous
+work (Guo et al., 2024b; Kong, 2025).
+STEP 2: Comprehension Assessment We pro-
+pose a method to assess whether the Trainee Model
+Mtrainhave fully comprehended a knowledge point
+from the KG. For each edge in the KG, its de-
+scription can be considered as a declarative state-
+ment Ri, which represents a knowledge point Ki
+that is unequivocally true, with a real-world prob-
+ability of 1 ( i.e.,P(Riis true ) = 1 ). To eval-
+uateMtrain’s understanding capabilities of these
+statements, we first generate multiple paraphrased
+statements Ri1, Ri2, . . . , R inand their negations
+¬Ri1,¬Ri2, . . . ,¬Rinusing Msynth. Following
+the principle of ECE, a model is considered well-
+calibrated if its predicted confidence scores ( i.e.,
+softmax probabilities) align with real-world proba-
+bilities of correctness. For LLMs, true understand-
+ing of a concept is achieved only when the model’s
+confidence estimates match the actual likelihood of
+correctness in the real world. Therefore, we use a
+prompt (see Figure 2) to elicit Mtrain’s confidence
+in a single paraphrased statement. Then, by averag-
+ing the confidence scores from the npositive and n
+negative samples of Ri,Mtrain’s confidence in Ri
+is quantified via the following formula:
+CRi=1
+2n(nX
+j=1P(t|Rij) +nX
+j=1P(f|¬Rij))(3)
+where P(t|Rij)is the probability of the next token
+being “yes” given a true statement and P(f|¬Rij)
+denotes the probability of “no” in response to a
+false statement.
+We further define a comprehension loss by cal-
+culating the cross-entropy between the true distri-
+bution and the predicted distribution:
+Loss CRi=−1
+2nnX
+j=1log(P(t|Rij))
+−1
+2nnX
+j=1log(P(f|¬Rij))(4)
+Figure 2: Prompt for comprehension assessment.
+Through binary yes/no questions, we capture precise
+semantic information for confidence modeling.
+which measures the gap between the LLM’s current
+understanding and complete mastery of the knowl-
+edge point. By assessing the comprehension loss of
+Mtrain, we can systematically evaluate whether fur-
+ther training with these knowledge points is needed.
+STEP 3: Graph Organization Subgraphs are
+the minimal QA pair generation units. We per-
+formk-hop subgraph extraction for effective graph
+organization, as detailed in Algorithm 1. To regu-
+late the composition of these subgraphs, we imple-
+ment several traverse strategies. The depth strategy
+controls the k-hop depth, ensuring the subgraph
+spans a predefined number of hops from the start
+edge. For each candidate subgraph, we compute the
+premise length (denoted as pre_length ), defined
+as the total number of tokens in the descriptions
+of entities and relationships within it. The length
+strategy enforces an upper bound on pre_length
+to maintain a balanced data distribution. When ex-
+panding the subgraph, we adopt a selection strategy
+with three options:
+1.max_loss: Select edges with higher loss val-
+ues, indicating greater uncertainty or potential
+information gain.
+2.min_loss: Select edges with lower loss values,
+representing more confident or stable relations.
+3. random: Select edges uniformly at random.
+These strategies collectively balance subgraph com-
+plexity, relevance, and computational tractability.
+STEP 4: QA Generation After extracting a sub-
+graph, we can create three types of QA pairs based
+on its intended use. For the atomic QA scenario, the
+subgraph should consist of a single node or edge,
+allowing Msynth to generate a QA pair representing
+basic knowledge. To analyze, summarize, or com-
+pare related information involving a set of entities
+and relationships within a subgraph, we prompt
+Msynthto organize and rephrase the data into a co-
+herent text(the answer). Then we use Msynth to
+generate its corresponding question. For multi-hopAlgorithm 1 K-hop Subgraph Extraction
+Input: Graph G, edge Ri= (Esrc, Etgt), graph
+organization strategies S
+Output: Subgraph G′
+1:G′← {Ri}
+2:C←GETADJACENT EDGES (G,{Esrc, Etgt})
+3:while C̸=∅do
+4: Select efrom Caccording to S
+5:G′←G′∪ {e}
+6:C←C\ {e}
+7: ifMEETS CONSTRAINTS (G′)then
+8: break
+9: forv∈GETENDPOINTS (e)do
+10: C←C∪GETADJACENT EDGES (G, v )
+11:return G′
+QAs, we first clarify the relationships between en-
+tities and then instruct Msynth to produce a QA pair
+that requires multi-step reasoning.
+5 Experiments
+5.1 Experimental Setup
+Domain Corpus and Evaluation Datasets To
+target knowledge-intensive tasks in closed-book
+QA, we utilized three datasets, each aligned with a
+critical scenario. We adapted the domain-specific
+dataset SeedEval from SeedBench (Ying et al.,
+2025), a benchmark related to seed knowledge
+(agriculture), which cover one-shot and zero-shot
+scenarios. Additionally, we adapted the PQArefE-
+valdataset from PQAref (Bašaragin et al., 2024),
+which is domain-specific and centers on medicine,
+constructing it for aggregated QA applications. Fur-
+thermore, we created HotpotEval , an adaptation of
+HotpotQA (Yang et al., 2018), intended for multi-
+hop QA tasks. Each dataset comprises two compo-
+nents: the QA test set ( Deval) and the correspond-
+ing source texts ( Dsource ). See Appendix E for the
+source and details of the dataset.
+Quality Evaluation Metrics We employ a set
+of natural language metrics (Cao et al., 2024) to
+evaluate the quality of generated text. Details are
+provided in Appendix F.3. Since most of these
+metrics are better suited for evaluating complete
+sentences than brief responses, we compared the
+aggregated QAs produced by GraphGen with those
+from baseline methods. The reward score averages
+scores from two reward models, labeled as Indand
+Deb. The unieval score comprises three evaluation
+components from the UniEval model, denoted asNat,Coh, and Und.
+Baselines We modified the code for WRAP
+(Maini et al., 2024), Genie (Yehudai et al., 2024),
+LongForm (Köksal et al., 2024), EntiGraph (Yang
+et al., 2024), and SELF-QA (Zhang and Yang,
+2023a) to accommodate our data synthesis needs,
+using them as the baselines for this study. See
+Appendix D for details of the baselines.
+Implementation Details In this study, we speci-
+fiedMtrainto be Qwen2.5-7B-Instruct and Msynth
+to be Qwen2.5-72B-Instruct . Two models are rep-
+resentative open-source LLM with robust perfor-
+mance and affordable computational cost. Consid-
+ering the characteristics of the tasks associated with
+the three datasets, and to thoroughly validate our
+methodology, GraphGen generates atomic, aggre-
+gated, and multi-hop QA pairs for dataset SeedEval ,
+PQArefEval , and HotpotEval , respectively. Addi-
+tional setups can be found in Appendix C.
+5.2 Performance Comparison
+Results on Quality Evaluation Metrics We
+demonstrate that the metrics can be used to in-
+tuitively measure data quality. We compare the
+aggregated responses generated by GraphGen for
+the aggregated QA scenario with those from base-
+line methods. As shown in Table 2, GraphGen
+outperforms the best baseline method by 1.9 points.
+Notably, on the MTLD metric for lexical diversity,
+GraphGen achieves 75.8, surpassing the best base-
+line method by 28.2 points. GraphGen excels in
+the MTLD metric due to its capability to aggregate
+cross-document knowledge, generating a signifi-
+cantly larger number of tokens compared to other
+methods that yield shorter QA responses. We note
+that graph-based methods lead the Uni-Score met-
+rics, indicating that data generated through graph
+structures—particularly those illustrating multiple
+entity relationships—align more closely with ev-
+eryday QA interactions. Notably, since LongForm
+directly uses Dsource as the answer in a QA pair, it
+reflects the quality of Dsource . Possibly influenced
+by its training corpus, the Deb metric exhibit a dis-
+tinct bias towards the original text, which may not
+be suitable for more chaotic Dsource .
+Results on Evaluation Datasets We conducted
+SFT on Mtrainusing generated data and evaluated
+Mfon corresponding test sets, with the results
+shown in Figure 3. Data generated by GraphGen
+brought the greatest performance improvement toFigure 3: Performance comparison on knowledge-intensive evaluation datasets. We use data generated through
+various methods to optimize Qwen2.5-7B-Instruct. We use ROUGE-F as the metric. The baseline methods exhibit
+varying performance across the three datasets, while GraphGen consistently achieves optimal results.
+Dataset Domain Scenario Language #Samples Avg #Tokens Max #Tokens
+Corpus Test Corpus Test Corpus Test
+SeedEval Agricultural Atomic QA English & Chinese 30,578 582 328 48 908 194
+PQArefEval Medical Aggregated QA English 58,078 5,815 357 518 1,837 1,680
+HotpotEval General Multi-Hop QA English 73,642 7,405 135 25 1,985 82
+Table 1: Description of datasets employed for experiments. For calculating the token count, the tokenizer used is
+from Qwen2.5 series (Yang et al., 2025). The corpus is employed for graph construction and data synthesis, while
+the test set is utilized to evaluate the performance of the Post-SFT model trained with the synthesized data.
+the base model. On SeedEval, PQArefEval, and
+HotpotEval, GraphGen exceeds the best baselines
+by 1.08, 2.7, and 4.73 points, respectively. No-
+tably, we observed that on the PQArefEval dataset,
+the performance of baseline methods after train-
+ing was inferior to their pre-training performance,
+which is counterintuitive. We hypothesize that this
+decline is due to the limitation of baseline meth-
+ods, which use solely a single text segment for
+generating QA pairs when handling the aggregated
+QA task. Consequently, these models may lose
+their ability to form cross-document associations,
+negatively impacting their performance on tasks
+that require multiple references. In contrast, Mf
+using data generated by GraphGen successfully
+addresses this challenge. Moreover, GraphGen’s
+performance on the multi-hop QA scenario is par-
+ticularly notable. This indicates that the knowledge
+associations derived from subgraphs enhance the
+multi-hop reasoning capabilities of the Post-SFT
+model, rather than merely enabling the acquisition
+of superficial knowledge. The variability in per-
+formance across different datasets stems from the
+adaptability issues of baseline methods regarding
+domain or stylistic differences. For instance, Long-
+Form directly uses the original text from the corpus
+as answers and generates corresponding questions.
+For shorter corpora, such as SeedEval and HotpotE-
+val, the synthesis models can effectively adhereto instructions and produce appropriate questions.
+However, in longer corpora like PQArefEval, the
+quality of generated questions often declines, lead-
+ing to suboptimal training outcomes.
+It is noteworthy that at this stage, we only used
+knowledge-related data, without mixing general
+instruction-following data. The purpose was to
+highlight the role of generated data in injecting new
+knowledge. In addition, to alleviate concerns about
+overfitting caused by synthetic data, we mixed the
+generated data with 100,000 general instruction-
+following data and conducted tests on a broader
+evaluation dataset. See Appendix F for test results.
+Sensitivity of Mtrain To further verify that the
+observed performance improvements are primar-
+ily attributed to the quality of the synthesized data
+rather than the specific characteristics of Mtrain, we
+conducted additional experiments using two rep-
+resentative open-source models: Meta-Llama-3.1-
+8B-Instruct and MiniCPM3-4B. The selection of
+these models is motivated by their distinct architec-
+ture types and parameter scales, allowing us to test
+the robustness and generality of our method across
+varying LLM structures. The results of two models
+(detailed in Appendix F.1) exhibit trends consistent
+with our main experimental results. Specifically,
+GraphGen consistently achieves superior results
+compared to baseline methods in all three evalua-
+tion datasets. These findings strongly suggest thatMethod #Samples Avg #Tokens Results Avg Score
+MTLD Uni Rew
+Nat Coh Und Ind Deb
+WRAP 476,626 32.4 13.4 91.2 87.1 91.6 44.0 4.0 42.5
+Genie 56,938 83.8 40.2 91.7 94.7 92.7 64.1 44.0 62.4
+LongForm 57,854 357.1 47.6 85.7 93.7 87.3 84.2 82.5 73.3
+EntiGraph 532,971 47.4 30.1 92.6 93.3 93.1 56.3 28.8 55.2
+SELF-QA 561,798 83.4 34.7 91.3 92.8 92.3 59.5 39.3 58.8
+GraphGen 54,287 657.9 75.8 87.8 95.7 90.4 85.0 31.8 75.2
+Table 2: Comparison results with other data synthesis methods on data quality evaluation metrics. The results
+indicate that the quality of data generated by GraphGen is comparatively high. The scores presented represent the
+average values derived from the generated datasets across the evaluated metrics. The top two performers in each
+column are highlighted.
+Figure 4: Distribution of comprehension loss for the
+Trainee Model. The model’s comprehension loss is rela-
+tively low for the vast majority of data, which indicates
+most of the data generated by the Synthesizer Model
+has already been mastered by the Trainee Model.
+Figure 5: Performance comparison conducted with
+varying proportions of training data. The proportions are
+arranged in descending order based on loss. “Average”
+represents the mean score across three datasets. As
+the amount of training data increases, we observe a
+noticeable and consistent upward trend in the results.
+the effectiveness of our approach is independent of
+specific LLM architectures or parameter sizes, rein-
+forcing the conclusion that the quality and structure
+of the synthesized data are the primary contributors
+to performance enhancement.
+5.3 Analysis of Scaling Law
+The scaling law of LLMs shows better model per-
+formance with more training data (Kaplan et al.,
+2020). In this study, we obtained the comprehen-
+sion loss for each knowledge point used in train-ing the model. Through statistical analysis of the
+Loss Cfor all knowledge points in the KG, we
+observed that the distribution of Loss Cis highly
+skewed, as illustrated in Figure 4. This finding
+supports the notion that Msynth has a preference for
+generating common knowledge, while the knowl-
+edge that Mtrainneeds to acquire during training
+often resides in the rare, long-tail data. To further
+investigate the relationship between long-tail data
+and training effectiveness, we explored the scaling
+law of data generated by GraphGen. Similar to the
+concept of hard example mining (Shrivastava et al.,
+2016), we sorted the synthetic data in descending
+order of Loss Cand divided it into different pro-
+portions for sequential training to emphasize the
+importance of focusing on the most challenging
+instances. Surprisingly, we found that even when
+trained on only a small proportion of data (less
+than 5%), the model can still maintain a relatively
+high proportion of performance, as can be seen in
+Figure 5. As the total amount of training data in-
+creases, the overall score shows minimal improve-
+ment. Therefore, the head of the generated data
+contributes little new knowledge to the model.
+Additionally, we conducted a comparative ex-
+periment by training the model using the top 30%
+and bottom 30% of the data sorted according to
+Loss C. The results showed that the model trained
+on the top 30% data achieved better performance
+than that trained on the bottom 30% data. In our
+study, comprehension loss is the discrepancy be-
+tween a model’s confidence in predicting correct
+or incorrect statements and the actual ground-truth
+accuracy. Higher comprehension loss values in-
+dicate knowledge blind spots within the model.
+These high-loss instances often involve long-tail or
+rare knowledge that the model may struggle with.Figure 6: Comprehension loss of the Trainee Model.
+The reduction in loss after training highlights the effec-
+tiveness of data synthesis and the enhanced comprehen-
+sion ability of the Trainee Model.
+Training on high-loss data allows models to learn
+from knowledge underrepresented in earlier train-
+ing stages. Although this type of knowledge is rare,
+it is critical for knowledge-intensive tasks and can
+lead to performance improvements. This finding
+demonstrates that data with higher Loss Ccan bring
+greater performance gains to the Trainee Model, as
+can be seen in Appendix F.2.
+5.4 Comprehension Loss Change
+After the SFT phase, we conducted a comprehen-
+sion assessment on Mf. Although we did not di-
+rectly use yes/no judgment questions as part of
+the training data, we observed a significant reduc-
+tion in Loss C, as can be seen in Figure 6. This
+indicates that GraphGen has enhanced Mtrain’s un-
+derstanding of the knowledge domain, enabling it
+to reliably differentiate between correct and incor-
+rect statements. Consequently, the model shows
+greater accuracy in knowledge-intensive tasks.
+5.5 Ablation Studies
+Selection of Entities and Relationships In
+atomic QA generation experiments, we compared
+the effectiveness of using only entities versus only
+relationships as the sources for generation. The
+results indicate that relying solely on relationships
+outperformed using entities alone and even slightly
+exceeded the performance of using the entire KG.
+We attribute this to the fact that relationships more
+effectively encapsulate the intrinsic properties of
+knowledge. Additionally, the presence of overlap
+in knowledge organization within the KG may
+contribute to a decline in performance. The results
+can be seen in Appendix F.4.
+Selection of Graph Organization Strategies
+We changed the length strategy of GraphGen by
+setting pre_length to 256, 512, 768, and 1024, andconducted evaluations on quality metrics for each
+case. The results can be seen in Appendix F.4. We
+found that, although the average length of the gen-
+erated data increased, the final score tended to stabi-
+lize. This indicates that the score is not directly cor-
+related with the data length. We also evaluated the
+data on Deval, as can be seen in Appendix F.4. We
+found that although a longer pre_length may en-
+hance the long-text ability of large models, the eval-
+uation results with a pre_length of 256 were the
+best. The analysis of the length distribution of the fi-
+nal generated data revealed that a potential explana-
+tion lies in the characteristics of the data length dis-
+tribution. Specifically, with a pre_length of 256,
+the distribution displays sharper traits for lengths
+below 5000. In contrast, an increased pre_length
+leads to a distribution with greater extension in
+length. An excessive amount of lengthy data may
+significantly prolong the convergence time required
+for the model. We also conducted experiments us-
+ing the selection strategy as control variables. The
+analysis indicated that the influence of the strategy
+on the results was minimal, as demonstrated in Ap-
+pendix F.4. This finding suggests that, as long as a
+correlation exists, variations in understanding lev-
+els within the subgraphs do not significantly impact
+the final outcomes. However, the underlying pat-
+terns merit further exploration in future research.
+6 Conclusion
+In this paper, we propose GraphGen, an effective
+KG-based approach to synthetic data generation
+for fine-tuning LLMs on knowledge-intensive tasks
+in closed-book QA settings. GraphGen is specifi-
+cally designed to meet the needs of three scenarios:
+atomic QA, aggregated QA, and multi-hop QA. Ex-
+periments demonstrate that GraphGen successfully
+addresses limitations of existing synthetic data gen-
+eration methods by leveraging KGs to guide the
+creation of high-quality QA pairs. Our approach
+ensures that the generated data is both relevant and
+diverse, offering a promising solution to effectively
+addressing the data bottlenecks frequently encoun-
+tered in supervised fine-tuning of LLMs.
+Future research could focus on enhancing the
+knowledge graph construction by integrating ex-
+ternal knowledge sources and dynamic updates to
+improve data quality and coverage. What’s more,
+exploring adaptive graph organization strategies
+and subgraph sampling methods could optimize
+the training data for better model performance.Limitations
+Despite the promising results exhibited by Graph-
+Gen, several limitations necessitate further investi-
+gation and enhancement. One significant concern
+is the framework’s requirement for substantial com-
+putational resources when building and processing
+large-scale KGs. This demand may restrict its ap-
+plicability in resource-constrained environments
+or when dealing with extensive datasets. There-
+fore, optimizing computational efficiency is vital
+for broader adoption.
+While GraphGen has demonstrated strong per-
+formance across three representative domains, its
+adaptability to diverse fields remains to be explored.
+Current experiments have primarily focused on
+closed-book QA tasks, leaving the framework’s
+generalization to other areas—such as mathemat-
+ics, reasoning, and coding—largely unexamined.
+Furthermore, the integration of synthetic data gen-
+erated by GraphGen into model training requires
+meticulous tuning. It is essential to investigate the
+balance between synthetic and real data, as well as
+their effects on model convergence and generaliza-
+tion.
+In this article, we do not discuss open-book ques-
+tion answering, such as Retrieval-Augmented Gen-
+eration (RAG). RAG’s effectiveness is contingent
+upon the quality and recall capacity of the retrieval
+corpus, while failures in retrieval can potentially ex-
+acerbate the incidence of hallucinations. The inte-
+gration of data synthesis with RAG methodologies
+signifies a promising avenue for future in-depth
+research.
+Acknowledgments
+This work was supported by Shanghai Artificial In-
+telligence Laboratory. The authors thank Songyang
+Zhang from Shanghai Artificial Intelligence Lab-
+oratory for academic discussion. The authors also
+thank Silicon Flow1for API support.
+1https://siliconflow.cn/References
+Bojana Bašaragin, Adela Ljaji ´c, Darija Medvecki,
+Lorenzo Cassano, Miloš Košprdi ´c, and Nikola
+Miloševi ´c. 2024. How do you know that? teach-
+ing generative language models to reference an-
+swers to biomedical questions. arXiv preprint ,
+arXiv:2407.05015.
+Yihan Cao, Yanbin Kang, Chi Wang, and Lichao Sun.
+2024. Instruction mining: Instruction data selection
+for tuning large language models. arXiv preprint ,
+arXiv:2307.06290.
+OpenCompass Contributors. 2023. Opencompass:
+A universal evaluation platform for foundation
+models. https://github.com/open-compass/
+opencompass . Accessed: 2025-02-13.
+Xinya Du, Junru Shao, and Claire Cardie. 2017. Learn-
+ing to ask: Neural question generation for reading
+comprehension. In Proceedings of the 55th Annual
+Meeting of the Association for Computational Lin-
+guistics (Volume 1: Long Papers) , pages 1342–1352.
+Zichu Fei, Xin Zhou, Tao Gui, Qi Zhang, and Xuan-
+Jing Huang. 2022. Lfkqg: A controlled generation
+framework with local fine-tuning for question gen-
+eration over knowledge bases. In Proceedings of
+the 29th International Conference on Computational
+Linguistics , pages 6575–6585.
+Khasa Gillani, Erik Novak, Klemen Kenda, and Dunja
+Mladeni ´c. 2024. Knowledge graph extraction from
+textual data using llm.
+Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q Wein-
+berger. 2017. On calibration of modern neural net-
+works. In International conference on machine learn-
+ing, pages 1321–1330.
+Shasha Guo, Lizi Liao, Jing Zhang, Yanling Wang,
+Cuiping Li, and Hong Chen. 2024a. Sgsh: Stim-
+ulate large language models with skeleton heuristics
+for knowledge base question generation. In Find-
+ings of the Association for Computational Linguis-
+tics: NAACL 2024 , pages 4613–4625.
+Zirui Guo, Lianghao Xia, Yanhua Yu, Tu Ao, and
+Chao Huang. 2024b. Lightrag: Simple and fast
+retrieval-augmented generation. arXiv preprint ,
+arXiv:2410.05779.
+Nourhan Ibrahim, Samar Aboulela, Ahmed Ibrahim,
+and Rasha Kashef. 2024. A survey on augmenting
+knowledge graphs (kgs) with large language models
+(llms): models, evaluation metrics, benchmarks, and
+challenges. Discover Artificial Intelligence , 4(1):76.
+Sathish Reddy Indurthi, Dinesh Raghu, Mitesh M
+Khapra, and Sachindra Joshi. 2017. Generating natu-
+ral language question-answer pairs from a knowledge
+graph using a rnn based question generation model.
+InProceedings of the 15th Conference of the Euro-
+pean Chapter of the Association for Computational
+Linguistics: Volume 1, Long Papers , pages 376–385.Ziwei Ji, Tiezheng Yu, Yan Xu, Nayeon Lee, Etsuko
+Ishii, and Pascale Fung. 2023. Towards mitigating
+llm hallucination via self reflection. In Findings
+of the Association for Computational Linguistics:
+EMNLP 2023 , pages 1827–1843.
+Robin Jia and Percy Liang. 2016. Data recombination
+for neural semantic parsing. In Proceedings of the
+54th Annual Meeting of the Association for Compu-
+tational Linguistics (Volume 1: Long Papers) , pages
+12–22.
+Nikhil Kandpal, Haikang Deng, Adam Roberts, Eric
+Wallace, and Colin Raffel. 2023. Large language
+models struggle to learn long-tail knowledge. In In-
+ternational Conference on Machine Learning , pages
+15696–15707. PMLR.
+Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B.
+Brown, Benjamin Chess, Rewon Child, Scott Gray,
+Alec Radford, Jeffrey Wu, and Dario Amodei. 2020.
+Scaling laws for neural language models. arXiv
+preprint , arXiv:2001.08361.
+Huanjun Kong. 2025. Huixiangdou2: A graph-based
+augmented generation approach. https://github.
+com/tpoisonooo/HuixiangDou2 . Accessed: 2025-
+02-13.
+Abdullatif Köksal, Timo Schick, Anna Korhonen, and
+Hinrich Schütze. 2024. Longform: Effective instruc-
+tion tuning with reverse instructions. arXiv preprint ,
+arXiv:2304.08460.
+Dongyang Li, Junbing Yan, Taolin Zhang, Chengyu
+Wang, Xiaofeng He, Longtao Huang, Hui Xue, and
+Jun Huang. 2024a. On the role of long-tail knowl-
+edge in retrieval augmented large language models.
+arXiv preprint , arXiv:2406.16367.
+Huihan Li, Yuting Ning, Zeyi Liao, Siyuan Wang, Xi-
+ang Li, Ximing Lu, Wenting Zhao, Faeze Brahman,
+Yejin Choi, and Xiang Ren. 2024b. In search of
+the long-tail: Systematic generation of long-tail in-
+ferential knowledge via logical rule guided search.
+InProceedings of the 2024 Conference on Empiri-
+cal Methods in Natural Language Processing , pages
+2348–2370.
+Yuanyuan Liang, Jianing Wang, Hanlun Zhu, Lei Wang,
+Weining Qian, and Yunshi Lan. 2023. Prompting
+large language models with chain-of-thought for few-
+shot knowledge base question generation. In Pro-
+ceedings of the 2023 Conference on Empirical Meth-
+ods in Natural Language Processing , pages 4329–
+4343.
+Ruibo Liu, Jerry Wei, Fangyu Liu, Chenglei Si, Yanzhe
+Zhang, Jinmeng Rao, Steven Zheng, Daiyi Peng, Diyi
+Yang, Denny Zhou, et al. 2024. Best practices and
+lessons learned on synthetic data for language models.
+arXiv preprint , arXiv:2404.07503.
+Lin Long, Rui Wang, Ruixuan Xiao, Junbo Zhao, Xiao
+Ding, Gang Chen, and Haobo Wang. 2024. On llms-
+driven synthetic data generation, curation, and evalu-
+ation: A survey. arXiv preprint , arXiv:2406.15126.Keer Lu, Keshi Zhao, Zheng Liang, Da Pan, Shusen
+Zhang, Xin Wu, Weipeng Chen, Zenan Zhou, Gu-
+osheng Dong, Bin Cui, et al. 2024. Versatune: Fine-
+tuning multi-ability llms efficiently. arXiv preprint ,
+arXiv:2411.11266.
+Pratyush Maini, Skyler Seto, He Bai, David Grangier,
+Yizhe Zhang, and Navdeep Jaitly. 2024. Rephrasing
+the web: A recipe for compute and data-efficient lan-
+guage modeling. arXiv preprint , arXiv:2401.16380.
+Philip M McCarthy and Scott Jarvis. 2010. Mtld, vocd-
+d, and hd-d: A validation study of sophisticated ap-
+proaches to lexical diversity assessment. Behavior
+research methods , 42(2):381–392.
+Nick Mecklenburg, Yiyou Lin, Xiaoxiao Li, Daniel
+Holstein, Leonardo Nunes, Sara Malvar, Bruno Silva,
+Ranveer Chandra, Vijay Aski, Pavan Kumar Reddy
+Yannam, et al. 2024. Injecting new knowledge into
+large language models via supervised fine-tuning.
+arXiv preprint , arXiv:2404.00213.
+Venkatesh Balavadhani Parthasarathy, Ahtsham Zafar,
+Aafaq Khan, and Arsalan Shahid. 2024. The ulti-
+mate guide to fine-tuning llms from basics to break-
+throughs: An exhaustive review of technologies, re-
+search, best practices, applied research challenges
+and opportunities. arXiv preprint , arXiv:2408.13296.
+Dominic Seyler, Mohamed Yahya, and Klaus Berberich.
+2017. Knowledge questions from knowledge graphs.
+InProceedings of the ACM SIGIR International Con-
+ference on Theory of Information Retrieval , ICTIR
+’17, page 11–18. ACM.
+Abhinav Shrivastava, Abhinav Gupta, and Ross Gir-
+shick. 2016. Training region-based object detectors
+with online hard example mining. In Proceedings of
+the IEEE conference on computer vision and pattern
+recognition , pages 761–769.
+Ilia Shumailov, Zakhar Shumaylov, Yiren Zhao, Nicolas
+Papernot, Ross Anderson, and Yarin Gal. 2024. Ai
+models collapse when trained on recursively gener-
+ated data. Nature , 631(8022):755–759.
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+et al. 2022. Chain-of-thought prompting elicits rea-
+soning in large language models. Advances in neural
+information processing systems , 35:24824–24837.
+Peter West, Chandra Bhagavatula, Jack Hessel, Jena
+Hwang, Liwei Jiang, Ronan Le Bras, Ximing Lu,
+Sean Welleck, and Yejin Choi. 2022. Symbolic
+knowledge distillation: from general language mod-
+els to commonsense models. In Proceedings of the
+2022 Conference of the North American Chapter of
+the Association for Computational Linguistics: Hu-
+man Language Technologies , pages 4602–4625.
+An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui,
+Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu,
+Fei Huang, Haoran Wei, et al. 2025. Qwen2.5 tech-
+nical report. arXiv preprint , arXiv:2412.15115.Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Ben-
+gio, William W. Cohen, Ruslan Salakhutdinov, and
+Christopher D. Manning. 2018. Hotpotqa: A dataset
+for diverse, explainable multi-hop question answer-
+ing. arXiv preprint , arXiv:1809.09600.
+Zitong Yang, Neil Band, Shuangping Li, Emmanuel
+Candès, and Tatsunori Hashimoto. 2024. Syn-
+thetic continued pretraining. arXiv preprint ,
+arXiv:2409.07431.
+Asaf Yehudai, Boaz Carmeli, Yosi Mass, Ofir Arviv,
+Nathaniel Mills, Assaf Toledo, Eyal Shnarch, and
+Leshem Choshen. 2024. Genie: Achieving human
+parity in content-grounded datasets generation. arXiv
+preprint , arXiv:2401.14367.
+Jie Ying, Zihong Chen, Zhefan Wang, Wanli Jiang,
+Chenyang Wang, Zhonghang Yuan, Haoyang Su,
+Huanjun Kong, Fan Yang, and Nanqing Dong. 2025.
+Seedbench: A multi-task benchmark for evaluating
+large language models in seed science. Preprint ,
+arXiv:2505.13220.
+Xuanyu Zhang and Qing Yang. 2023a. Self-qa: Unsu-
+pervised knowledge guided language model align-
+ment. arXiv preprint , arXiv:2305.11952.
+Xuanyu Zhang and Qing Yang. 2023b. Self-qa: Un-
+supervised knowledge guided language model align-
+ment. arXiv preprint arXiv:2305.11952 .
+Runhao Zhao, Jiuyang Tang, Weixin Zeng, Ziyang
+Chen, and Xiang Zhao. 2024a. Zero-shot knowl-
+edge graph question generation via multi-agent llms
+and small models synthesis. In Proceedings of the
+33rd ACM International Conference on Information
+and Knowledge Management , pages 3341–3351.
+Yu Zhao, Huifeng Yin, Bo Zeng, Hao Wang, Tianqi
+Shi, Chenyang Lyu, Longyue Wang, Weihua Luo,
+and Kaifu Zhang. 2024b. Marco-o1: Towards open
+reasoning models for open-ended solutions. arXiv
+preprint , arXiv:2411.14405.
+Ming Zhong, Yang Liu, Da Yin, Yuning Mao, Yizhu
+Jiao, Pengfei Liu, Chenguang Zhu, Heng Ji, and
+Jiawei Han. 2022. Towards a unified multi-
+dimensional evaluator for text generation. In Pro-
+ceedings of the 2022 Conference on Empirical Meth-
+ods in Natural Language Processing , pages 2023–
+2038.A Additional System Modules
+A.1 Entity Enrichment Module with Wikipedia
+We have developed a plug-in module for GraphGen aimed at enriching entity information within the
+KG through targeted Wikipedia searches. Entities from Dsource may initially contain only rudimentary
+descriptions. However, by leveraging the extensive and authoritative content of Wikipedia, we can provide
+a more comprehensive understanding of these entities, including historical context, definitions, and related
+facts. This enhancement not only enriches the content of the knowledge graph but also serves as a means
+to verify the accuracy of existing information, identifying potential errors or gaps within the data.
+A.2 Coreference Resolution Module
+We have developed an additional plug-in module for coreference resolution that processes text segments
+from Dsource . By designating the first segment as a reference point, we analyze subsequent segments to
+identify any ambiguous pronouns. Utilizing a large language model (LLM), we generate responses that
+clarify these references based on the context established by the reference segment. This approach enables
+us to accurately identify and resolve pronouns and other referring expressions, thereby enhancing the
+clarity and coherence of the text segments.
+A.3 User Interface
+The user interface of GraphGen is designed to provide users with an intuitive tool for modifying and
+adjusting various settings. As can be seen in Figure 7, the settings include “Input Configuration”, “Traverse
+Strategy” and “Model Configuration”. Users can save their current parameter configurations as presets for
+easy retrieval in the future. This is especially useful for those who frequently adjust settings, enhancing
+efficiency.
+Figure 7: User interface of GraphGen. “Input Configuration” is utilized to specify the data sources and the target
+format. “Traverse Strategy” determines the method of graph organization. “Model Configuration” is employed to
+set parameters for the LLMs.B GraphGen Details
+B.1 Prompt Templates
+In the GraphGen framework, we used the following prompt:
+• Prompt for extracting entities and relationships of the KG (Figure 8).
+•Prompt for summarizing multiple descriptions when the descriptions of an entity or relation come
+from various sources (Figure 9).
+• Prompt for rephrasing the description into a positive or a negative statement (Figure 10 and 11).
+• Prompt for atomic QA generation (Figure 12).
+• Prompt for aggregated QA generation (Figure 13 and 14).
+• Prompt for multi-hop QA generation (Figure 15).Figure 8: Prompt for KG extraction.Figure 9: Prompt for KG summarization.
+Figure 10: Prompt for description rephrasing (opposite meaning).Figure 11: Prompt for description rephrasing (literal meaning).
+Figure 12: Prompt for atomic QA generation.Figure 13: Prompt for aggregated answer rephrasing.Figure 14: Prompt for question generation (aggregated QA).
+Figure 15: Prompt for multi-hop QA generation.Figure 16: An example of the extracted KG. Different colors represent different entity types.
+B.2 Examples
+Here we present some output examples from the GraphGen workflow. Figure 16 shows an example of the
+extracted KG. In the graph, entities are interconnected based on the relationships obtained from Dsource ,
+and each entity or relation has its own description.
+Figure 17 illustrates the three styles of data generated by GraphGen. We can clearly observe that atomic
+QA focuses on simple, single knowledge points, while aggregated QA generates a coherent and logical
+long answer within complex subgraphs, thereby producing more complex and comprehensive responses.
+Multi-hop QA, on the other hand, emphasizes reasoning and connecting multiple knowledge points.
+These methods each demonstrate different levels of knowledge extraction and semantic understanding
+capabilities.Figure 17: Examples of the GraphGen data. The words indicating contrasts or clear logical relationships between
+knowledge points is highlighted.B.3 Implementation Details
+Here we present the complete configuration of GraphGen’s organization strategy, as can be seen in Table 3.
+Parameter Default Value Description Options
+qa_form atomic Type of QA form de-
+sired.• atomic: single-step
+• multi_hop: multi-step
+• aggregated: open-ended
+expand_method max_tokens Method for controlling
+graph expansion.•max_width: limit by number of
+edges in the subgraph
+•max_tokens: limit by token length
+of entities and relations in the sub-
+graph
+bidirectional True Expanding the graph in
+both directions (True) or
+one direction (False).
+max_extra_edges 5 Maximum number of
+edges to expand.
+max_tokens 256 Maximum number of to-
+kens.
+max_depth 2 Maximum depth for
+traversal in each direc-
+tion.
+edge_sampling max_loss Strategy for edge selec-
+tion at the same layer.•max_loss: prioritize highest loss
+edges
+•min_loss: prioritize lowest loss
+edges
+• random: random selectionisolated_node_strategy add Handling strategy for
+isolated nodes.• add: include isolated nodes
+• ignore: exclude isolated nodes
+Table 3: Configuration of the graph organization strategy.C Additional Setups
+In this section, we present the detailed configurations for generating, training and evaluation settings.
+Table 5 provides the hyperparameters employed during training, while Table 4 outlines the parameters
+used in our evaluation pipeline. The time required for processing varies with the size of the dataset and
+changes in the graph organization strategy. On average, generating a batch of approximately 50,000 data
+entries takes about 2 hours for Qwen2.5-72B-Instruct2, while SFT on Qwen2.5-7B-Instruct3requires
+around 1 hour and evaluation takes about 10 minutes, utilizing 8 NVIDIA A100 40GB GPUs.
+When generating data, for Msynth, we set the following parameters: topk = 50 ,topp = 0.95,
+repetition_penalty = 1.05,max_tokens = 10240 , and temperature = 0. It is noteworthy that when
+rephrasing descriptions, the temperature is adjusted to 1 for diverse expressions. When judging statements,
+forMtrain , we need to obtain the softmax probabilities of the output tokens. Therefore, we set the
+parameters as follows: logprobs =True, top_logprobs = 5, and max_tokens = 1.
+For evaluation, we leverage the OpenCompass framework (Contributors, 2023) as a standardized
+evaluation toolkit. The evaluation process is controlled through key hyperparameters that dictate model
+behavior, including sequence length constraints, batch processing, and sampling configurations. The
+detailed parameter settings are presented in Table 4.
+Parameter Value Description
+Maximum Sequence Length 7168 The maximum length of input tokens the model can
+process in a single instance.
+Maximum Output Length 2048 The maximum number of newly generated tokens
+allowed in model output.
+Batch Size 80 The maximum number of prompts that LMDeploy
+receives in the ‘generate’ function.
+Temperature (Gen.) 0 Controls randomness in sampling; lower values lead
+to more deterministic outputs (greedy search). A
+value of 0 enforces fully deterministic generation.
+Table 4: Evaluation configuration parameters.
+2https://huggingface.co/Qwen/Qwen2.5-72B-Instruct
+3https://huggingface.co/Qwen/Qwen2.5-7B-InstructIn the training phase, we employ a transformer-based architecture with the AdamW optimizer. The
+learning rate is linearly scheduled with a warm-up phase, and gradient clipping is applied to stabilize
+training. These configurations ensure effective optimization and robust model convergence.
+Parameter Value Description
+Maximum Length 2048 Maximum sequence length for model inputs.
+Learning Rate 2e-5 Step size for weight updates, controlling optimization
+speed.
+Weight Decay 0.1 Regularization term to mitigate overfitting by penal-
+izing large weights.
+Gradient Clipping 1 Caps gradient norm to stabilize training and prevent
+exploding gradients.
+Batch Size 64 (16 ×4) Total number of samples processed per optimization
+step.
+Optimizer AdamW Variant of Adam with decoupled weight decay for
+improved generalization.
+Betas ( β1, β2) (0.9, 0.999) Exponential decay rates for first and second moment
+estimates in Adam.
+Warmup Ratio 0.03 Fraction of total training steps used for gradual learn-
+ing rate ramp-up.
+Number of Epochs 2 Total number of complete passes over the training
+dataset.
+Table 5: Training configuration parameters.D Baseline Details
+Among the baseline methods, WRAP, Genie, LongForm, and SELF-QA are generation methods based on
+prompt engineering, while EntiGraph is based on KG. Specifically, LongForm utilizes the text segments
+fromDsource directly as answers in QA pairs, subsequently generating corresponding questions based on
+these answers. Genie feeds raw text into a LLM to produce a QA pair. WRAP also extracts QA pairs
+from raw text but varies in the number of QA pairs generated for each text segment. SELF-QA involves
+two critical steps: first, it generates ten questions based on the original text, and then it answers these
+questions contextually, yielding a total of ten QA pairs. EntiGraph begins by extracting entities from the
+text, then combines these entities in pairs or triplets to create QA pairs, informed by the analysis of the
+original text. To optimize performance and prevent the generation of excessive, redundant information
+that could waste computational resources, we implemented a limit on the number of entities selected by
+EntiGraph during its execution.E Dataset Details
+SeedEval is adapted from SeedBench4, a benchmark with 11 tasks related to seed knowledge. For this
+study, we selected Task QA–4 (covering one-shot and zero-shot scenarios) related to textual knowledge
+question answering. PQArefEval is derived from PQAref , from which we extracted 5,818 instances for our
+analysis. HotpotQA is a dataset for diverse, explainable multi-hop question answering, where questions
+require integrating information from multiple sources. We used the test set of HotpotQA as the new
+evaluation dataset, HotpotEval . Each dataset comprises two components: the QA test set ( Deval) and the
+corresponding source texts ( Dsource ). The Corpus for SeedEval is provided by anonymous agricultural
+experts, while PQArefEval andHotpotEval are constructed from the original references of PQAref and
+HotpotQA , respectively. Table 6 presents examples from the datasets.
+Dataset Examples
+Corpus Test
+SeedEval Grain size is one of the key factors
+determining grain yield. However, it
+remains largely unknown how grain
+size is regulated by developmental
+signals. Here, we report the
+identification and characterization ...Question: What were the find-
+ings regarding the effect of el-
+evated DEP1 accumulation on
+grain length?
+Answer: Elevated DEP1 ac-
+cumulation increased the grain
+length by 6.85–9.58% with a nor-
+mal plant stature.
+PQArefEval Clinical analysis of the acromial
+height-measuring device combined
+with new-type clavicular hook plate
+and standard clavicular hook plate in
+the treatment of Neer type II distal
+clavicle fractures. Background: Distal
+clavicular fracture is a shoulder joint
+injury that is common in clinical
+settings and is generally surgically
+treated using the clavicular hook plate
+technique with a confirmed curative
+effect ...Question: Is Bridging Neces-
+sary?
+Answer: The necessity of bridg-
+ing depends on the context in
+which the term is used. In the
+context of myocardial bridging,
+it is not a procedure that is done
+but rather a congenital condi-
+tion where a segment of a coro-
+nary artery takes an intramyocar-
+dial course, which can be asymp-
+tomatic or lead to complications
+such as ...
+HotpotEval Ed Wood is a 1994 American
+biographical period comedy-drama film
+directed and produced by Tim Burton,
+and starring Johnny Depp as cult
+filmmaker Ed Wood ...Question: The Vermont Cata-
+mounts men’s soccer team cur-
+rently competes in a conference
+that was formerly known as what
+from 1988 to 1996?
+Answer: the North Atlantic Con-
+ference
+Table 6: Dataset examples.
+4https://anonymous.4open.science/r/SeedBenchF Additional Experimental Results
+F.1 Main Results on Additional Models
+To further validate the effectiveness of our proposed method, we conducted additional fine-tuning experi-
+ments using two models: Meta-Llama-3.1-8B-Instruct and MiniCPM3-4B, as trainee models. The results,
+illustrated in Figure 18, are consistent with our primary findings. Specifically, our method continues to
+deliver stable and significant performance improvements across three knowledge-intensive datasets. These
+additional experiments reinforce the robustness and generalizability of our approach across different LLM
+architectures and parameter scales. We have chosen ROUGE-F as the evaluation metric because the evalu-
+ation datasets used in this paper consists of question-and-answer problems. ROUGE-F is an evaluation
+metric used to measure the overlap between the generated text and the reference text, particularly in terms
+of word-level overlap. It is calculated as the F1 score, which is the harmonic mean of precision and recall.
+The formula for ROUGE-F is as follows:
+F1 = 2×Precision ×Recall
+Precision +Recall
+where precision is the proportion of correct words in the generated text relative to the total number of
+words in the generated text and recall is the proportion of words in the reference text that are correctly
+predicted relative to the total number of words in the reference text. We selected ROUGE-F because
+it provides a comprehensive measure of both precision and recall, making it suitable for evaluating the
+quality of generated answers in question-and-answer datasets.
+Figure 18: Performance comparison on knowledge-intensive evaluation datasets. The models are fine-tuned using
+data generated by different methods. The top figure shows results on LLaMA-3.1-8B-Instruct, while the bottom
+figure shows results on MiniCPM3-4B. While baseline methods show varying performance, GraphGen consistently
+achieves superior results across all three datasets.F.2 Effect of Comprehension Loss on Model Performance
+Figure 19 compares model performance when trained on the top 30% and bottom 30% of data sorted
+by comprehension loss. The results indicate that models trained on higher-loss data achieve better
+performance, suggesting that such data contributes positively to model optimization and generalization.
+Figure 19: Comparison of model performance trained on top 30% and bottom 30% data sorted by comprehension
+loss. This figure demonstrates that the model trained on data with higher loss (top 30%) outperforms the one trained
+on data with lower loss (bottom 30%), highlighting the positive impact of high-loss data on model performance
+enhancement.F.3 Quality Evaluation Metric Details
+Table 7 presents the metrics used to evaluate the intrinsic quality of the text. To normalize the metric
+scores to a range of 0 to 100, we employ min-max normalization as specified in Formula 5. In this
+analysis, the minimum and maximum values for MTLD are established at 0 and 200, respectively. The
+three metrics included in the Uni-Score are scaled from 0 to 1. For the Reward Score, the range for Ind
+is 0–5, while for Deb, it spans from 0 to 3. We use Formula 6 to compute the final average score SAvg,
+which provides a comprehensive assessment of data quality.
+S(x) =x−xmin
+xmax−xmin×100 (5)
+SUni=SNat+SCoh+SUnd
+3
+SRew =SInd+SDeb
+2
+SAvg=SMTLD +SUni+SRew
+3(6)
+Metric Notation Explanation
+MTLD MTLD The metric for assessing lexical diversity in texts (McCarthy and Jarvis,
+2010).
+Unieval Score Uni Naturalness, coherence and understandability score provided by the UniEval
+dialogue model (Zhong et al., 2022).
+Reward Score Rew The reward model inference score of QA pairs. Reward models in this pa-
+per include BAAI/IndustryCorpus2_DataRater1andOpenAssistant/reward-
+model-deberta-v3-large-v22.
+1https://huggingface.co/BAAI/IndustryCorpus2_DataRater
+2https://huggingface.co/OpenAssistant/reward-model-deberta-v3-large-v2
+Table 7: Key metrics for evaluating the quality of generated text. The table provides a summary of the notation and
+explanations for each metric.F.4 Ablation Study on the Selection Strategy
+Tables 8 and 9 present the results of an ablation study evaluating different edge selection strategies for
+GraphGen on the PQArefEval andHotpotEval datasets. The study compares the following strategies:
+max_loss, min_loss, and random. Performance is measured using the ROUGE-F metric.
+Method Selection Strategy Score
+GraphGen (256)max_loss 21.14
+min_loss 21.22
+random 21.06
+GraphGen (512)max_loss 20.72
+min_loss 20.92
+random 20.93
+GraphGen (768)max_loss 20.46
+min_loss 20.47
+random 20.64
+GraphGen (1024)max_loss 20.50
+min_loss 20.56
+random 20.40
+Table 8: Ablation Study on Different Selection Strategies of GraphGen on the PQAref Dataset. The model is
+evaluated under different sequence length settings (pre_length) and three distinct generation strategies: random,
+min_loss, and max_loss.
+Method Selction Strategy Score
+GraphGenmax_loss 23.55
+min_loss 23.79
+random 23.49
+Table 9: Performance of different generation strategies on the Hotpot dataset. The performance is measured using
+ROUGE-F.Figure 20 21 22 presents the character length distributions of answers in a medical QA dataset,
+comparing three sampling strategies (maximum loss, minimum loss, and random selection) across four
+token length constraints (256-1024).
+Figure 20: Character length distribution under the maximum loss sampling strategy.
+Figure 21: Character length distribution under the minimum loss sampling strategy.Figure 22: Character length distribution under the random selection strategy.
+Table 10 presents the results of an ablation study on different sequence length settings in GraphGen,
+evaluating their impact on various quality metrics. The results show that increasing sequence length
+generally improves lexical diversity while maintaining consistent performance across evaluation metrics.
+Method #Samples Avg #Tokens Results Avg Score
+MTLD Uni Rew
+Nat Coh Und Ind Deb
+GraphGen(256) 119501 532.6 71.9 87.8 95.7 90.4 84.6 38.0 74.8
+GraphGen(512) 54287 657.9 75.8 87.8 95.7 90.4 85.0 31.8 75.2
+GraphGen(768) 38246 718.1 75.8 87.9 95.9 90.4 84.8 31.0 75.0
+GraphGen(1024) 32137 749.3 75.0 87.9 95.9 90.5 84.5 31.7 74.8
+Table 10: Ablation study on quality metrics.F.5 Ablation Study on Knowledge Representation Strategy
+Table 11 presents an ablation study evaluating different knowledge representation strategies for GraphGen
+on the agricultural dataset. The study compares three configurations—using only entities, only relations,
+and both entities and relations. Performance is measured using the ROUGE-F metric to assess the impact
+of different knowledge structures on model effectiveness.
+Method Knowledge Representation Strategy ROUGE-F
+GraphGenOnly Entities 50.68
+Only Relations 51.88
+Entities + Relations 51.77
+Table 11: Ablation study on different knowledge representation strategies for GraphGen on the agricultural dataset.
+The model is evaluated under three different configurations: using only entities, only relations, and both entities and
+relations.G Evaluation on General and Agricultural Tasks
+Table 12 presents the evaluation results of different models on both general tasks and the SeedBench
+agricultural benchmark. The study examines six model variants, including GraphGen ,EntiGraph ,
+Genie ,LongForm ,SELF-QA , and Wrap . Performance is reported across multiple metrics, including
+GPQA, CMLU, GSM8K, BBH, MATH, Lukaemon, and various SeedBench scores.
+Metric GraphGen EntiGraph Genie LongForm SELF-QA WRAP
+General Benchmarks
+GPQA 33.84 27.78 29.80 30.81 34.85 33.84
+CMLU 77.61 77.56 78.58 77.42 77.54 77.89
+GSM8K 80.89 79.45 80.44 80.74 80.21 81.20
+BBH 68.51 67.72 67.80 67.57 66.92 66.57
+MATH 52.45 52.14 53.73 52.91 52.99 54.71
+Lukaemon 73.56 71.11 73.61 72.77 72.43 70.55
+Agricultural Benchmarks (SeedBench)
+QA-1 61.75 65.25 61.25 61.00 66.25 63.25
+QA-2 75.67 74.49 75.35 72.59 75.02 74.09
+QA-3 22.46 30.15 24.69 24.37 26.43 26.64
+QA-4 50.71 51.61 51.91 49.48 49.10 48.76
+SUM-1 52.59 61.80 58.95 66.35 58.53 57.11
+SUM-2 52.20 63.90 65.30 71.48 65.44 63.68
+RC-1 96.91 96.91 96.02 96.46 96.46 96.02
+RC-2 96.67 87.96 88.63 90.41 89.09 90.08
+RC-3 77.82 83.66 83.99 84.45 83.74 83.97
+RC-4 63.34 71.78 70.95 72.22 65.44 66.81
+RC-5 75.27 77.60 74.91 76.35 75.81 76.17
+Table 12: Evaluation results of different models on general tasks and the SeedBench agricultural benchmark.
+General benchmarks are listed first, followed by agricultural benchmarks. In SeedBench, QA-1 corresponds to
+multiple-choice questions, QA-2 refers to multiple-answer questions, QA-3 involves fill-in-the-blank tasks, and
+QA-4 pertains to open-ended generative questions. SUM-1 represents simple summarization tasks, while SUM-2
+focuses on key information extraction. RC-1 denotes multiple-choice reading comprehension, RC-2 covers multiple-
+answer reading comprehension, RC-3 consists of fill-in-the-blank reading comprehension tasks, RC-4 includes
+generative reading comprehension, and RC-5 represents subcategory classification tasks.

@@ -1,0 +1,1310 @@
+Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+Shuo Wang* 1Shunyang Huang* 1Jinghui Yuan* 2Zhixiang Shen1Zhao Kang† 1
+Abstract
+Fusing heterogeneous information remains a per-
+sistent challenge in modern data analysis. While
+significant progress has been made, existing ap-
+proaches often fail to account for the inherent het-
+erogeneity of object patterns across different se-
+mantic spaces. To address this limitation, we pro-
+pose the Cooperation of Experts (CoE) frame-
+work, which encodes multi-typed information into
+unified heterogeneous multiplex networks. By
+transcending modality and connection differences,
+CoE provides a powerful and flexible model for
+capturing the intricate structures of real-world
+complex data. In our framework, dedicated en-
+coders act as domain-specific experts, each spe-
+cializing in learning distinct relational patterns in
+specific semantic spaces. To enhance robustness
+and extract complementary knowledge, these ex-
+perts collaborate through a novel large margin
+mechanism supported by a tailored optimization
+strategy. Rigorous theoretical analyses guarantee
+the framework’s feasibility and stability, while
+extensive experiments across diverse benchmarks
+demonstrate its superior performance and broad
+applicability. Our code is available at https:
+//github.com/strangeAlan/CoE .
+1. Introduction
+Most real-world objects and data are heterogeneous in the
+form of multiple types or diverse forms of interactions,
+which pose significant challenges for modeling their in-
+tricate relationships (Han, 2009; ?). For instance, multi-
+modal data combines diverse sources, such as images and
+text, where each modality contributes unique features that
+collectively offer a richer understanding of the underlying
+*Equal contribution†Corresponding author1University of
+Electronic Science and Technology of China, Chengdu, Sichuan
+Province, China2Northwestern Polytechnical University. Corre-
+spondence to: Shuo Wang <runner21st@gmail.com >, Zhao Kang
+<zkang@uestc.edu.cn >.
+Proceedings of the 42ndInternational Conference on Machine
+Learning , Vancouver, Canada. PMLR 267, 2025. Copyright 2025
+by the author(s).phenomena; in a social network, people are linked with
+different types of ties: friendship, family relationship, pro-
+fessional relationship, etc. To characterize the complexities
+of this heterogeneity, we encode multi-typed information
+into a unified heterogeneous multiplex network, where each
+layer contains the same number of nodes (possibly with
+different attributes) but a different type of links, enabling a
+comprehensive and effective representation of the diverse
+relationships inherent in real-world data (Sun & Han, 2013).
+Inspired by the success of graph neural networks (GNNs)
+(Kipf & Welling, 2016; Wang et al., 2019), numerous ap-
+proaches have been proposed for multiplex network rep-
+resentation learning (Jing et al., 2021; Shen et al., 2024b).
+However, these methods often rely on training a single pre-
+dictor across the entire network, which can lead to sub-
+optimal results by neglecting the intrinsic heterogeneity
+and varying characteristics of different link patterns (Wang
+et al., 2024). As shown in Figures 1a and 1b, classifier
+performance, which is independently trained on each net-
+work, differs significantly across different layers, high-
+lighting the importance of accounting for this variability.
+To effectively capture diverse node patterns, dedicated ex-
+perts —components designed to focus on specific aspects of
+the network, are introduced (Shi et al., 2024b). Each expert
+specializes in learning from a particular type of interaction,
+thereby reducing cross-interference between relationships
+and enabling a more nuanced representation of complex
+structures.
+When utilizing multiple experts, effective collaboration
+among them becomes crucial. Existing Mixture of Experts
+(MoE) approaches employ a gating mechanism that activates
+only a subset of experts during both training and inference
+(Li et al., 2023a; Shi et al., 2024a). While this strategy
+improves efficiency, it inherently limits the ability to fully
+exploit the rich and diverse information embedded in hetero-
+geneous data. This highlights the importance of fostering
+collaboration rather than competition among experts to lever-
+age cross-layer knowledge effectively. However, this shift
+introduces two key challenges that must be addressed.
+First, given the challenges of capturing the diverse and in-
+tricate patterns within networks, a key question arises: how
+can we design a framework that effectively extracts and in-
+tegrates such complex information across all networks? To
+1arXiv:2505.20853v1  [cs.LG]  27 May 2025Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+2080100
+90
+90.6790.49
+86.0293.3794.48Class 0
+Class 1
+Class 228.78
+Network A
+Network B
+(a) ACM
+2080100
+90
+91.5363.38
+49.5480.1095.93
+Class 2Class 1Class 0
+16.5455.19
+27.8412.18
+Network A
+Network B
+Network C (b) Yelp
+a+b     a&b a+c     a&c b+c     b&c020406080accuracy(%)80.93
+73.53
+56.0691.76 90.9192.55 (c) Impact of fusion procedure on Yelp.
+Figure 1. (a) and (b) present the classification results on different networks from the ACM and Yelp datasets, representing the diverse and
+intricate patterns within networks. (c) “+” symbol denotes directly adding the networks, while “ &” represents the fusion procedure used
+in CoE.
+address this, we propose Cooperation of Experts (CoE) , a
+novel architecture specifically designed to enable an efficient
+division of labor among experts. The framework adopts a
+two-level experts framework: low-level experts focus on
+learning patterns from individual networks, while high-level
+experts operate on a fused representation to capture cross-
+network relationships. Unlike simple concatenation, the
+fused representation is optimized by maximizing mutual
+information across networks. As shown in Figure 1c, this
+approach enhances performance by encoding complemen-
+tary information, enabling more robust and comprehensive
+representations.
+Second, how can well-trained experts collaboratively con-
+tribute to the final prediction? To promote cooperation
+rather than competition, we assign each expert a weighted
+influence in the decision-making process, determined by its
+proficiency in capturing distinct patterns. This is achieved
+through a learnable confidence tensor that dynamically ad-
+justs the authority of each expert based on its specialization.
+To ensure effective collaboration, we introduce an inno-
+vative optimization mechanism for the confidence tensor,
+which strategically maximizes the margin between the two
+most confidently predicted outcomes. This mechanism not
+only balances the contributions of different experts but also
+addresses disparities in their expertise, ultimately boosting
+overall predictive performance.
+Our primary contributions can be summarized as:
+•We propose the Cooperation of Experts (CoE) , a
+novel expert coordination framework designed to ex-
+tract stable and nuanced node patterns from multiplex
+networks. By tailoring experts to capture both special-
+ized and shared features, CoE effectively disentangles
+and integrates heterogeneous information, uncovering
+intricate connections across diverse relationships.
+•Our work further advances the utilization of multipleexperts. To the best of our knowledge, this is the first
+framework to emphasize expert cooperation rather than
+competition. We introduce a novel large margin opti-
+mization strategy that maximizes the effectiveness of
+each expert’s specialized expertise, fostering a more
+holistic and in-depth understanding of the underlying
+knowledge within networks.
+•The effectiveness of our method is validated through
+rigorous theoretical analysis and extensive experimen-
+tal evaluation. We conduct comprehensive experiments
+with various state-of-the-art methods on both multi-
+relational and multi-modal tasks.
+2. Related Work
+2.1. Multiplex Network Learning
+Multiplex network learning focuses on capturing diverse
+structural patterns in multi-relational networks to support
+tasks such as node classification, clustering, and link pre-
+diction ( ??). With the rise of GNNs, HAN (Wang et al.,
+2019) integrates structural and attribute information using
+attention mechanisms at both the node and semantic levels,
+while MAGNN (Fu et al., 2020) and MHGCN (Yu et al.,
+2022) leverage graph convolution to extract relational fea-
+tures across multiple layers. MGBO (Huang et al., 2024)
+employs self-expression learning for homophily modeling,
+whereas HDMI (Jing et al., 2021) and DMG (Mo et al.,
+2023) utilize contrastive learning to enhance self-supervised
+representations. However, these methods heavily rely on
+reliable network topology structures, limiting their effec-
+tiveness in real-world scenarios with noisy or incomplete
+data.
+2.2. Graph Structure Learning
+Graph Structure Learning (GSL) has become a crucial area
+of research in GNNs, particularly for optimizing unreliable
+2Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+graph structures with significant noise. Supervised GSL
+methods often generate new adjacency matrices with learn-
+able components, optimized using label information. These
+methods include probabilistic models (e.g., LDS and GEN
+(Franceschi et al., 2019; Wang et al., 2021)), similarity-
+based techniques (e.g., GRCN and IDGL (Yu et al., 2021;
+Chen et al., 2020)), attention mechanisms (e.g., NodeFormer
+(Wu et al., 2022)), or by treating all elements in the adja-
+cency matrix as learnable parameters (e.g., ProGNN (Jin
+et al., 2020)). In contrast, methods like SUBLIME, STA-
+BLE, and GSR (Liu et al., 2022; Li et al., 2022; Zhao et al.,
+2023) leverage contrastive learning to construct graph struc-
+tures in a self-supervised manner. While most previous
+studies have focused on single, homogeneous graphs, re-
+cent efforts have expanded GSL to heterogeneous graphs
+in supervised settings ( ??), as demonstrated by GTN and
+HGSL (Yun et al., 2019; Zhao et al., 2021). More recently,
+InfoMGF (Shen et al., 2024b) has explored unsupervised
+fusion of graphs from multiple sources, advancing research
+in multiplex graph structure learning. Despite these strides,
+there remains a lack of research addressing the challenge of
+effectively enabling the integration of complex information
+across multiple networks.
+2.3. Multiple Learners Learning
+Multiple Learners Learning is a powerful machine learning
+paradigm that leverages multiple models to enhance predic-
+tive performance. A classical approach within this paradigm
+is ensemble learning, which aggregates diverse models to
+reduce variance and bias, thereby improving generalization.
+Common ensemble methods include bagging (Zhou & Tan,
+2024) and boosting (He et al., 2024). However, while boost-
+ing relies on sequential training where each model builds
+upon the previous one, it fails to independently capture infor-
+mation from diverse networks (Emami & Mart ´ınez-Mu ˜noz,
+2023). In contrast, advanced bagging techniques emphasize
+diversity among learners. Building on the classical Random
+Forest strategy (Rigatti, 2017), recent work introduces multi-
+weighted bagging, such as the WRF method (Winham et al.,
+2013). Although ensemble learning facilitates information
+fusion, its advantages are predominantly observed in tabu-
+lar data (Chen & Guestrin, 2016), making it challenging to
+extract complex patterns inherent in multiplex networks.
+Another notable specialization within this domain is the
+expert mechanism. The classical Mixture of Experts (MoE)
+framework enhances adaptivity by assigning specialized
+submodels (i.e., experts) to distinct regions of the input
+space (Li et al., 2023a). A key limitation of many GNNs
+is their homogeneous processing of the entire graph, which
+overlooks structural and feature diversity. To address this,
+recent studies integrate MoE with graph learning (Wang
+et al., 2024; Kim et al., 2023) to improve adaptability. Fur-
+thermore, Mowst (Zeng et al., 2024) refines this approachby training experts to specialize in both feature and structure
+modalities. However, existing expert mechanisms primarily
+focus on expert competition, often neglecting the effective
+utilization of inter-relational dependencies—precisely the
+gap our work aims to bridge.
+3. Preliminaries
+Heterogeneous Multiplex Networks. It is represented by
+G={G1, ..., G V}composed of Vnetworks, where Gv=
+{Av, Xv}is the v-th network. Xv∈RN×dfis the attribute
+matrix for Nnodes, so that Xi∈Rdfrepresents the feature
+vector of node i.Av∈ {0,1}N×Nis the corresponding
+adjacency matrix and Dvis a diagonal matrix denoting
+the degree matrix of Av.Ydenotes the node label. We
+summarize the notations in Appendix A.
+Experts Definition. During the training phase, each expert
+is assigned a distinct task by focusing on specific layers, re-
+ferred to as their knowledge fields . For instance, a classifier
+Fis exclusively trained on layer G1ifG1constitutes the
+knowledge field of F. Consequently, experts are defined as
+the combination of classifiers and their corresponding layers
+within the designated knowledge fields, denoted as Ei.
+4. Our Proposed Method
+In this section, we introduce the CoE framework using a
+top-down approach. We begin by detailing the encoding
+of heterogeneous information into multiplex networks, fol-
+lowed by the two-level design of experts. Next, we describe
+the collaborative strategy employed by the experts, and
+finally, we conclude with the optimization of the critical
+confidence tensor. The overall framework of the proposed
+approach is shown in Figure 2.
+4.1. Encoding Heterogeneous Information
+Modeling arbitrary forms of heterogeneous information
+through multiplex networks presents a critical challenge:
+ensuring the reliability of the network structure. Real-world
+networks are often sparse and contain significant noise,
+which can degrade downstream performance. Therefore,
+we apply a Graph Structure Learning (GSL) strategy to
+refine and optimize the network structure.
+Specifically, we employ a network learner, which not only
+generates refined networks but also ensures the preservation
+of crucial node features and structural information. We
+achieve this by utilizing the commonly employed Simple
+Graph Convolution (SGC) (Wu et al., 2019), which is a
+two-layer attentive network:
+Hv=σ(((˜D−1
+2v˜Av˜D−1
+2v)rXv))⊙Wv
+1)⊙Wv
+2(1)
+where ˜Dv=Dv+Iand˜Av=Av+I.rrepresents the
+3Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+Graph
+Structure
+LearningMultimodal Data. . .
+Heterogeneous
+Multiplex NetworksLow-level experts
+GV2High-level experts G2
+Image
+Audio
+Multiplex Network
+G12
+. . .G1
+GV
+. . .
+Two-level ExpertsText
+Encoding 
+Heterogeneous InformationFused NetworksLarge Margin MechanismGraph
+Encoder
+. . .
+Confidence Tensor
+Margin
+max2max1
+giCross Entropy Loss Yi
+Figure 2. The overall framework of the proposed CoE. Specifically, CoE first encodes various information into heterogeneous multiplex
+networks, followed by network fusion through mutual information maximization. Subsequently, two-level experts are trained on single
+and fused networks respectively. Expert collaboration is enabled by a confidence tensor, which is optimized via a large margin mechanism.
+order of graph aggregation. σ(·)is the non-linear activation
+function and ⊙denotes the element-wise multiplication.
+For multi-modal data where Avis not provided, we use the
+original Xvto replace Hv.
+Hvis subsequently utilized to reconstruct the network us-
+ing the K-nearest neighbors ( KNN) method. In practice,
+we employ KNN sparsification with its locality-sensitive
+approximation to enhance efficiency (Fatemi et al., 2021).
+Once the reconstructed adjacency matrix is obtained, we
+perform post-processing operations, like existing GSL
+paradigm (Li et al., 2023b), to ensure that the final adja-
+cency matrix A′
+vadheres to key properties, including non-
+negativity, symmetry, and normalization. This process ulti-
+mately results in the construction of the heterogeneous multi-
+plex networks G={G′
+1,···, G′
+V}, where G′
+i={A′
+i, Xi}.
+4.2. Two-level Design for Task-driven Experts
+As described above, the two-level expert framework is de-
+signed to operate across distinct knowledge fields. Specifi-
+cally, low-level experts focus on individual networks, learn-
+ing network-specific link patterns, while high-level ex-
+perts capture shared information across networks to iden-
+tify higher-order dependencies that cannot be uncovered
+when networks are analyzed independently. To enhance the
+task relevance of low-level experts, we guide their learn-
+ing by formulating it as the maximization of I(G′
+i;Y). For
+high-level experts, we incorporate I(G′
+i;G′
+j)as a maxi-
+mization objective during the training phase, which has
+been theoretically shown to provide a lower bound for
+I(G′
+i;Gj) +I(Gi;G′
+j)(Federici et al., 2020). The lossfunction can be formulated as:
+LE=−VX
+i=1I(G′
+i;Y)−VX
+i=1VX
+j=i+1I(G′
+i;G′
+j)
+−VX
+i=1I(G′
+i;Gtot)−VX
+i=1X
+j̸=iI(G′
+i;Gij)(2)
+where we fuse G′
+iandG′
+jby optimizing the loss function
+above to generate the fused network Gij. Additionally, an
+extra high-level expert is trained on Gtot, which is obtained
+by fusing all refined single networks following the same fu-
+sion procedure. Through mutual information maximization,
+Gijeffectively captures the intricate information shared
+across the single networks. Since directly computing mu-
+tual information is impractical due to the complexity of
+network-structured data, we reformulate the network-level
+mutual information in terms of node-level representations.
+Theorem 4.1. Given a network Gwith label Y, the cross-
+entropy loss Lcls(Z, Y)is the upper bound of −I(G;Y),
+where Zdenotes the node representations of all nodes in
+network G. (Sun et al., 2022; Li et al., 2024)
+Following Theorem 4.1, the original LEcould be eventually
+transformed as follows:
+ˆLE=VX
+i=1Lcls(Zi;Y)−VX
+i=1VX
+j=i+1Ilb(Zi;Zj)
+−VX
+i=1Ilb(Zi;Ztot)−VX
+i=1X
+j̸=iIlb(Zi;Zij)(3)
+Here, Ilb(Zi;Zj)is the lower bound of the mutual infor-
+mation I(Zi;Zj)between networks iandj(Liang et al.,
+4Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+2024):
+Ilb(Zi;Zj) =Ezi,zj+∼p(zi,zj)
+zj∼p(zj)
+logexpf(zi, zj+)P
+Nexpf(zi, zj)
+(4)
+where f(·,·)is a score critic approximated using a non-
+linear projection and cosine similarity. The joint distribution
+of node representations from networks iandjis denoted by
+p(zi, zj), while the marginal distribution is represented by
+p(zi). The representations ziandzj+are positive samples
+of each other, indicating that they correspond to the same
+node in networks iandj, respectively. Implementation
+details are summarized in Appendix E.
+4.3. Large Margin Mechanism
+Since each expert demonstrates a distinct knowledge pref-
+erence for different node patterns, it is crucial to bridge the
+information gap across various knowledge fields. Unlike tra-
+ditional expert coordination mechanisms (Chen et al., 2022),
+which rely on a subset of experts, we advocate leveraging
+all experts in the decision-making process. This approach
+reduces the risk of amplifying noise caused by the reliance
+on a limited number of experts. To promote collaboration
+rather than competition among experts, we introduce a con-
+fidence tensor, defined as follows.
+Definition 4.2. A confidence tensor Θ∈Rc×c×kis defined,
+where cdenotes the number of categories and krepresents
+the number of experts. The (r, s, t)-th element of Θ, denoted
+asΘrst, quantifies the credibility assigned by the t-th expert
+to the prediction that a sample belongs to the r-th category
+when it actually belongs to the s-th category.
+For the convenience of calculation, we empirically expand
+the confidence tensor ΘintoRc×kc. Therefore, the final
+collaborative prediction result of the experts is obtained
+according to the following formula
+ˆyi=argmax
+j=1...c(S(Θgi))j(5)
+where giis the collection of various expert opinions. For any
+expert Ejand a given node vi, the corresponding decision
+could be represented as a vector Ej(vi)∈Rc×1, thus gi
+is(E⊤
+1(vi), E⊤
+2(vi),···, E⊤
+k(vi))⊤.S(·)represents the
+softmax operation on the internal vectors.
+By leveraging the confidence tensor, all experts contribute
+to the final decision-making process with varying levels
+of influence. However, in a multi-expert collaborative sys-
+tem, significant errors within the cognitive framework of
+a particular expert have the potential to mislead the entire
+system. To mitigate this risk and improve generalization, it
+is crucial to design a loss function to encourage consistency
+among experts. This loss function is designed to maximize
+the margin between the most confidently predicted outcomeand the second most confidently predicted outcome among
+experts. By doing so, it ensures greater consistency in pre-
+dictions made by different experts, enhancing the overall
+robustness and reliability of the system. This objective can
+be formalized as follows:
+YT
+i(Yi⊙ S(Θgi))−max 2(S(Θgi)) (6)
+with the symbol max 2(v)representing the second largest
+element in vector v,Yiis the i-th column of Y, while
+the symbol ⊙represents the Hadamard product. It is
+worth noting that the definition of margin itself is given by
+max 1(S(Θgi))−max 2(S(Θgi)), where max 1(v)is the
+highest value in vector v. It is proved that using our defined
+margin (Eq. 6) leads to the same optimization direction as
+the original definition while avoiding approximations (Yuan
+et al., 2024).
+However, the max function is non-smooth, and the max 2
+function is both non-convex and non-smooth. Therefore,
+we use the logsumexp function to approximate the max
+function, which is expressed as f(v) =1
+αlogPc
+j=1eαvj
+,
+where αis a quite large constant. By setting the maximum
+value of the vector to be operated upon to zero and then
+applying the max operator, max 2function can be effectively
+computed by:
+max 2(S(Θgi)) =1
+αlog
+cX
+j=1eα(S(Θgi)−Yi⊙S(Θgi))j
+
+(7)
+By adding up the loss term for each node, the generalization
+loss is:
+M=NX
+i=1Y⊤
+i(Yi⊙ S(Θgi))
+−NX
+i=11
+αlog
+cX
+j=1eα(S(Θgi)−Yi⊙S(Θgi))j
+(8)
+On the other hand, it is also crucial to ensure that predic-
+tions from all experts always tend to be correct. We use
+cross-entropy loss to measure the distance from the correct
+opinion.
+C=−NX
+i=1(Y⊤
+i(Yi⊙log(S(Θgi)))) (9)
+Thus two types of losses are incorporated during the tensor
+optimization phase, where CandMare specifically de-
+signed to enhance the correctness and consistency of expert
+decisions. Accordingly, the overall loss function can be
+5Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+formulated as
+L=C −ηM+VX
+i=1Lcls(Zi, Y)−VX
+i=1VX
+j=i+1Ilb(Zi;Zj)
+−VX
+i=1Ilb(Zi;Ztot)−VX
+i=1X
+j̸=iIlb(Zi;Zij)
+(10)
+where ηis a given hyperparameter to balance CandM,
+additional experiments are conducted to show the impact of
+all parameters appeared in the optimization phase.
+5. Theoretical Analysis
+In this section, we establish that our proposed model sat-
+isfies key properties, including partial convexity, Lipschitz
+continuity and robust generalization ability. Additionally,
+we present the optimization algorithm and prove its conver-
+gence to critical points of the model’s loss function. Partial
+convexity indicates that the loss function remains convex
+with respect to certain intermediate variables, ensuring a
+smoother optimization landscape and reducing the risk of
+getting trapped in local optima.
+Theorem 5.1. L(Θgi)is a convex function with respect to
+(Θgi).
+Theorem 5.2. Lis Lipschitz continuous, and the Lipschitz
+constant L≤2√ck 
+1 +γ+γ
+ceα
+.
+Consider performing gradient descent for Titerations,
+yielding a sequence of points {Θ0,Θ1, . . . , Θt, . . . , ΘT−1}.
+Due to the Lipschitz continuity of the loss function, the norm
+of the gradient at the point with the smallest gradient con-
+verges to zero. This implies that, with a sufficiently large
+number of iterations, there must be at least one critical point
+within the set of points visited during the process.
+Theorem 5.3. For a step size η≤1
+L, the gradient descent
+algorithm generates a sequence {Θt}such that
+min
+t=0,1,...,T∥∇L(Θt)∥2≤2(L(Θ0)− L∗)
+ηT(11)
+where L∗is the minimum value of L(Θ).
+The above theorem proves that CoE is theoretically conver-
+gent. All proofs for theorems in this section are given in
+Appendix D.
+Moreover, as generalization capability serves as a critical
+metric for evaluating model performance, we conduct a
+systematic analysis of the proposed model’s generalization
+behavior in this study.
+We begin by formalizing the learning setup. Let X × Y
+be the input-label space with |Y|=Cclasses. We havean i.i.d. training sample S={(xi, yi)}n
+i=1. A CoE clas-
+sifier f:X → ∆Cproduces a probability vector over C
+classes, denoted f(x) = ( f1(x), . . . , f C(x))⊤. We define
+the margin of fat(x, y)as
+γf(x, y) :=fy(x)−max
+y′̸=yfy′(x), (12)
+a large positive γf(x, y)implies a strong preference for
+the correct class y. The usual 0-1 loss is ℓ0-1(f;x, y) :=
+I[arg max cfc(x)̸=y].We also define ℓ0-1
+γ(f;x, y) :=
+I[γf(x, y)≤0]and the ramp loss:
+ℓγ(f;x, y) :=
+
+0, γ f(x, y)≥γ,
+1−γf(x, y)
+γ,0< γf(x, y)< γ,
+1, γ f(x, y)≤0.(13)
+One has ℓ0-1(f;x, y)≤ℓ0-1
+γ(f;x, y)≤ℓγ(f;x, y).
+Letℓγ◦ Fbe the set of ramp-loss functions induced by a
+hypothesis class F, where each f∈ F is a CoE classifier.
+Then for any δ >0, with probability at least 1−δover an
+i.i.d. sample S={(xi, yi)}n
+i=1, the following holds for all
+f∈ F:
+E[ℓ0−1(f)]≤E(x,y)∼D[ℓ0−1
+γ(f;x, y)]
+≤1
+nnX
+i=1ℓγ(f;xi, yi) +2
+γRn(F) + 3s
+log(2
+δ)
+2n,(14)
+whereRn(F)is the Rademacher complexity of the CoE
+margin-function class.
+In CoE framework, we have kexperts E1, . . . , E k,
+each outputs a probability vector Ej(x)∈RC.
+Besides, we have a confidence tensor Θand we
+form g(x) = [ E1(x)⊤, . . . , E k(x)⊤]⊤, then f(x) =
+softmax 
+Θg(x)
+.And the margin is γf(x, y) =
+[Θg(x)]y−max y′̸=y[Θg(x)]y′.
+Here we assume ||Θ||F≤BΘand||Ej(x)||2≤Ge,∀j, x,
+where BΘandGecould be considered as two bounds.
+Hence ||g(x)||2≤√
+k Ge. LetFΘbe the set of CoE margin
+functions γf.
+ThenRn(FΘ)≤CMCBΘGe√
+k√n, where CMCis a constant
+on the order ofp
+ln(C), reflecting the multi-class max
+operation. With probability at least 1−δ, allf∈ FΘsatisfy
+E
+ℓ0-1(f)
+≤1
+nnX
+i=1ℓγ 
+f;xi, yi
++2BΘGe√
+k
+γ√n+3s
+log(2
+δ)
+2n.
+(15)
+6Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+Table 1. Accuracy ±STD comparison (%) under the setting of network node classification task. The highest result is highlighted with red
+boldface and the runner-up is bolded . The symbol “OOM” means out of memory.
+Methods ACM DBLP Yelp MAG Amazon
+GCN 89.04±0.62 80.70±0.30 74.03±1.61 74.60±0.13 93.12±0.28
+HAN 91.30±0.33 81.28±0.23 52.04±1.55 OOM OOM
+LDS 88.55±0.42 87.17±0.81 87.11±1.99 OOM OOM
+GRCN 92.00±0.20 91.10±0.43 78.30±0.99 OOM 95.27±0.31
+IDGL 92.33±1.17 79.29±0.58 88.28±5.08 OOM 93.68±0.45
+ProGNN 92.09±1.21 91.10±1.46 60.43±1.36 OOM 93.12±0.47
+GEN 90.82±2.69 91.33±0.70 69.22±3.04 OOM 97.51±1.05
+NodeFormer 90.73±0.88 80.26±0.66 90.76±1.03 77.14±0.19 97.72±0.38
+SUBLIME 91.81±0.26 91.49±0.32 90.91±0.75 67.45±0.22 97.02±0.93
+STABLE 89.18±4.41 79.00±1.98 89.77±3.36 OOM 97.76±0.51
+GSR 91.39±1.17 77.83±0.38 84.46±0.79 OOM 94.10±0.79
+HDMI 91.45±0.43 90.14±0.38 73.75±0.87 69.25±0.12 95.08±0.47
+InfoMGF 92.81±0.29 91.45±0.37 92.01±0.42 77.32±0.09 97.78±0.21
+GMoE 90.29±0.41 91.18±0.43 91.92±0.37 77.27±0.54 97.78±0.41
+Mowst 85.69±1.01 89.69±0.99 91.31±1.17 77.40±0.11 97.89±0.44
+CoE 94.21±0.14 92.27±0.24 93.40±0.12 78.37±0.16 98.01±0.09
+It shows that ensuring a large margin γand controlling the
+norms BΘ(confidence-tensor magnitude) and Ge(expert-
+output scale) leads to a generalization guarantee. Increasing
+the number of experts khas a√
+kimpact, illustrating the
+trade-off between model capacity and margin-based guar-
+antees. Due to CoE mechanism limits the number of k
+andBΘ, while Geis fixed, thus our model has remarkable
+generalization ability.
+6. Experiments
+In this section, we present comprehensive experiments to
+thoroughly evaluate the effectiveness and robustness of our
+proposed CoE model. Specifically, we address the follow-
+ing research questions: RQ1: Does CoE outperform SOTA
+models on multiplex and multimodal network datasets?
+RQ2: What is the impact of the key components on model
+performance? RQ3: How robust is the CoE algorithm when
+subjected to structural attacks or noise?
+6.1. Experimental Setup
+Datasets. To thoroughly evaluate the effectiveness of
+CoE, we conduct experiments on five benchmark network
+datasets, including citation networks (ACM (Yun et al.,
+2019) and DBLP (Yun et al., 2019)), review networks (Yelp
+(Lu et al., 2019) and Amazon (McAuley & Leskovec, 2013;
+Gao et al., 2023)), and a large-scale citation network MAG
+(Wang et al., 2020). Additionally, we perform experiments
+on four multimodal datasets: ESP, Flickr, IAPR, and NUS
+(Xia et al., 2023), which lack structural information. Thus,
+we first build network structures with KNN for them. De-tailed descriptions of these datasets can be found in Ap-
+pendix C.
+Baselines. We evaluate the performance of our method
+by comparing it against a range of existing approaches.
+In the network data scenario, we select two supervised
+structure-fixed GNNs—GCN (Kipf & Welling, 2016) and
+HAN (Wang et al., 2019)—as well as six supervised GSL
+methods: LDS (Franceschi et al., 2019), GRCN (Yu et al.,
+2021), IDGL (Chen et al., 2020), ProGNN (Jin et al., 2020),
+GEN (Wang et al., 2021), and NodeFormer (Wu et al., 2022).
+Additionally, we include three unsupervised GSL methods:
+SUBLIME (Liu et al., 2022), STABLE (Li et al., 2022), and
+GSR (Zhao et al., 2023), and two unsupervised multiplex
+methods: HDMI (Jing et al., 2021) and InfoMGF (Shen
+et al., 2024b). Finally, we also compare against two state-
+of-the-art Graph-MoE methods: GMoE (Wang et al., 2024)
+and Mowst (Zeng et al., 2024).
+For multimodal data, we select four representative GSL
+methods, including two supervised approaches (ProGNN
+and GEN) and two unsupervised approaches (SUBLIME
+and InfoMGF). Additionally, we incorporate three multi-
+view methods (i.e., DCCAE (Wang et al., 2015), CPM-Nets
+(Zhang et al., 2020), and ECML (Xu et al., 2024)) and two
+multimodal methods (i.e., MMDynamics (Han et al., 2022)
+and QMF (Zhang et al., 2023)). Classification accuracy is
+used as the evaluation metric. To ensure a fair comparison,
+we adopt GCN as the backbone encoder for all models. For
+methods that cannot support multiplex networks or multi-
+modal data learning, we conduct training on each network
+or modality separately and report the maximum accuracy
+results. Implementation details can be found in Appendix
+7Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+B.
+6.2. Node Classification Performance (RQ1)
+The experimental results, presented in Table 1, show that
+our proposed CoE achieves the highest accuracy across all
+datasets, consistently outperforming existing approaches.
+Notably, CoE surpasses recent Graph-MoE and multiplex
+methods. Furthermore, our method exhibits the lowest stan-
+dard deviation in most cases, highlighting its stability.
+The multimodal data classification results are summarized
+in Table 2, where the topology is first inferred from the
+initial feature matrix. As shown in the table, our pro-
+posed CoE significantly outperforms baseline models, in-
+cluding both network learning frameworks and multimodal
+approaches. These results highlight CoE’s stability and
+adaptability across diverse settings.
+Table 2. Accuracy ±STD comparison ( %±σ) under the setting
+of multimodal data classification task.
+Methods ESP Flickr IAPR NUS
+ProGNN 78.52±0.16 67.77±0.24 67.63±0.11 62.78±0.39
+GEN 79.05±0.24 63.33±0.22 67.75±0.29 64.26±0.19
+SUBLIME 77.53±0.14 64.97±0.18 62.06±0.11 52.54±0.16
+InfoMGF 79.23±0.24 68.79±0.22 68.75±0.18 63.80±0.19
+DCCAE 78.48±0.45 67.98±0.24 60.73±0.64 62.39±0.27
+CPM-Nets 80.09±0.59 69.49±0.46 67.33±0.45 65.34±0.54
+ECML 71.21±0.11 62.41±0.16 58.89±0.18 64.34±0.14
+MMDynamics 80.19±0.56 65.44±0.73 66.59±0.41 63.64±0.68
+QMF 80.14±0.34 69.24±0.34 69.08±0.45 65.42±0.37
+CoE 81.11±0.05 70.24±0.09 71.04±0.04 66.80±0.32
+6.3. Ablation Studies (RQ2)
+To assess the contribution of each component in the CoE
+framework, we design four variant models by systematically
+modifying or removing specific elements and evaluate their
+performance on the node classification task. The experimen-
+tal results, presented in Table 3, provide insights into the
+impact of each component on overall performance.
+Effectiveness of the expert learning components. Recall that
+CoE employs GSL with a two-level expert design, incor-
+porating both low-level and high-level experts. To analyze
+their contributions, we construct two variant models: one
+without high-level experts (w/o-HE) and another without
+the GSL process (w/o-GSL). The results show that both
+variants exhibit degraded performance, with the absence
+of high-level experts having a more pronounced negative
+impact compared to the removal of GSL.
+Effectiveness of expert collaboration mechanism. To evalu-
+ate the effectiveness of the proposed large-margin mecha-Table 3. Performance ( %±σ) of CoE and its variants.
+Variants ACM DBLP Yelp MAG Amazon
+RF 93.39±0.19 91.48±0.14 91.61±0.21 76.91±0.16 97.56±0.12
+WRF 93.64±0.15 91.97±0.22 93.05±0.16 77.45±0.18 97.78±0.26
+w/o HE 91.25±0.17 90.71±0.26 68.27±0.32 78.05±0.27 94.50±0.16
+w/o GSL 93.60±0.29 91.13±0.24 93.14±0.33 77.97±0.34 97.87±0.24
+CoE 94.21±0.14 92.27±0.24 93.40±0.12 78.37±0.16 98.01±0.09
+nism, we replace it with two variants: the original random
+forest (RF) (Rigatti, 2017) and the weighted random for-
+est (WRF) (Winham et al., 2013). Experimental results
+confirm the superiority of our large-margin mechanism.
+Notably, WRF outperforms RF, suggesting that different
+experts demonstrate varying levels of proficiency for differ-
+ent node patterns. This finding highlights the importance
+of designing a tailored expert collaboration mechanism to
+accommodate specific scenarios.
+6.4. Robustness Analysis (RQ3)
+To assess the robustness of our proposed method, we in-
+troduce perturbations to the network structure by randomly
+adding or removing edges in the ACM dataset. The propor-
+tion of modified edges is varied from 0 to 0.9 to simulate
+different levels of attack intensity. For comparison, we
+evaluate several baseline methods, including the traditional
+fixed-structure model (GCN), the graph structure learning
+method (SUBLIME), the multiplex learning method (In-
+foMGF), and the expert-mixing approach (Mowst).
+0.0 0.2 0.4 0.6 0.8
+Add edge rate94
+91
+88
+85
+82
+79
+76
+73
+70
+67Accuracy(%)
+Ours
+SUBLIME
+GCN
+Mowst
+InfoMGF
+(a) Adding edges
+0.0 0.2 0.4 0.6 0.8
+Delete edge rate94
+91
+88
+85
+82
+79
+76
+73Accuracy(%)
+Ours
+SUBLIME
+GCN
+Mowst
+InfoMGF (b) Deleting edges
+Figure 3. Robustness analysis on ACM.
+The experimental results, presented in Figure 3, clearly
+show that as perturbations increase, the performance of
+all methods degrades to varying extents. However, graph
+structure learning methods (CoE, InfoMGF, and SUBLIME)
+exhibit strong resilience. In particular, CoE benefits signifi-
+cantly from GSL, allowing it to accurately detect and correct
+disrupted network connections. Even under extreme per-
+turbations, CoE consistently outperforms other methods,
+demonstrating exceptional robustness in maintaining stable
+performance and effectively mitigating the adverse effects
+of structural distortions.
+8Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+Furthermore, we investigate the impact of two key hyperpa-
+rameters in CoE: the optimization-phase parameters γand
+α. We set these parameters to {50,100,200,500,1000}.
+As illustrated in Figure 4, CoE shows low sensitivity to
+variations in both γandα, demonstrating the remarkable
+stability of our model. Additional sensitivity analyses for
+other hyperparameters are provided in Appendix F.
+50 100 200 500 1000
+94
+92
+90
+88Accuracy(%)
+ACM
+DBLP
+Yelp
+(a) Sensitivity on γ
+50 100 200 500 1000
+94
+92
+90
+88Accuracy(%)
+ACM
+DBLP
+Yelp (b) Sensitivity on α
+Figure 4. Sensitivity analysis on critical hyper-parameters.
+7. Conclusion
+In this work, we propose and analyze a novel paradigm for
+fusing diverse information through heterogeneous multiplex
+networks. Our approach introduces an expert mechanism
+into network learning and provides a tailored optimization
+strategy. We present a comprehensive theoretical analysis
+alongside extensive experiments, comparing our method
+with various baselines. To the best of our knowledge, this
+is the first study to explore expert learning in multiplex
+networks. Unlike traditional approaches that emphasize
+expert competition, our work pioneers a shift toward expert
+cooperation, advocating for further research on applying
+the Collaboration of Experts mechanism to more complex
+scenarios.
+Impact Statement
+This paper aims to advance the field of Machine Learning.
+While our work has potential societal implications, we do
+not identify any specific concerns that require particular
+emphasis at this stage.
+Acknowledgments
+This work was supported by the National Natural Science
+Foundation of China (No. U24A20323).
+References
+Baranwal, A., Fountoulakis, K., and Jagannath, A. Effects
+of graph convolutions in multi-layer networks. arXiv
+preprint arXiv:2204.09297 , 2022.
+Chen, T. and Guestrin, C. Xgboost: A scalable tree boostingsystem. In Proceedings of the 22nd acm sigkdd inter-
+national conference on knowledge discovery and data
+mining , pp. 785–794, 2016.
+Chen, Y ., Wu, L., and Zaki, M. Iterative deep graph learn-
+ing for graph neural networks: Better and robust node
+embeddings. Advances in neural information processing
+systems , 33:19314–19326, 2020.
+Chen, Z., Deng, Y ., Wu, Y ., Gu, Q., and Li, Y . Towards un-
+derstanding the mixture-of-experts layer in deep learning.
+Advances in neural information processing systems , 35:
+23049–23062, 2022.
+Emami, S. and Mart ´ınez-Mu ˜noz, G. Sequential training of
+neural networks with gradient boosting. IEEE Access , 11:
+42738–42750, 2023.
+Fatemi, B., El Asri, L., and Kazemi, S. M. Slaps: Self-
+supervision improves structure learning for graph neural
+networks. Advances in Neural Information Processing
+Systems , 34:22667–22681, 2021.
+Federici, M., Dutta, A., Forr ´e, P., Kushman, N., and Akata,
+Z. Learning robust representations via multi-view in-
+formation bottleneck. arXiv preprint arXiv:2002.07017 ,
+2020.
+Franceschi, L., Niepert, M., Pontil, M., and He, X. Learning
+discrete structures for graph neural networks. In Interna-
+tional conference on machine learning , pp. 1972–1982.
+PMLR, 2019.
+Fu, X., Zhang, J., Meng, Z., and King, I. Magnn: Metapath
+aggregated graph neural network for heterogeneous graph
+embedding. In Proceedings of the web conference 2020 ,
+pp. 2331–2341, 2020.
+Gao, Y ., Wang, X., He, X., Liu, Z., Feng, H., and Zhang,
+Y . Addressing heterophily in graph anomaly detection:
+A perspective of graph spectrum. In Proceedings of the
+ACM Web Conference 2023 , pp. 1528–1538, 2023.
+Han, J. Mining heterogeneous information networks by
+exploring the power of links. In International conference
+on discovery science , pp. 13–30. Springer, 2009.
+Han, Z., Yang, F., Huang, J., Zhang, C., and Yao, J. Multi-
+modal dynamics: Dynamical fusion for trustworthy mul-
+timodal classification. In Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition ,
+pp. 20707–20717, 2022.
+He, Y .-X., Wu, Y .-C., Qian, C., and Zhou, Z.-H. Mar-
+gin distribution and structural diversity guided ensemble
+pruning. Machine Learning , 113(6):3545–3567, 2024.
+9Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+Huang, Y ., Mo, Y ., Liu, Y ., Nie, C., Wen, G., and Zhu,
+X. Multiplex graph representation learning via bi-level
+optimization. In Proceedings of the Thirty-Third Inter-
+national Joint Conference on Artificial Intelligence , pp.
+2081–2089, 2024.
+Jin, W., Ma, Y ., Liu, X., Tang, X., Wang, S., and Tang, J.
+Graph structure learning for robust graph neural networks.
+InProceedings of the 26th ACM SIGKDD international
+conference on knowledge discovery & data mining , pp.
+66–74, 2020.
+Jing, B., Park, C., and Tong, H. Hdmi: High-order deep
+multiplex infomax. In Proceedings of the Web Conference
+2021 , pp. 2414–2424, 2021.
+Kim, S., Lee, D., Kang, S., Lee, S., and Yu, H. Learning
+topology-specific experts for molecular property predic-
+tion. In Proceedings of the AAAI Conference on Artificial
+Intelligence , volume 37, pp. 8291–8299, 2023.
+Kipf, T. N. and Welling, M. Semi-supervised classifica-
+tion with graph convolutional networks. In International
+Conference on Learning Representations , 2016.
+Li, J., Su, Q., Yang, Y ., Jiang, Y ., Wang, C., and Xu, H.
+Adaptive gating in mixture-of-experts based language
+models. arXiv preprint arXiv:2310.07188 , 2023a.
+Li, K., Liu, Y ., Ao, X., Chi, J., Feng, J., Yang, H., and He,
+Q. Reliable representations make a stronger defender:
+Unsupervised structure refinement for robust gnn. In
+Proceedings of the 28th ACM SIGKDD Conference on
+Knowledge Discovery and Data Mining , pp. 925–935,
+2022.
+Li, S., Song, J., Zhang, B., Ruan, G., Xie, J., and Wang,
+C. Gagsl: Global-augmented graph structure learn-
+ing via graph information bottleneck. arXiv preprint
+arXiv:2411.04356 , 2024.
+Li, Z., Sun, X., Luo, Y ., Zhu, Y ., Chen, D., Luo, Y ., Zhou, X.,
+Liu, Q., Wu, S., Wang, L., et al. Gslb: The graph structure
+learning benchmark. Advances in Neural Information
+Processing Systems , 36, 2023b.
+Liang, P. P., Deng, Z., Ma, M. Q., Zou, J. Y ., Morency,
+L.-P., and Salakhutdinov, R. Factorized contrastive learn-
+ing: Going beyond multi-view redundancy. Advances in
+Neural Information Processing Systems , 36, 2024.
+Liu, Y ., Zheng, Y ., Zhang, D., Chen, H., Peng, H., and Pan,
+S. Towards unsupervised deep graph structure learning.
+InProceedings of the ACM Web Conference 2022 , pp.
+1392–1403, 2022.Lu, Y ., Shi, C., Hu, L., and Liu, Z. Relation structure-aware
+heterogeneous information network embedding. In Pro-
+ceedings of the AAAI conference on artificial intelligence ,
+volume 33, pp. 4456–4463, 2019.
+Mao, Y ., Yan, X., Guo, Q., and Ye, Y . Deep mutual informa-
+tion maximin for cross-modal clustering. In Proceedings
+of the AAAI Conference on Artificial Intelligence , vol-
+ume 35, pp. 8893–8901, 2021.
+McAuley, J. J. and Leskovec, J. From amateurs to connois-
+seurs: modeling the evolution of user expertise through
+online reviews. In Proceedings of the 22nd international
+conference on World Wide Web , pp. 897–908, 2013.
+Mo, Y ., Lei, Y ., Shen, J., Shi, X., Shen, H. T., and Zhu,
+X. Disentangled multiplex graph representation learning.
+InInternational Conference on Machine Learning , pp.
+24983–25005. PMLR, 2023.
+Rigatti, S. J. Random forest. Journal of Insurance Medicine ,
+47(1):31–39, 2017.
+Shen, Z., He, H., and Kang, Z. Balanced multi-relational
+graph clustering. In Proceedings of the 32nd ACM In-
+ternational Conference on Multimedia , pp. 4120–4128,
+2024a.
+Shen, Z., Wang, S., and Kang, Z. Beyond redundancy:
+Information-aware unsupervised multiplex graph struc-
+ture learning. Advances in neural information processing
+systems , 2024b.
+Shi, C., Yang, C., Zhu, X., Wang, J., Wu, T., Li, S., Cai, D.,
+Yang, Y ., and Meng, Y . Unchosen experts can contribute
+too: Unleashing moe models’ power by self-contrast.
+arXiv preprint arXiv:2405.14507 , 2024a.
+Shi, Y ., Wang, Y ., Lang, W., Zhang, J., Dong, P., and Li, A.
+Mixture of experts for node classification. arXiv preprint
+arXiv:2412.00418 , 2024b.
+Sun, Q., Li, J., Peng, H., Wu, J., Fu, X., Ji, C., and Philip,
+S. Y . Graph structure learning with variational informa-
+tion bottleneck. In Proceedings of the AAAI Conference
+on Artificial Intelligence , volume 36, pp. 4165–4174,
+2022.
+Sun, Y . and Han, J. Mining heterogeneous information
+networks: a structural analysis approach. ACM SIGKDD
+explorations newsletter , 14(2):20–28, 2013.
+Wang, H., Jiang, Z., You, Y ., Han, Y ., Liu, G., Srinivasa, J.,
+Kompella, R., Wang, Z., et al. Graph mixture of experts:
+Learning on large-scale graphs with explicit diversity
+modeling. Advances in Neural Information Processing
+Systems , 36, 2024.
+10Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+Wang, K., Shen, Z., Huang, C., Wu, C.-H., Dong, Y ., and
+Kanakia, A. Microsoft academic graph: When experts are
+not enough. Quantitative Science Studies , 1(1):396–413,
+2020.
+Wang, R., Mou, S., Wang, X., Xiao, W., Ju, Q., Shi, C., and
+Xie, X. Graph structure estimation neural networks. In
+Proceedings of the web conference 2021 , pp. 342–353,
+2021.
+Wang, W., Arora, R., Livescu, K., and Bilmes, J. On deep
+multi-view representation learning. In International con-
+ference on machine learning , pp. 1083–1092. PMLR,
+2015.
+Wang, X., Ji, H., Shi, C., Wang, B., Ye, Y ., Cui, P., and
+Yu, P. S. Heterogeneous graph attention network. In The
+world wide web conference , pp. 2022–2032, 2019.
+Winham, S. J., Freimuth, R. R., and Biernacka, J. M. A
+weighted random forests approach to improve predictive
+performance. Statistical Analysis and Data Mining: The
+ASA Data Science Journal , 6(6):496–505, 2013.
+Wu, F., Souza, A., Zhang, T., Fifty, C., Yu, T., and Wein-
+berger, K. Simplifying graph convolutional networks. In
+International conference on machine learning , pp. 6861–
+6871. PMLR, 2019.
+Wu, Q., Zhao, W., Li, Z., Wipf, D. P., and Yan, J. Node-
+former: A scalable graph structure learning transformer
+for node classification. Advances in Neural Information
+Processing Systems , 35:27387–27401, 2022.
+Xia, W., Wang, T., Gao, Q., Yang, M., and Gao, X. Graph
+embedding contrastive multi-modal representation learn-
+ing for clustering. IEEE Transactions on Image Pro-
+cessing , 32:1170–1183, 2023. doi: 10.1109/TIP.2023.
+3240863.
+Xu, C., Si, J., Guan, Z., Zhao, W., Wu, Y ., and Gao, X.
+Reliable conflictive multi-view learning. In Proceedings
+of the AAAI Conference on Artificial Intelligence , vol-
+ume 38, pp. 16129–16137, 2024.
+Yu, D., Zhang, R., Jiang, Z., Wu, Y ., and Yang, Y . Graph-
+revised convolutional network. In Machine Learning and
+Knowledge Discovery in Databases: European Confer-
+ence, ECML PKDD 2020, Ghent, Belgium, September 14–
+18, 2020, Proceedings, Part III , pp. 378–393. Springer,
+2021.
+Yu, P., Fu, C., Yu, Y ., Huang, C., Zhao, Z., and Dong, J.
+Multiplex heterogeneous graph convolutional network.
+InProceedings of the 28th ACM SIGKDD Conference on
+Knowledge Discovery and Data Mining , pp. 2377–2387,
+2022.Yuan, J., Chen, H., Luo, R., and Nie, F. A margin-
+maximizing fine-grained ensemble method. arXiv
+preprint arXiv:2409.12849 , 2024.
+Yun, S., Jeong, M., Kim, R., Kang, J., and Kim, H. J. Graph
+transformer networks. Advances in neural information
+processing systems , 32, 2019.
+Zeng, H., Lyu, H., Hu, D., Xia, Y ., and Luo, J. Mixture
+of weak and strong experts on graphs. In The Twelfth
+International Conference on Learning Representations ,
+2024.
+Zhang, C., Cui, Y ., Han, Z., Zhou, J. T., Fu, H., and Hu, Q.
+Deep partial multi-view learning. IEEE transactions on
+pattern analysis and machine intelligence , 44(5):2402–
+2415, 2020.
+Zhang, Q., Wu, H., Zhang, C., Hu, Q., Fu, H., Zhou, J. T.,
+and Peng, X. Provable dynamic fusion for low-quality
+multimodal data. In International conference on machine
+learning , pp. 41753–41769. PMLR, 2023.
+Zhao, J., Wang, X., Shi, C., Hu, B., Song, G., and Ye, Y .
+Heterogeneous graph structure learning for graph neural
+networks. In Proceedings of the AAAI conference on
+artificial intelligence , volume 35, pp. 4697–4705, 2021.
+Zhao, J., Wen, Q., Ju, M., Zhang, C., and Ye, Y . Self-
+supervised graph structure refinement for graph neural
+networks. In Proceedings of the Sixteenth ACM Interna-
+tional Conference on Web Search and Data Mining , pp.
+159–167, 2023.
+Zhou, Z.-H. and Tan, Z.-H. Learnware: Small models do
+big. Science China Information Sciences , 67(1):112102,
+2024.
+11Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+A. Notations
+Table 4. Notations used in our paper.
+Notation Description
+V, N, d f The number of networks/nodes/features.
+G={G1, ..., G V}The heterogeneous multiplex network.
+Gv={Av, Xv} Thev-th original network.
+Av∈ {0,1}N×NThe adjacency matrix of v-th original network.
+Dv The diagonal matrix denoting the degree matrix of Av.
+Xv∈RN×df The attribute matrix of v-th network.
+Xi∈Rdf The feature vector of node i.
+G′
+v={A′
+v, Xv} Thev-th refined network.
+Gtot The network fused by all refined single networks.
+Ei The expert integrates the node predictor and the corresponding networks in its knowledge field.
+Y The label information.
+Hv∈RN×df The node embeddings of the original network from the attention learner.
+r The order of graph aggregation.
+K The number of neighbors in KNN.
+c The number of categories.
+gi The collection of various expert opinions.
+k The number of experts.
+Θ The confidence tensor.
+I(G′
+i;G′
+j) The mutual information between the i-th and j-th refined networks.
+M The generalization loss contributed by all nodes.
+C The cross-entropy loss to measure the distance from the correct opinion.
+Lcls The cross-entropy loss.
+LE The training loss of all experts.
+L The overall loss function.
+max 1(v) The largest element in vector v.
+max 2(v) The second largest element in vector v.
+α Constant used in computing max 2.
+η A given hyperparameter in L.
+f(·,·) The score critic approximated using a non-linear projection and cosine similarity.
+S(·) The softmax operation on the internal vectors.
+σ(·) The non-linear activation function.
+⊙ The Hadamard product.
+B. Hyper-parameters Settings and Infrastructure
+Table 5. Details of the hyper-parameters settings.
+Dataset E lr d h d K r L τ c α γ
+ACM 800 0.001 128 64 15 2 2 0.2 100 100
+DBLP 400 0.005 64 32 10 2 2 0.2 100 100
+Yelp 400 0.0001 128 64 15 2 2 0.2 100 100
+MAG 400 0.001 256 64 15 3 3 0.2 100 100
+Amazon 400 0.001 256 64 15 3 3 0.2 100 100
+All experiments are conducted on a platform equipped with an Intel(R) Xeon(R) Gold 5220 CPU and an NVIDIA A800
+80GB GPU, using PyTorch 2.1.1 and DGL 2.4.0. Each experiment is run five times and the average results are reported.
+Our model is trained using the Adam optimizer. The hyper-parameter settings for all datasets are presented in Table 5.
+Here, Erepresents the number of training epochs, which is tuned within the set {100,200,400,500,800,1000}andlr
+is the learning rate which is searched within the set {0.0001,0.005,0.001,0.005,0.01}. The hidden layer dimension dh
+and the representation dimension dof the graph encoder GCN are tuned within the set {32,64,128,256}. The number of
+neighbors KforKNN is searched within the set {5,10,15,20,30}. The order of graph aggregation rand the number of
+layers Lin GCN are set to either 2 or 3, which is in line with the common layer count of GNN models (Baranwal et al.,
+2022). The temperature parameter τcin the contrastive loss is fixed at 0.2. In the optimization phase, the parameters αandγ
+12Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+are both set to 100. For the large-scale datasets MAG and Amazon, when computing the contrastive loss for estimating
+mutual information, we use a batch size of 2560 and process the data in batches.
+C. Datasets
+Table 6. Statistics of multi-relational network datasets.
+Dataset Nodes Relation type Edges Features Classes Training Validation Test
+ACM 3,025Paper-Author-Paper (PAP) 26,4161,902 3 600 300 2,125Paper-Subject-Paper (PSP) 2,197,556
+DBLP 2,957Author-Paper-Author (APA) 2,398334 4 600 300 2,057Author-Paper-Conference-Paper-Author (APCPA) 1,460,724
+Yelp 2,614Business-User-Business (BUB) 525,718
+82 3 300 300 2,014 Business-Service-Business (BSB) 2,475,108
+Business-Rating Levels-Business (BLB) 1,484,692
+MAG 113,919Paper-Paper (PP) 1,806,596128 4 40,000 10,000 63,919Paper-Author-Paper (PAP) 10,067,799
+Amazon 11,944User-Product-User (UPU) 175,608
+25 2 4,777 2,388 4,779 User-Star rating-User (USU) 3,566,479
+User-Review-User (UVU) 1,036,737
+Table 7. Statistics of multimodal datasets.
+Dataset Classes Total Features Modal Training Validation Test
+IAPR 6 7,855 100 Image,text 3,926 1,961 1,968
+ESP 7 11,032 100 Image,text 5,514 2,754 2,764
+Flickr 7 12,154 100 Image,text 6,076 3,037 3,041
+NUS 8 20,000 100 Image,text 10,000 5,000 5,000
+We choose 5 multi-relational network benchmark datasets in total. The statistics of the datasets are provided in Table 6.
+Following (Shen et al., 2024a), here we extract MAG from the original OGBN-MAG (Wang et al., 2020), remaining the
+nodes from the four largest classes.
+We also select 4 multimodal datasets where the topological structure is not given. For a fair comparison, we adopt the
+identical data processing approach as described in (Mao et al., 2021) on all datasets, where the 4096-dimensional (D) image
+features are extracted by VGG-16 net and 768D text features are extracted by BERT net. To further improve efficiency,
+Principal Component Analyses (PCA) is employed to reduce the dimensions of both image features and text features to 100.
+The examples and descriptions of the aforementioned multimodal datasets are shown in Table 7.
+D. Proof
+D.1. Proof of theorem 5.1
+Proof. Assume that L(Θgi)can be divided into three parts: L1,L2, andL3, which are expressed as follows:
+L1=NX
+i=1− 
+Y⊤
+ilog(S(Θgi))
+,L2=NX
+i=1 
+γY⊤
+iS(Θgi)
+L3=γNX
+i=11
+αlog
+cX
+j=1eα(S(Θgi)−Yi⊙S(Θgi))j
+(16)
+L1andL2are evidently convex with respect to (Θgi). Considering L3, the exponential term α(S(Θgi)−Yi⊙ S(Θgi))j
+is a linear transformation with respect to S(Θgi). Since the log-sum-exp function is well known to be convex, and the
+composition of a convex function with a linear function preserves convexity, the proof is complete.
+13Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+D.2. Proof of theorem 5.2
+Proof. It is not difficult to prove that, through a variable substitution, the derivative∂L3
+∂Θpqcan be equivalently written as:
+∂L3
+∂Θpq=Pc
+j=1I(j̸=m)eαS(Θg)jS(Θg)j(gqδjp− S(Θg)pgq)
+γ−1(Pc
+j=1eαS(Θg)j−eαS(Θg)m+ 1)(17)
+Where I(j̸=m)is the indicator function, which is 0 when j=mand 1 otherwise. It is evident that |gq| ≤1,|δmp| ≤1,
+and|S(Θg)pgq| ≤1. Therefore, the following inequality holds:
+∂L1
+∂Θpq≤ |gqδmp|+|S(Θg)pgq| ≤2 (18)
+Similarly, we have:∂L2
+∂Θpq≤γ|S(Θg)m| · |gqδmp− S(Θg)pgq| ≤2γ (19)
+Based on the fact that |Pc
+j=1eαS(Θg)j−eαS(Θg)m+ 1| ≤c, it is not difficult to prove that∂L3
+∂Θpq≤2γeα
+c. For any Θand
+˜Θ, by the mean value theorem, there exists σsuch that:
+L(Θ)− L(˜Θ) =∇L(σ)·(Θ−˜Θ) (20)
+Applying the Cauchy-Schwarz inequality, we obtain:
+|L(Θ)− L(˜Θ)| ≤ ∥∇L (σ)∥F∥Θ−˜Θ∥F (21)
+where ∥∇L(σ)∥2
+F=P
+p,q
+∂L
+∂Θpq2
+Θ=σ. From the bounds on∂L3
+∂Θpq, we know:
+∂L
+∂Θpq
+Θ=σ≤2
+1 +γ+γeα
+c
+(22)
+Thus, summing over all p, qgives:
+∥∇L(σ)∥2
+F≤X
+p,q
+2
+1 +γ+γeα
+c2
+= 4k2c
+1 +γ+γeα
+c2(23)
+Taking the square root, the Lipschitz constant is therefore bounded by:
+2k√c
+1 +γ+γeα
+c
+(24)
+D.3. Proof of theorem 5.3
+Proof. Since the gradient of L(Θ)is Lipschitz continuous with constant L, we have the inequality:
+L(Θt+1)≤ L(Θt) +⟨∇L(Θt),Θt+1−Θt⟩+L
+2∥Θt+1−Θt∥2(25)
+Substituting the update rule Θt+1= Θ t−η∇L(Θt), we get:
+L(Θt+1)≤ L(Θt)−η∥∇L(Θt)∥2+η2L
+2∥∇L(Θt)∥2(26)
+Rearranging terms yields:
+L(Θt+1)≤ L(Θt)−
+η−η2L
+2
+∥∇L(Θt)∥2(27)
+14Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+To ensure a decrease in the objective function, choose η≤1
+L. For such η, the term η−η2L
+2is positive, and thus:
+L(Θt+1)≤ L(Θt)−η
+2∥∇L(Θt)∥2(28)
+Summing over t= 0,1, . . . , T −1, we have:
+L(Θ0)− L(Θt)≥η
+2T−1X
+t=0∥∇L(Θt)∥2(29)
+SinceL(Θ)is lower-bounded by L∗, it follows that:
+L(Θ0)− L∗≥η
+2T−1X
+t=0∥∇L(Θt)∥2(30)
+Dividing through by ηTgives:
+1
+TT−1X
+t=0∥∇L(Θt)∥2≤2(L(Θ0)− L∗)
+ηT(31)
+Thus, there exists some t∈ {0,1, . . . , T −1}such that:
+∥∇L(Θt)∥2≤2(L(Θ0)− L∗)
+ηT(32)
+This proves the result.
+E. Methodology Details
+Following the approach proposed in previous works (Liu et al., 2022; Shen et al., 2024b), after constructing the cosine
+similarity matrix of Hv, we implement post-processing techniques to ensure that A′
+vexhibits the characteristics of sparsity,
+non-negativity, symmetry, and normalization. For the convenience of discussion, the subscript vis omitted hereinafter.
+KNN for sparsity. In most applications, a fully connected adjacency matrix often has limited practical significance and
+incurs high computational costs. Therefore, we employ the K-Nearest Neighbors ( KNN) operation to sparsify the learned
+graph. For each node, we retain the edges with the top- Kvalues and set the others to 0, thereby obtaining the sparse
+adjacency matrix Asp. Note that we employ efficient KNN with locality-sensitive hashing (Fatemi et al., 2021) to enhance
+the model’s scalability. This approach avoids the resource-intensive computation and storage of explicit similarity matrices,
+reducing the complexity from O(N2)toO(NB), where Nis the number of nodes and Bis the batch size of the sparse
+KNN.
+Symmetrization and Activation. Since real-world connections are typically bidirectional, we symmetrize the adjacency
+matrix. Additionally, the weight of each edge should be non-negative. Given the input Asp, these operations can be expressed
+as follows:
+Asym=σ(Asp) +σ(Asp)⊤
+2(33)
+where σ(·)represents a non-linear activation implemented by the ReLU function.
+Normalization. The normalized adjacency matrix with self-loops can be obtained as follows:
+A′= (˜Dsym)−1
+2˜Asym(˜Dsym)−1
+2 (34)
+where ˜Dsymis the degree matrix of ˜Asymwith self-loops. Subsequently, for each view, we can acquire the adjacency matrix
+A′
+v, which possesses the desirable properties of sparsity, non-negativity, symmetry, and normalization.
+15Cooperation of Experts: Fusing Heterogeneous Information with Large Margin
+F. Additional experiments
+5 10 15 20 25
+K94
+92
+90
+88Accuracy(%)
+ACM
+DBLP
+Yelp
+Figure 5. Sensitivity analysis on K.
+Subsequent to the research on αandγ, an investigation into the sensitivity of the number of neighbors Kis conducted. The
+values of Kspan a set of {5,10,15,20,25}. As depicted in Figure 5, despite the significance of Kas a model parameter,
+the CoE demonstrates minimal sensitivity to its variations. This finding suggests that the performance of the model remains
+relatively stable across a broad spectrum of Kvalues, thereby indicating its robustness in response to changes in this
+parameter.
+16

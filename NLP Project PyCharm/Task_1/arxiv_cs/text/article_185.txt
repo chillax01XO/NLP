@@ -1,0 +1,864 @@
+arXiv:2505.20471v1  [cs.CV]  26 May 2025WeatherEdit: Controllable Weather Editing with 4D Gaussian Field
+Chenghao Qian1, Wenjing Li1, Yuhu Guo2, Gustav Markkula1
+1University of Leeds,
+2Carnegie Mellon University
+Input Weather: Sunny
+{Moderate Rain }
+{Heavy Snow }
+{Light Fog}
+WeatherEdit EditedResults 
+Timestep 𝑡𝑡+𝑖𝑖View 𝑣𝑣2
+Timestep 𝑡𝑡
+View 𝑣𝑣2
+Timestep 𝑡𝑡
+Timestep 𝑡𝑡 Timestep 𝑡𝑡+𝑖𝑖𝑣𝑣1 𝑣𝑣2 𝑣𝑣3𝑣𝑣1 𝑣𝑣2 𝑣𝑣3
+Figure 1. Realistic, Controllable Weather Editing. Given input sunny weather images from multi-view cameras across multiple
+timesteps, WeatherEdit can generate high-fidelity scenarios under diverse weather conditions ( e.g., foggy, snowy, and rainy) with var-
+ious severity levels ( e.g., light, moderate, heavy) based on user instructions. The best view is in zoom.
+Abstract
+In this work, we present WeatherEdit, a novel weather
+editing pipeline for generating realistic weather effects with
+controllable types and severity in 3D scenes. Our approach
+is structured into two key components: weather background
+editing and weather particle construction. For weather
+background editing, we introduce an all-in-one adapter that
+integrates multiple weather styles into a single pretrained
+diffusion model, enabling the generation of diverse weather
+effects in 2D image backgrounds. During inference, we de-
+sign a Temporal-View (TV-) attention mechanism that fol-
+lows a specific order to aggregate temporal and spatial in-
+formation, ensuring consistent editing across multi-frame
+and multi-view images. To construct the weather particles,
+we first reconstruct a 3D scene using the edited images and
+then introduce a dynamic 4D Gaussian field to generate
+snowflakes, raindrops and fog in the scene. The attributes
+and dynamics of these particles are precisely controlled
+through physical-based modelling and simulation, ensuring
+realistic weather representation and flexible severity adjust-
+ments. Finally, we integrate the 4D Gaussian field with the
+3D scene to render consistent and highly realistic weather
+effects. Experiments on multiple driving datasets demon-
+strate that WeatherEdit can generate diverse weather effectswith controllable condition severity, highlighting its poten-
+tial for autonomous driving simulation in adverse weather.
+See project page: https://jumponthemoon.github.io/w-edit
+1. Introduction
+3D weather editing (3D-WE) aims to generate multi-
+weather conditions in 3D scenes based on user instructions.
+It is a crucial task in computer vision with applications in
+autonomous driving[26, 27], augmented reality, and virtual
+scene synthesis [1]. While existing methods range from
+2D-based image techniques [36, 41] to 3D neural rendering
+[17], developing a unified framework that enables multiple
+realistic weather effects and controllable severity remains
+a significant challenge. For instance, style transfer methods
+can modify weather backgrounds but are typically limited to
+a single effect. Diffusion models [39] enable multi-weather
+synthesis; however, they often lack fine-grained control and
+struggle with spatial and temporal consistency across multi-
+ple images [30]. More recently, ClimateNeRF [17] utilized
+Neural Radiance Fields (NeRF) to model snow accumula-
+tion and flooding in 3D space. However, this method is lim-
+ited to static weather events and leaves the overall weather
+tone unchanged, lacking full-scene atmospheric realism.
+In 3D-WE, achieving both realism andcontrollability
+is important. Realism ensures high-quality weather effectsand we consider it involves three aspects: (R1) Distortion-
+free editing : The editing results should be free from visual
+distortions and unnatural artifacts. (R2) Temporal-view con-
+sistency : Weather effects and scene elements should main-
+tain consistency across both time steps and different view-
+points. (R3) Dynamic weather effects : Weather particles,
+such as snowflakes and raindrops, should be realistically
+simulated to reflect natural weather dynamics. On the other
+hand, controllability ensures flexible and fine-grained edit-
+ing of weather effects, enabling users to customize vari-
+ous aspects of the scene, including: (C1) Type: The sys-
+tem should support the selection and transition between
+different weather types ( e.g., rainy, snowy, foggy). (C2)
+Event : The system should allow users to specify whether
+the weather effect is static (e.g., previously fallen snow) or
+ongoing (e.g., falling snow). (C3) Severity : Users should be
+able to adjust the intensity of weather conditions, such as
+changing light rain to heavy rain or increasing fog density.
+Unfortunately, current approaches have not explicitly con-
+sidered the above aspects, leading to limitations in realism
+and controllability.
+In this paper, we consider the above points and introduce
+a novel weather editing framework named WeatherEdit that
+enables realistic, and controllable weather generation in
+3D scenes. WeatherEdit follows a progressive 2D-to-4D
+transformation process, starting with 2D image-based back-
+ground editing, transitioning to 3D scene reconstruction,
+and culminating in 4D dynamic weather simulation. This is
+achieved through a two-step process: weather background
+editing andweather particle modeling .
+In weather background editing, we first introduce an ef-
+ficient all-in-one adapter that integrates multiple weather
+styles into a single model, allowing for the fine-tuning of
+a diffusion model to achieve distortion-free rendering (R1)
+and flexible weather type control (C1). Second, to ensure
+temporal-view consistency (R2), we introduce a parameter-
+free attention mechanism that aligns different viewpoints
+simultaneously and the same viewpoint over time. For
+weather particle modeling, we propose a novel 4D Gaus-
+sian field, representing weather particles as 3D Gaussians
+with attributes such as color and density while simulating
+their motion. This enables dynamic weather effects (R3)
+and severity (C3). Rather than simulating an infinite field
+for full-scene coverage, we optimize efficiency by recycling
+particles within a compact field and aligning it with the ren-
+dering camera, maintaining both realism and performance.
+The final weather effect is rendered from the 4D Gaus-
+sian field combined with the 3D scene reconstructed using
+edited weather background images. This flexible combina-
+tion allows control over weather events, such as a wet road
+without rainfall (static) or a heavy snowstorm with limited
+visibility (dynamic), enabling adjustable event (C2).
+The main points of this paper are summarized below.1. Based on our analysis of weather editing characteris-
+tics, we introduce WeatherEdit, a comprehensive and ef-
+ficient framework for realistic and controllable weather
+generation. Compared with existing methods which fo-
+cus on either background editing or static weather ef-
+fects, a progressive 2D-to-4D transformation process in
+WeatherEdit enhances adaptability across a wider range
+of scenarios.
+2. We introduce an all-in-one adapter to enable a diffusion
+model for multi-weather (snowy, rainy and fog) synthe-
+sis and a Temporal-View attention to ensure consistent
+editing across multi-frame and multi-view.
+3. We design a 4D Gaussian field for weather particle
+modeling, enabling plausible simulation of raindrops,
+snowflakes, and fog with controllable severity.
+4. We demonstrate WeatherEdit’s effectiveness in generat-
+ing realistic, consistent, and controllable weather effects
+in 3D driving scenes, showcasing its applicability to real-
+world scenarios.
+2. Related Work
+Weather Effect Synthesis
+Existing methods can be categorized into 2D-based and
+3D-based approaches. 2D-based methods utilize genera-
+tive models [24, 43] to synthesize weather effects in single
+images. [14, 33] use CycleGAN [43] to edit weather con-
+ditions, while [32] applies GAN-based inpainting to gen-
+erate flooding with water reflections. [11] uses graphical
+model to produce fog effects, while [26] finetunes a diffu-
+sion model to various weather effects. Conventional 3D-
+based methods [8, 10, 34, 44] use graphical simulation to
+model weather in 3D space. More recently, [17] has in-
+troduced neural rendering techniques for creating weather
+backgrounds but it is limited to post-weather event.
+Diffusion Model for Image Editing
+Diffusion models [12, 21, 29] have significantly advanced
+image editing, enabling flexible and controllable modifica-
+tions. Methods such as ControlNet [42] and T2I-Adapter
+[23] introduce trainable modules to guide the generation
+process, allowing for fine-grained control over diffusion-
+based outputs. InstructPix2Pix [4] enables interactive edit-
+ing with textual instructions by trained on image-text pairs.
+TurboEdit [7] employs a pseudo-guidance approach to en-
+hance edit magnitude without introducing artifacts.
+Although these methods support diverse styles, they are
+not specifically designed for weather editing, often distort-
+ing content or generating overly artistic effects. Moreover,
+they primarily focus on single-image editing, lacking spatial
+and temporal consistency across multiple frames and views.
+These limitations restrict their ability to generate realistic
+and consistent weather effects within the same scene.Text 
+Encoder
+SegMapText Prompt{ Snowy, Rainy, 
+Foggy }
+Snowy
+Rainy
+Foggy2D Image EncoderDecoderU-Net
+Self-attention
+Cross- attentionStep1
+All-in-one AdapterWeather Background Editing Step2 Weather Particle Construction
+ Tuned Parameters 
+…
+Multi -time & Multi -view Aligned ResultsText 
+Encoder
+Text Prompt
+{Rainy }
+EncoderDecoder
+U-Net
+Self-
+attention
+Cross- attention…
+TV-Attention
+3D  Scene
+Reconstruction
+Light Moderate Heavy
+Local Field Alignment
+Attribute 
+Modelling
+4D Gaussians3D Gaussians
+Dynamic 
+Simulation
+{Moderate }
+3D Model
+…1All-in-one Adapter Training
+2Temporal -View Consistency Alignment
+Edited ResultsControllable Elements
+…
+Views
+𝒗𝒗𝟐𝟐
+𝒕𝒕𝒏𝒏𝒕𝒕𝟏𝟏
+…𝒕𝒕𝟏𝟏𝒗𝒗𝟏𝟏𝒗𝒗𝟐𝟐𝒗𝒗𝒎𝒎
+𝒕𝒕𝒏𝒏
+𝒕𝒕𝟏𝟏
+𝒗𝒗𝟏𝟏 𝒗𝒗𝟐𝟐 𝒗𝒗𝒎𝒎Figure 2. Overview of the WeatherEdit Framework. (a) Weather Background Editing: An all-in-one adapter enables the synthesis of
+diverse weather effects (e.g., snow, rain, fog) from text prompts and segmentation maps. Inference takes multi-frame and multi-view images
+as input, using temporal-view (TV) attention to ensure consistency.(b) Weather Particle Construction: A 4D Gaussian field, initialized from
+3D Gaussians, undergoes attribute modeling and dynamic simulation, allowing user-controlled weather intensity (e.g., light, moderate,
+heavy). Local field alignment ensures seamless integration of the reconstructed 3D scene with dynamic weather effects.
+3D Scene Reconstruction.
+Neural Radiance Fields (NeRF) [22]and 3D Gaussian Splat-
+ting (3DGS) [15] are leading techniques for 3D scene recon-
+struction from multi-view images. NeRF encodes scenes
+implicitly with a neural network, while 3DGS represents
+them explicitly as 3D Gaussians, enabling faster rendering.
+Their versatility allows applications in dynamic scene re-
+construction [6, 38], content creation [19, 20], and artifact
+removal [25]. While [17] extends NeRF to model smog,
+snow, and floods for weather simulation but focuses only
+on static weather conditions, leaving dynamic weather phe-
+nomena unaddressed.
+3. Methods
+In order to generate realistic and controllable multi-weather
+scenes in 3D, we propose a novel framework, WeatherEdit,
+which follows a progressive 2D-to-4D transformation pro-
+cess. As illustrated in Fig. 2, WeatherEdit adopts a two-
+step weather editing pipeline: weather background editing
+and weather particle construction. The first step generates
+distortion-free, spatially and temporally aligned 2D images
+with edited backgrounds, while the second step dynamically
+models weather particles with various types and severity
+levels. The joint association of these two steps enables the
+flexible generation of multi-weather scenes.
+(b) All-in -one Adapter (a) Single Adapter
+Pretrained 
+Weights
+Pretrained 
+Weights
+…{ Snowy } { Rainy }
+Pretrained 
+Weights
+…{ Snowy },…, { Rainy }Figure 3. Single Adapter vs. All-in-One Adapter. (a) Utilizes
+separate adapters for each weather style (e.g., snow, rain, fog),
+while (b) employs a unified all-in-one adapter for efficient multi-
+style adaptation. Blue box highlights adapters to be trained.
+3.1. Weather Background Editing
+All-in-one Adapter. Existing diffusion-based methods of-
+ten suffer from scene deformations and excessive styl-
+ization, making them unsuitable for precise and realistic
+weather editing. While [24] achieves effective weather edit-
+ing by fine-tuning separate models with multiple LoRA [13]
+adapters (shown in Fig. 3 (a)) for different styles, it requires
+multiple retraining steps, leading to inefficiencies in storage
+and training time.
+To address this, we propose an all-in-one LoRA adapter
+that injects multiple weather styles into a single model (as
+shown in Fig. 3 (b),), eliminating the need for training mul-
+tiple ones. Let W0∈Rd×kbe the pre-trained weights, x
+the input image, and ithe weather style ( e.g., snowy, rainy,
+foggy) specified by text prompt. Each style is associated𝒕𝒕+𝟏𝟏𝒗𝒗−𝟏𝟏 𝒗𝒗+𝟏𝟏 𝒗𝒗Temporal
+𝒕𝒕𝒕𝒕−𝟏𝟏Viewpoint
+v+1
+t
+Q
+Temporal View
+Frame t+1View v+1 Frame t
+K
+V
+K K
+ Kv+1tv+1t+1
+V V
+ Vv+1t
+Frame t -1 Frame t
+ View v -1 View v+1Kvt
+Vvtv+1
+t+1v+1
+t
+v+1
+tv+1t-1
+v+1t-1
+View vFigure 4. Temporal-View Attention for Consistent Weather
+Editing. The TV-attention aggregates information across both ad-
+jacent frames and center viewpoints to ensure multi-frame and
+multi-view consistency. The top section illustrates frame and
+viewpoint relationships, indicated by directional arrows, while the
+bottom section visualizes the attention operations.
+with a low-rank matrix Li. The adapted model’s forward
+pass is then computed as h=W0x+Lix.
+Moreover, since weather effects depend on scene seman-
+tics (e.g., snow on trees, rain on roads), we enhance edit-
+ing by conditioning the model on semantic segmentation
+maps. Given an input image xwith its corresponding seg-
+mentation map M, we encode the latent representation as
+z0=E(x, M). The model fine-tuning objective is then for-
+mulated as:
+L(∆θ) =Eϵ,t
+∥ϵ−ϵθ+∆θ(√atz0+√
+1−atϵ, t, p )∥2
+,
+(1)
+where ϵis the sampled Gaussian noise, ϵθ+∆θis the UNet
+model with LoRA, and pis the text prompt. This formu-
+lation ensures editing results are semantically relevant, en-
+abling precise and context-aware weather editing.
+Temporal-View Consistency Allignment. After fine-
+tuning the model, multi-time and multi-view images are
+processed to achieve background scene editing. However,
+processing each image independently can lead to inconsis-
+tencies across time steps and viewpoints due to the inherent
+stochasticity of generative models. To address this, we pro-
+pose a Temporal-View (TV-) attention mechanism to enable
+our model to integrate information from adjacent frames
+and key viewpoints.
+In multi-view driving datasets, cameras are typically po-
+sitioned in a structured left-front-right arrangement. The
+front camera captures overlapping content with both the
+left and right cameras, providing shared information across
+views. To leverage this, we design the view attention to al-low the left and right cameras to query the center (front)
+view:
+SAttnv
+t=Softmax 
+Qv
+t·Kv,T
+t√
+d!
+Vv
+t, (2)
+where Qv
+tis the query from view v, and Kv
+t, Vv
+tare the
+key and value derived from the center view v. This ensures
+that each side viewpoint aggregates information from the
+center view, maintaining result consistency across different
+perspectives.
+To preserve temporal coherence, each frame tqueries its
+adjacent frames ( t−1andt+ 1), allowing it to integrate
+contextual information from both past and future frames.
+The temporal attention is defined as:
+TAttnv
+t=Softmax 
+Qv
+t·KT(t),T
+v√
+d!
+VT(t)
+v, (3)
+where T(t) ={t−1, t+1}, ensuring that each frame incor-
+porates temporal context, preventing inconsistencies across
+consecutive frames. The final attention is computed as a
+weighted sum of self-, view-, and temporal-attention, with
+λcontrolling the balance to ensure global coherence across
+frames and viewpoints:
+Attnv
+t=λ·SelfAttnv
+t+(1−λ)·(SAttnv
+t+TAttnv
+t).(4)
+In this way, we can effectively reduce inconsistencies
+caused by independent image processing, producing a co-
+herent editing effect across both view and temporal do-
+mains.
+3.2. Weather Particle Construction
+Real-world weather is inherently regional, and we incorpo-
+rate this into weather particle construction. Specifically, we
+propose a 4D Gaussian field , initialized with 3D Gaussians
+carrying physical attributes ( e.g., color, quantity) to model
+raindrops, fog, and snowflakes through attribute modeling.
+To enhance realism, we apply dynamic simulation to create
+realistic weather effects.
+To generate a consistent falling particle effect, a large
+number of particles must be simulated, which is computa-
+tionally expensive. To address this, we model particle be-
+havior within a localized field, dynamically recycling parti-
+cles as they exit while aligning the field with the rendering
+camera. This ensures a continuous and realistic weather ef-
+fect while optimizing computational efficiency.
+Attribute Modeling. Different weather particles exhibit
+unique characteristics. For instance, snowflakes are typi-
+cally white with irregular shapes, while raindrops are trans-
+parent and elongated. To accurately capture these dif-
+ferences, we define a set of characteristic attributes AtoAttribute Modelling
+Opacity4DGaussian Field 
+Quantity
+Position
+Rotation
+Scale
+Color  
+Dynamic Simulation
+Gaussians Field 
+Construction
+3D Scene 
+Local Field AlignmentRendering
+Results
+Fog
+Rain
+Snow
+Field Size
+…Figure 5. Weather Particle Construction Process. The attribute
+modeling stage defines weather properties to construct a 4D Gaus-
+sian field, which then undergoes dynamic simulation to model fog,
+rain, and snow. Local field alignment ensures seamless integration
+with the 3D scene, enabling realistic weather rendering.
+distinguish different types of weather particles: Ai=
+{Ci, Pi, Ri, Si, Oi}, where, Cidefines color, Pirepresents
+position, RiandSicorrespond to rotation and scale, and
+Oisignifies opacity. The index irefers to a specific type of
+weather, such as snow, rain, or fog. Additionally, we model
+these parameters using Gaussian distributions, expressed
+asG(Ai), to mimic the natural randomness of real-world
+weather. To compose the 4D Gaussian field, we use Bito
+define the particle field size and combine it with quantity q,
+which controls the number of weather particles to regulate
+density. The final attributes of the 4D Gaussian field, are
+denoted as: Wi={G(Ai), q, B i}.
+Dynamic Simluation. Real-world weather is dynamic,
+with particles falling under gravity and wind. Instead of
+simulating these forces in detail, we approximate motion
+using a constant directional velocity, updating each parti-
+cle’s position as follows:
+Pj(t+ ∆t) =Pj(t) +Dj·∆t, (5)
+where
+Pj(t) =x(t), y(t), z(t)⊤,Dj=Dx, Dy, Dz⊤(6)
+represent the position and velocity of the j-th particle, re-
+spectively. Here, x(t), y(t), z(t)denote the spatial coor-
+dinates of the particle at time t, while Dx, Dy, Dzare its
+velocity components along the x,y, and zaxes.
+To efficiently simulate a consistent falling particle effect,
+we recycle particles when they exit the predefined simula-
+tion field by resetting their positions. The position of the
+i-th particle, Pi(t), is updated as follows:Pi(t) =
+
+pmax−δp,ifpi(t)< p min,
+pmin+δp,ifpi(t)> p max,
+Pi(t), otherwise .(7)
+Here, pminandpmaxdenotes the field’s lower and upper
+bounds, while δprepresents the offset to the field bounds.
+Local Field Alignment. After obtaining the reconstructed
+3D scene and simulated 4D Gaussian field, we combine
+them to render the final weather scene. In large-scale envi-
+ronments, the weather field must scale appropriately to en-
+sure a consistent weather effect. However, as scene size in-
+creases, more particles are required, leading to higher com-
+putational costs. To mitigate this, we constrain the size of
+the 4D Gaussian field and limit the number of particles,
+aligning its motion with the rendering camera. This keeps
+the field relatively stationary to the camera while preserving
+internal dynamics and intended weather effects. Given cam-
+era poses T0att0andTtatt, the relative transformation
+is:
+∆T=TtT−1
+0. (8)
+The particle’s position, initially Pj(t0), updates as:
+Pj(t) = ∆ RPj(t0) + ∆ t, (9)
+where ∆Rand∆tare the rotation and translation from
+∆T. In this way, we can ensure consistent weather dynam-
+ics in large-scale scenes with minimal computational cost.
+4. Experiments
+4.1. Experimental Setup
+Dataset. To develop the weather dataset for all-in-one
+adapter fine-tuning, we extract 1,237 image pairs from
+the BDD100K [40], MUSE [3], and ACDC [31] datasets.
+Each pair contains a normal-weather image and an adverse-
+weather image, including snowy, rainy, and foggy condi-
+tions, along with a corresponding ground-truth semantic
+segmentation map. For weather editing, we selected eight
+scenes with multi-view image sequences from the Pandaset
+[37], Waymo Open Dataset [35], nuScenes [5], and KITTI-
+360 [18] datasets.
+Implementation details. We implement the 2D editing
+model using CycleGAN-Turbo[24] and train on a single
+RTX A6000. The 4D Gaussian field and 3D scene recon-
+struction is based on OmniRe[6] and 3DGS[15], with both
+training and rendering performed on a single RTX 3090.
+Evaluation Metrics. To evaluate edited weather back-
+ground quality, we use the cosine similarity of CLIP [28]
+image embeddings (CLIP-S) to measure content preserva-
+tion and the directional CLIP similarity [9] (CLIP-DS) to
+assess alignment with text instructions. To assess consis-
+tency across temporal and spatial dimensions, we calculate(b) ControlNet (e) WeatherEdit (Ours) (d) TurboEdit
+ (a) Original
+ (c) IntructPix2PixScene 1:Rainy Scene 2: FoggyView 1 View 2 View 1 View 2 View 1 View 2 View 1 View 2 View 1 View 2
+Frame 1
+Frame 2
+Frame 1Frame 2Figure 6. Comparison with 2D-based Editing Methods. We show (a) original images with weather editing results from (b) ControlNet,
+(c) InstructPix2Pix, (d) TurboEdit, and (e) Ours. Existing methods often suffer from over-stylization, content removal, and inconsistencies
+in spatial and temporal coherence. In contrast, our method preserves scene integrity while ensuring multi-view and multi-frame consistency,
+producing realistic and temporally coherent weather effects across viewpoints and frames.
+(a) Original Scene (b) 3D Stylization (c) Climate NERF (d) WeatheEdit (Ours )
+Figure 7. Comparison with 3D-based weather synthesis methods in editing snowy .3D Stylization (b) produces only a subtle snowy
+effect on the sidewalk, while (c) ClimateNeRF present unnatural snow cover. In contrast, our method (d) synthesizes a realistic snowy
+effect while ensuring a perceptually convincing atmosphere.
+the warp error to measure temporal coherence between ad-
+jacent frames and employ the Bhattacharyya distance [2] to
+quantify color distribution similarity across viewpoints.
+4.2. Experimental Results
+We present both qualitative and quantitative comparisons of
+our weather background editing method against 2D-based
+approaches, including ControlNet [42], InstructPix2Pix [4],
+and TurboEdit [7], as well as 3D-based methods, such as
+3D stylization [16] and ClimateNeRF [17]. For dynamic
+weather effects, we apply qualitative analysis, i.e.,control-
+lable weather simulation, to demonstrate the results.
+Weather Background Editing Comparison. For the com-
+parison of 2D-based methods, as shown in Fig. 6, we ob-
+serve that ControlNet tends to over-stylize the image, al-
+tering its original content. InstructPix2Pix produces a rea-
+sonable effect; however, the effect is inconsistent across ad-
+jacent frames and viewpoints. While TurboEdit accurately
+stylizes the image, it significantly modifies the scene con-
+tent (e.g., turning pedestrians into water reflections and trees
+in a foggy scene). In contrast, our method achieves a real-
+istic and coherent weather transformation while preserving
+scene integrity, as also indicated by the highest CLIP-DS
+and CLIP-S scores shown in Tab. 1.
+For 3D-based methods, 3D stylization produces only aControlNet InstructPix2Pix TurboEdit Ours
+CLIP-DS Score ↑ 0.2905 0.2953 0.2573 0.3023
+CLIP-S Score ↑ 0.5944 0.6908 0.6762 0.7495
+Table 1. Comparison with 2D-based weather background editing.
+3D Stylization ClimateNeRF Ours
+CLIP-DS Score ↑ 0.2253 0.2674 0.2834
+CLIP-S Score ↑ 0.8417 0.7022 0.7513
+Table 2. Comparison with 3D-based weather background editing.
+barely perceptible snowy effect on the vegetation, aligning
+with the highest CLIP-S score(shown in Tab. 2), which in-
+dicates minimal change in the scene. In contrast, ClimateN-
+eRF generates an unrealistic snowcover on the road sur-
+face due inaccurate scene geometry. Furthermore, neither
+method is capable of modifying the overall scene tone to
+accurately reflect the intended weather conditions. In con-
+trast, our approach not only synthesizes a realistic snowy
+effect but also adjusts the scene tone to create a coherent
+and perceptually convincing snowy atmosphere, as also in-
+dicated by the highest CLIP-DS score in Tab. 2.
+Controllable Weather Simulation. A key advantage of our
+method over existing approaches is its ability to generatePandaset Waymo Nuscenes
+(a) Original Driving Scene
+(b) Edited Weather Background
+(c) Controlled Weather SeverityLight Moderate Heavy
+Rainy Foggy SnowyFigure 8. Controllable Weather Effect and Severity in Driving Scenes. WeatherEdit can modify (a) original driving scenes from
+Pandaset, Nuscenes, and Waymo datasets by generating (b) snowy, foggy, and rainy effects while preserving scene structure. Additionally,
+it enables (c) controllable weather severity, adjusting precipitation intensity from light to heavy for realistic and flexible weather simulation.
+dynamic weather effects while precisely controlling both
+the type and severity of weather conditions. Additionally,
+we can flexibly choose whether to introduce weather parti-
+cles and, if included, adjust their intensity with fine granu-
+larity. This allows for a range of scenarios, from a static wet
+road surface without active rainfall to a heavy snowstorm
+with dense snowfall obscuring visibility. To visualize the
+results, we render edited weather backgrounds and modu-
+late weather severity. The weather backgrounds, depicted in
+Fig. 8b, are reconstructed from 2D editing outputs, with the
+specific weather type determined by the selected adapters
+during the editing phase. Following this, weather particles
+are introduced by applying the 4D Gaussian field, as illus-
+trated in Figure Fig. 8c. By adjusting particle attributes such
+as color and opacity, we can simulate various weather parti-
+cles, including snowflakes, raindrops and fog. Moreover, by
+controlling particle quantity, shape, rotation, and velocity,
+we can achieve different levels of severity—ranging from
+light to moderate to heavy precipitation. Our approach en-
+ables highly flexible and physics-consistent scene manipu-
+lation, allowing for the realistic simulation of diverse envi-
+ronmental conditions.
+5. Ablation Studies
+We conduct ablation studies on the semantic condition in-
+put for finetuning, temporal-view attention for image edit-
+ing and modular design in weather particle construction.
+Semantic Conditioned Input. We investigate the effective-
+ness of semantic-conditioned input by comparing editing
+results and FID score with and without it. By computing theSelf-attention only w View w Temporal Full
+Warp-error ↓ 0.043 0.042 0.039 0.041
+Bhattacharyya distance ↓ 0.272 0.253 0.261 0.245
+Table 3. Ablation on Temporal-View Attention.
+cross-attention map using ”snowy” in the text prompt, we
+observe that semantic conditioning enhances the model’s
+response to sidewalks and trees, aligning weather effects
+more accurately with scene structures, as shown in Fig. 11.
+Additionally, the model achieves a lower average FID value
+across different weather conditions compared to cases with-
+out semantic conditioning, demonstrating its effectiveness
+in capturing weather characteristics during training.
+Temporal-View Attention. As shown in Fig. 10, with-
+out TV-Attention, view 3 exhibits inconsistent editing ef-
+fects, with a darker tone across two frames compared to
+view 2. After incorporating temporal-view attention, view
+3 achieves more consistent editing, displaying a similar
+snowy effect between adjacent views and frames. For the
+qualitative analysis shown in Tab. 3, temporal attention re-
+duces warp error, indicating improved temporal coherence,
+while spatial attention results in a lower Bhattacharyya
+distance, suggesting more consistent editing across view-
+points. By integrating both temporal and view attention, the
+full implementation achieves the lowest Bhattacharyya dis-
+tance while maintaining a balanced reduction in warp error,
+ensuring globally consistent editing results.
+Modular Design for 4D Gaussian Field. As shown in
+Fig. 9, without 2D background editing (b), the scene con-(a) Original Scene (b) w/o Weather Background Editing (c) w/o Attribute Modelling
+(d) w/o Dynamic Simulation (e) w/o Local Field Alignment (f) Full implementation
+Figure 9. Ablation Study on WeatherEdit modules. (b) Without Weather Background Editing, the scene lacks atmospheric tone. (c)
+Without Attribute Modeling, the scene presents unrealistic, blobs instead of proper weather effects. (d) Without Dynamic Simulation,
+particles remain static in the camera view (highlighted in red circle), lacking natural motion. (e) Without Local Field Alignment, weather
+particles stay fixed at their initial position and disappear as the camera moves forward (highlighted in red line). (f) Full Implementation
+generates a realistic weather background with natural, scene-consistent weather dynamics.
+Frame 1
+Frame 2
+(a) w/o TV -AttentionView 1 View 3 View 2
+(b) w TV -AttentionFrame 1
+Frame 2View 1 View 3 View 2
+Figure 10. Effect of Temporal-View (TV) Attention on Consis-
+tency. Without TV-Attention (a) , inconsistencies appear across
+frames and viewpoints, as highlighted in the red box. With TV-
+Attention, weather effects maintain consistent scene appearance
+across frames and viewpoints.
+tains weather particles but lacks an overall weather tone.
+During attribute modeling, we randomly initialize 4D Gaus-
+sians, resulting in a scene filled with colorful blobs (c) in-
+stead of realistic weather effects. Without dynamic simula-
+tion (d), the particles remain relatively static in the camera
+view, lacking the natural falling motion. Without local field
+alignment (e), weather particles stay fixed at the initial posi-
+tion of the scene. As the camera moves forward, the weather
+particles gradually disappear instead of persisting through-
+out the scene. In contrast, when all modules are included,
+the full implementation (f) produces a scene with a realistic
+weather background and natural weather dynamics.
+(b) w Semantic (c) w/o SemanticSeg map
+(a) InputImageCross attention map with ‘ snowy ’
+73.975.7
+w Semantic 
+w/o Semantic FIDFigure 11. Ablation on semantic conditioned input. Left (a)
+shows the input image paired with a segmentation map. With se-
+mantic conditioning (b), snowfall presents more prominent feature
+(highlighted in red box) and aligns better with scene structures
+compared to (c) without it, while cross-attention maps highlight
+improved view awareness.
+6. Conclusion
+We introduce WeatherEdit, a novel 4D weather edit-
+ing framework capable of generating realistic weather ef-
+fects—including fog, rain, and snow—with precise control
+over their severity. Our approach leverages an all-in-one
+adapter that enables a diffusion model to transform normal-
+weather images into diverse weather styles. To main-
+tain consistency of edited results across multiple frames
+and viewpoints, we introduce an ordered Temporal-View
+(TV) Attention mechanism. Additionally, by designing a
+4D Gaussian field, we model the attributes and dynamics
+of weather particles within a 3D scene, enhancing real-
+ism and enabling fine-grained control over weather sever-
+ity. WeatherEdit demonstrates its potential in generating
+extreme weather conditions from normal scenes, providing
+a foundation for future research on evaluating the resilience
+of real-world applications such as autonomous driving.References
+[1] Yasin Almalioglu, Mehmet Turan, Niki Trigoni, and Andrew
+Markham. Deep learning-based robust positioning for all-
+weather autonomous driving. Nature Machine Intelligence ,
+4(9):749–760, 2022. 1
+[2] Anil Kumar Bhattacharyya. On a measure of divergence be-
+tween two statistical populations defined by their probability
+distributions. Bulletin of the Calcutta Mathematical Society ,
+35:99–109, 1943. 6
+[3] Tim Br ¨odermann, David Bruggemann, Christos Sakaridis,
+Kevin Ta, Odysseas Liagouris, Jason Corkill, and Luc
+Van Gool. Muses: The multi-sensor semantic perception
+dataset for driving under uncertainty. In European Confer-
+ence on Computer Vision (ECCV) , 2024. 5
+[4] Tim Brooks, Aleksander Holynski, and Alexei A. Efros. In-
+structpix2pix: Learning to follow image editing instructions.
+In2023 IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition (CVPR) , pages 18392–18402, 2023. 2, 6
+[5] Holger Caesar, Varun Bankiti, Alex H Lang, Sourabh V ora,
+Venice Erin Liong, Qiang Xu, Anush Krishnan, Yu Pan, Gi-
+ancarlo Baldan, and Oscar Beijbom. nuscenes: A multi-
+modal dataset for autonomous driving. In Proceedings of
+the IEEE/CVF conference on computer vision and pattern
+recognition , pages 11621–11631, 2020. 5
+[6] Ziyu Chen, Jiawei Yang, Jiahui Huang, Riccardo de Lutio,
+Janick Martinez Esturo, Boris Ivanovic, Or Litany, Zan Go-
+jcic, Sanja Fidler, Marco Pavone, Li Song, and Yue Wang.
+Omnire: Omni urban scene reconstruction. In The Thir-
+teenth International Conference on Learning Representa-
+tions , 2025. 3, 5
+[7] Gilad Deutch, Rinon Gal, Daniel Garibi, Or Patashnik, and
+Daniel Cohen-Or. Turboedit: Text-based image editing using
+few-step diffusion models, 2024. 2, 6
+[8] Bryan E Feldman and James F O’Brien. Modeling the
+accumulation of wind-driven snow. In ACM SIGGRAPH
+2002 conference abstracts and applications , pages 218–218,
+2002. 2
+[9] Rinon Gal, Or Patashnik, Haggai Maron, Amit H Bermano,
+Gal Chechik, and Daniel Cohen-Or. Stylegan-nada: Clip-
+guided domain adaptation of image generators. ACM Trans-
+actions on Graphics (TOG) , 41(4):1–13, 2022. 5
+[10] John K Haas. A history of the unity game engine. 2014. 2
+[11] Martin Hahner, Dengxin Dai, Christos Sakaridis, Jan-Nico
+Zaech, and Luc Van Gool. Semantic understanding of
+foggy scenes with purely synthetic data. In 2019 IEEE In-
+telligent Transportation Systems Conference (ITSC) , pages
+3675–3681. IEEE, 2019. 2
+[12] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-
+fusion probabilistic models. Advances in neural information
+processing systems , 33:6840–6851, 2020. 2
+[13] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-
+Zhu, Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen, et al.
+Lora: Low-rank adaptation of large language models. ICLR ,
+1(2):3, 2022. 3
+[14] Sunhee Hwang, Seogkyu Jeon, Yu-Seung Ma, and Hyeran
+Byun. Weathergan: Unsupervised multi-weather image-to-
+image translation via single content-preserving uresnet gen-erator. Multimedia Tools and Applications , 81(28):40269–
+40288, 2022. 2
+[15] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk ¨uhler,
+and George Drettakis. 3d gaussian splatting for real-time
+radiance field rendering. ACM Transactions on Graphics , 42
+(4), 2023. 3, 5
+[16] Yijun Li, Ming-Yu Liu, Xueting Li, Ming-Hsuan Yang, and
+Jan Kautz. A closed-form solution to photorealistic image
+stylization. In Proceedings of the European conference on
+computer vision (ECCV) , pages 453–468, 2018. 6
+[17] Yuan Li, Zhi-Hao Lin, David Forsyth, Jia-Bin Huang, and
+Shenlong Wang. Climatenerf: Extreme weather synthesis
+in neural radiance field. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision (ICCV) , 2023.
+1, 2, 3, 6
+[18] Yiyi Liao, Jun Xie, and Andreas Geiger. Kitti-360: A novel
+dataset and benchmarks for urban scene understanding in 2d
+and 3d. IEEE Transactions on Pattern Analysis and Machine
+Intelligence , 45(3):3292–3310, 2022. 5
+[19] Chen-Hsuan Lin, Jun Gao, Luming Tang, Towaki Takikawa,
+Xiaohui Zeng, Xun Huang, Karsten Kreis, Sanja Fidler,
+Ming-Yu Liu, and Tsung-Yi Lin. Magic3d: High-resolution
+text-to-3d content creation. In Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition ,
+pages 300–309, 2023. 3
+[20] Xian Liu, Xiaohang Zhan, Jiaxiang Tang, Ying Shan, Gang
+Zeng, Dahua Lin, Xihui Liu, and Ziwei Liu. Humangaus-
+sian: Text-driven 3d human generation with gaussian splat-
+ting. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition , pages 6646–6657,
+2024. 3
+[21] Chenlin Meng, Yutong He, Yang Song, Jiaming Song, Jia-
+jun Wu, Jun-Yan Zhu, and Stefano Ermon. Sdedit: Guided
+image synthesis and editing with stochastic differential equa-
+tions. arXiv preprint arXiv:2108.01073 , 2021. 2
+[22] Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik,
+Jonathan T. Barron, Ravi Ramamoorthi, and Ren Ng. Nerf:
+Representing scenes as neural radiance fields for view syn-
+thesis. In Computer Vision – ECCV 2020: 16th Euro-
+pean Conference, Glasgow, UK, August 23–28, 2020, Pro-
+ceedings, Part I , page 405–421, Berlin, Heidelberg, 2020.
+Springer-Verlag. 3
+[23] Chong Mou, Xintao Wang, Liangbin Xie, Yanze Wu, Jian
+Zhang, Zhongang Qi, and Ying Shan. T2i-adapter: learning
+adapters to dig out more controllable ability for text-to-image
+diffusion models. In Proceedings of the Thirty-Eighth AAAI
+Conference on Artificial Intelligence and Thirty-Sixth Con-
+ference on Innovative Applications of Artificial Intelligence
+and Fourteenth Symposium on Educational Advances in Ar-
+tificial Intelligence . AAAI Press, 2024. 2
+[24] Gaurav Parmar, Taesung Park, Srinivasa Narasimhan, and
+Jun-Yan Zhu. One-step image translation with text-to-image
+models. arXiv preprint arXiv:2403.12036 , 2024. 2, 3, 5
+[25] Chenghao Qian, Yuhu Guo, Wenjing Li, and Gustav
+Markkula. Weathergs: 3d scene reconstruction in adverse
+weather conditions via gaussian splatting. In International
+Conference on Robotics and Automation(ICRA) , 2025. 3[26] Chenghao Qian, Yuhu Guo, Yuhong Mo, and Wenjing Li.
+Weatherdg: Llm-assisted procedural weather generation for
+domain-generalized semantic segmentation. IEEE Robotics
+and Automation Letters , 2025. 1, 2
+[27] Chenghao Qian, Mahdi Rezaei, Saeed Anwar, Wenjing
+Li, Tanveer Hussain, Mohsen Azarmi, and Wei Wang.
+Allweather-net: Unified image enhancement for autonomous
+driving under adverse weather and low-light conditions.
+InInternational Conference on Pattern Recognition , pages
+151–166. Springer, 2025. 1
+[28] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry,
+Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning
+transferable visual models from natural language supervi-
+sion. In International conference on machine learning , pages
+8748–8763. PmLR, 2021. 5
+[29] Robin Rombach, Andreas Blattmann, Dominik Lorenz,
+Patrick Esser, and Bj ¨orn Ommer. High-resolution image syn-
+thesis with latent diffusion models, 2021. 2
+[30] Thomas Rothmeier and Werner Huber. Let it snow: On
+the synthesis of adverse weather image data. In 2021 IEEE
+International Intelligent Transportation Systems Conference
+(ITSC) , pages 3300–3306, 2021. 1
+[31] Christos Sakaridis, Dengxin Dai, and Luc Van Gool. Acdc:
+The adverse conditions dataset with correspondences for
+semantic driving scene understanding. In Proceedings of
+the IEEE/CVF international conference on computer vision ,
+pages 10765–10775, 2021. 5
+[32] Victor Schmidt, Alexandra Luccioni, M ´elisande Teng,
+Tianyu Zhang, Alexia Reynaud, Sunand Raghupathi, Gautier
+Cosne, Adrien Juraver, Vahe Vardanyan, Alex Hern ´andez-
+Garc ´ıa, et al. Climategan: Raising climate change awareness
+by generating images of floods. In International Conference
+on Learning Representations . 2
+[33] Victor Schmidt, Alexandra Luccioni, S Karthik Mukkavilli,
+Narmada Balasooriya, Kris Sankaran, Jennifer Chayes, and
+Yoshua Bengio. Visualizing the consequences of climate
+change using cycle-consistent adversarial networks. arXiv
+preprint arXiv:1905.03709 , 2019. 2
+[34] Alexey Stomakhin, Craig Schroeder, Lawrence Chai, Joseph
+Teran, and Andrew Selle. A material point method for snow
+simulation. ACM Transactions on Graphics (TOG) , 32(4):
+1–10, 2013. 2
+[35] Pei Sun, Henrik Kretzschmar, Xerxes Dotiwalla, Aurelien
+Chouard, Vijaysai Patnaik, Paul Tsui, James Guo, Yin Zhou,
+Yuning Chai, Benjamin Caine, Vijay Vasudevan, Wei Han,
+Jiquan Ngiam, Hang Zhao, Aleksei Timofeev, Scott Et-
+tinger, Maxim Krivokon, Amy Gao, Aditya Joshi, Yu Zhang,
+Jonathon Shlens, Zhifeng Chen, and Dragomir Anguelov.
+Scalability in perception for autonomous driving: Waymo
+open dataset. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR) , 2020.
+5
+[36] Jeya Maria Jose Valanarasu, Rajeev Yasarla, and Vishal M.
+Patel. Transweather: Transformer-based restoration of im-
+ages degraded by adverse weather conditions. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR) , pages 2353–2363, 2022. 1[37] Pengchuan Xiao, Zhenlei Shao, Steven Hao, Zishuo Zhang,
+Xiaolin Chai, Judy Jiao, Zesong Li, Jian Wu, Kai Sun, Kun
+Jiang, et al. Pandaset: Advanced sensor suite dataset for
+autonomous driving. In 2021 IEEE international intelligent
+transportation systems conference (ITSC) , pages 3095–3101.
+IEEE, 2021. 5
+[38] Zhiwen Yan, Chen Li, and Gim Hee Lee. Nerf-ds: Neural ra-
+diance fields for dynamic specular objects. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition , pages 8285–8295, 2023. 3
+[39] Yijun Yang, Hongtao Wu, Angelica I. Aviles-Rivero, Yulun
+Zhang, Jing Qin, and Lei Zhu. Genuine knowledge from
+practice: Diffusion test-time adaptation for video adverse
+weather removal. In 2024 IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition (CVPR) , pages 25606–
+25616, 2024. 1
+[40] Fisher Yu, Haofeng Chen, Xin Wang, Wenqi Xian, Yingying
+Chen, Fangchen Liu, Vashisht Madhavan, and Trevor Dar-
+rell. Bdd100k: A diverse driving dataset for heterogeneous
+multitask learning. In Proceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition , pages
+2636–2645, 2020. 5
+[41] Howard Zhang, Yunhao Ba, Ethan Yang, Varan Mehra,
+Blake Gella, Akira Suzuki, Arnold Pfahnl, Chethan Chinder
+Chandrappa, Alex Wong, and Achuta Kadambi. Weather-
+stream: Light transport automation of single image deweath-
+ering. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition (CVPR) , pages 13499–
+13509, 2023. 1
+[42] Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding
+conditional control to text-to-image diffusion models. In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision (ICCV) , pages 3836–3847, 2023. 2, 6
+[43] Jun-Yan Zhu, Taesung Park, Phillip Isola, and Alexei A
+Efros. Unpaired image-to-image translation using cycle-
+consistent adversarial networks. In Proceedings of the IEEE
+international conference on computer vision , pages 2223–
+2232, 2017. 2
+[44] K ´aroly Zsolnai-Feh ´er. The flow from simulation to reality.
+nature physics , 18(11):1260–1261, 2022. 2

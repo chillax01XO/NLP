@@ -1,0 +1,1476 @@
+arXiv:2505.20971v1  [cs.CL]  27 May 2025Reason-Align-Respond: Aligning LLM Reasoning
+with Knowledge Graphs for KGQA
+Xiangqing Shen, Fanfan Wang, and Rui Xia*
+School of Computer Science and Engineering,
+Nanjing University of Science and Technology, China
+{xiangqing.shen, ffwang, rxia}@njust.edu.cn
+Abstract
+LLMs have demonstrated remarkable capabili-
+ties in complex reasoning tasks, yet they of-
+ten suffer from hallucinations and lack reli-
+able factual grounding. Meanwhile, knowledge
+graphs (KGs) provide structured factual knowl-
+edge but lack the flexible reasoning abilities of
+LLMs. In this paper, we present Reason-Align-
+Respond ( RAR), a novel framework that system-
+atically integrates LLM reasoning with knowl-
+edge graphs for KGQA. Our approach consists
+of three key components: a Reasoner that gen-
+erates human-like reasoning chains, an Aligner
+that maps these chains to valid KG paths, and
+a Responser that synthesizes the final answer.
+We formulate this process as a probabilistic
+model and optimize it using the Expectation-
+Maximization algorithm, which iteratively re-
+fines the reasoning chains and knowledge paths.
+Extensive experiments on multiple benchmarks
+demonstrate the effectiveness of RAR, achieving
+state-of-the-art performance with Hit scores of
+93.3% and 91.0% on WebQSP and CWQ re-
+spectively. Human evaluation confirms that RAR
+generates high-quality, interpretable reasoning
+chains well-aligned with KG paths. Further-
+more, RARexhibits strong zero-shot generaliza-
+tion capabilities and maintains computational
+efficiency during inference.
+1 Introduction
+Large language models (LLMs) have exhibited
+impressive capabilities across a range of com-
+plex tasks (Hadi et al., 2023), yet their reason-
+ing processes often lack reliable factual knowl-
+edge. This shortcoming reduces interpretability,
+leads to hallucinations, and causes factual or logi-
+cal errors (Huang et al., 2025). Knowledge graphs
+(KGs) (Bollacker et al., 2008), which organize fac-
+tual knowledge in a structured format, offer strong
+interpretability and expressive power, making them
+*Corresponding author.
+Question: What’s the music style of the album folklore by Scott Swift's daughter?Answer: Indie Folk
+Answer: Pop
+Training-free Agent Exploration Methods
+LLM AgentT stepsPath Generator
+Our FrameworkResponserExplore on graphTaylor Swiftfolkloret=1genrepopScott Swift
+Training-based Path Generation MethodsAnswer: Pop
+✗KG
+daughtert=2✗albumIndie FolkgenreScottstylePopTaylordaughterfolklorealbum
+Knowledge Path by AlignerTaylor SwiftfolkloregenrepopScott SwiftdaughteralbumIndie FolkgenrenationalitySevenUSALovertracktrack
+Start by identifying the children of King Henry VII of England, represented by the query entity \"Henry VIII of England\". These children are represented by the answer entity \"x\". This step establishes the list of offspring connected to King Henry VI
+Next, verify that the album “folklore” is associated with “c”…
+2. Next, determine the music genre played by the artist represented by the intermediate entity \"c\". This genre is represented by the answer entity \"x\", providing the specific music style associated with the artist in question. Reasoning Chain by Reasoner
+1. Begin by identifying the daughter of the query entity “ Scott Swift”, represented by the intermediate entity “c”. This step establishes…2. Next, verify that the intermediate entity “c” has released aalbum named “folklore”. This ensures that…3. Finally, determine the music genre of the album “folklore”. This genre provides the specific music style…Responser123Figure 1: The comparison between our Reason-Align-
+Respond framework and the existing methods for LLM-
+based KGQA.
+a reliable source of factual support for LLM rea-
+soning. Integrating KGs with LLMs in question
+answering, e.g, knowledge graph question answer-
+ing (KGQA), has gained interest as an effective
+strategy to mitigate hallucinations and enhance in-
+terpretability.
+The existing LLM-based KGQA studies broadly
+fall into two main categories: Training-free
+Agent Exploration methods (Sun et al., 2024)
+and Training-based Path Generation methods (Luo
+et al., 2024a). The former uses LLMs as agents to
+explore nodes in KGs, while the latter trains gen-
+erators to retrieve and generate knowledge paths.
+However, both methods lack the holistic reason-
+ing process that humans typically employ when
+answering questions. This limitation, combined
+1with the semantic gap between natural language
+descriptions and structured knowledge graphs, of-
+ten results in reasoning paths that do not align with
+human logic, lack semantic relevance, or contain
+unnecessary noise, as shown in Fig. 1.
+On the other hand, the latest deep reasoning
+LLMs, such as OpenAI-o1 (Zhong et al., 2024)
+and DeepSeek-R1 (Guo et al., 2025), produce holis-
+tic reasoning chains before answering challenging
+questions, showcasing stronger logical reasoning
+abilities. But the reasoning chains obtained through
+reinforcement learning tend to be verbose, some-
+times contain logical fallacies, and amplify hallu-
+cinations (Bao et al., 2025). While our work is
+not specifically aimed at improving Deepseek-R1,
+we believe that using knowledge paths from KGs
+as constraints for deep reasoning might potentially
+alleviate these issues.
+The two aforementioned aspects are complemen-
+tary. For one thing, allowing LLMs to first perform
+human-like reasoning in KGQA, can establish a
+structured, goal-oriented framework that helps re-
+duce invalid or noisy KG path exploration. For
+another, while free reasoning by LLMs tends to
+increase hallucinations, incorporating knowledge
+paths from KGs provides constraints that help en-
+sure alignment with the knowledge graph, thereby
+reducing hallucinations.
+In this work, we introduce Reason-Align-
+Respond ( RAR), a novel framework that systemati-
+cally integrates three modules—Reasoner, Aligner,
+and Responser—to align LLM reasoning with
+knowledge graphs for KGQA. Each of the three
+modules is a fine-tuned LLM. Firstly, Reasoner
+conducts global reasoning for the question, simu-
+lating human-like thinking process to generate a
+reasoning chain that guides LLM’s exploration on
+the KG. Secondly, Aligner decodes a knowledge
+path on the KG based on the above reasoning chain.
+Each decoding step ensures correspondence to an
+actual knowledge triple in the graph. Finally, Re-
+sponser leverages both the reasoning chain and the
+knowledge path to generate the final answer.
+We treat both reasoning chain zrand knowl-
+edge path zpas latent variables, use a probabilistic
+model to formalize the distribution of answer a
+given the question qand KG G, and propose an
+end-to-end training algorithm to jointly fine-tune
+the parameters across all three modules. Specif-
+ically, we employ the expectation-maximization
+(EM) algorithm to iteratively optimize model pa-
+rameters while inferring the latent variables. TheE-step estimates the posterior probability of latent
+variables ( zr,zp) given observations ( q,G,a) and
+samples high-quality reasoning chain and aligned
+knowledge paths accordingly. The M-step maxi-
+mizes the evidence lower bound (ELBO) of the log-
+likelihood to update model parameters. Through
+iterative optimization, the model progressively re-
+fines the reasoning chain and knowledge path, and
+in turn promotes the generation of high-quality re-
+sponses, ultimately forming a stable closed loop.
+We conduct extensive evaluation across multi-
+ple benchmarks, including WebQSP, CWQ, Com-
+monsenseQA (CSQA), and MedQA, using Free-
+base, ConceptNet and a medical KG as knowl-
+edge graphs. The results demonstrate the effec-
+tiveness of RARin improving KGQA performance.
+Compared to 19 baselines across three categories,
+RARachieves state-of-the-art results. Specifically,
+it achieves Hit scores of 93.3% on WebQSP and
+91.0% on CWQ, with corresponding F1 score of
+87.7% and 84.8%, significantly surpassing the ex-
+isting methods. Additionally, RARdemonstrates
+strong zero-shot generalizability on CSQA and
+MedQA. The EM algorithm demonstrates gradual
+performance improvements with increasing itera-
+tions and shows stable convergence after 200 steps.
+Human evaluation of reasoning chains shows that
+RAR generates high-quality, interpretable chains
+aligned with KG paths, ensuring accurate and reli-
+able reasoning. We also report the results of RARun-
+der different LLM backbone models, and conduct
+the ablation study that confirms the importance of
+each component. Notably, RARachieves these effec-
+tive performance while maintaining computational
+efficiency during inference. These comprehensive
+results demonstrate that our approach successfully
+bridges the gap between LLM reasoning and struc-
+tured knowledge, offering a promising direction for
+developing more reliable and interpretable question
+answering systems.
+2 Approach
+Knowledge graphs (KGs) contain extensive fac-
+tual knowledge in the form of triples: G=
+{(e, r, e′)|e, e′∈ E, r∈ R} , where EandR
+denote sets of entities and relations, respectively.
+The goal of knowledge graph question answering
+(KGQA) is to retrieve relevant facts from a KG G
+and generate an answer ain response to a given
+natural language question q.
+2Reasoner 𝑝!𝑧"𝑞Generate a step-by-step reasoning chain for the question: …Aligner 𝑝#𝑧$𝒢,𝑧",𝑞Generate triples in the KG based on the question and reasoning chain: …PriorLikelihoodPriorUpdate ResponserM-step: update ReasonerM-step: update AlignerKG-constrained DecodingQuestion 𝑞What’s the music style of the album folklore by Scott Swift's daughter?
+Reasoning Chain 𝑧"Responser 𝑝%(𝑎|𝑧",𝑧$,𝑞)Answer the question based on the reasoning chain and knowledge path: …Answer 𝑎Indie FolkResoning Chain: First, find Taylor’s albums. Next, find albums winning Grammy. Last, find release dates of the albums. Knowledge Path: (Taylor, album, Midnights), (Midnights, award, Grammy), (Midnights, date, 2022-10)Resoning Chain: First, find Taylor’s albums. Next, find albums winning Grammy. Last, find release dates of the albums. Knowledge Path: (Taylor, album, Midnights), (Midnights, award, Grammy), (Midnights, date, 2022-10)Resoning Chain: <THINK> 1. Begin by identifying... 2. Next, verify that the... 3.  Finally, determine the music genre of the album “folklore”... </THINK>Knowledge Path: <ALIGN> (ScottSwift, daughter, Taylor Swift), (Taylor Swift, album, folklore), (folklore, genre, Indie Folk)</ALIGN> 
+🔥 
+🔥 
+🔥 E-step: sample high-quality Reasoning Chains and Knowledge Paths (𝑧",𝑧$)~𝑝%,'(𝑧",𝑧$)|𝒢,𝑞,𝑎
+Knowledge Path 𝑧$Reasoning Chain 𝑧!Taylor SwiftfolkloregenrepopScott SwiftdaughteralbumIndie FolkgenrenationalitySevenUSALovertracktrack123
+1. Begin by identifying the daughter of the query entity “Scott Swift”, represented by the intermediate entity “c”. This step…2. Next, verify that the intermediate entity “c” has released a album… This ensures…3. Finally, determine the music genre of the album “folklore”. This genre provides…Figure 2: Illustration of our RARframework comprising Reasoner, Aligner, Responser with iterative EM optimization.
+2.1 Task Formalization
+We introduce two latent variables, a reasoning
+chain zrand a knowledge path zp, working together
+to answer the question qbased on a KG G:
+•Reasoning Chain zrdenotes a chain of dis-
+crete reasoning steps expressed in natural lan-
+guage, working together to address the ques-
+tionq.
+•Knowledge Path zpdenotes an interconnected
+path of knowledge triples extracted from a KG
+G.
+Since neither zrnorzpare explicitly annotated
+in existing KGQA benchmarks, we treat them as
+latent variables, and employ a probabilistic model
+to formalize the distribution of the answer acondi-
+tioned on the question qand KG Gas:
+pw,ϕ,θ(a|G, q) =
+X
+zr,zppw(a|zr, zp, q)pϕ(zp|G, zr, q)pθ(zr|q),(1)
+where we assume ais conditionally independent
+ofGgiven (zr, zp, q), allowing factorization and
+summation over these conditional probabilities. On
+this basis, we introduce our framework, Reason-
+Align-Respond (RAR), that integrates three mod-
+ules—Reasoner, Aligner, and Responser—to align
+LLM reasoning with knowledge graphs for KGQA,
+as illustrated in Fig. 2.
+It is worth noting that each of the three modules
+is a fine-tuned LLM, with parameters denoted as
+θ,ϕ, and ω, respectively. They each utilize the
+Prompts shown in App. F to generate reasoning
+chains, knowledge paths, and answers.Firstly, Reasoner pθ(zr|q)generates a latent rea-
+soning chain zrto address the question q. The Rea-
+soner generates a reasoning chain in the following
+format:
+zr=<THINK> s1. . . s t</THINK> ,
+where <THINK> and</THINK> are special tokens
+denoting the start and end of the reasoning process,
+and each siis a discrete reasoning step.
+Secondly, Aligner pϕ(zp|G, zr, q)takes the ques-
+tionqand the reasoning chain zras inputs to ex-
+plore KG G, producing a latent reasoning path zp
+that aligns with zr. Aligner processes the prompt
+withqandzrto generate a knowledge path in the
+following format:
+zp=<ALIGN> π1. . . π t</ALIGN> ,
+where <ALIGN> and </ALIGN> mark the begin-
+ning and end of the knowledge path. Each πi
+is a triple from the KG Gformatted as πi=
+<TRI> (eh
+i, ri, et
+i)</TRI> , where <TRI> and</TRI>
+bound the triple.
+Finally, Responser pw(a|zr, zp, q)generates the
+final answer aby synthesizing the question q, rea-
+soning chain zr, and knowledge path zp.
+2.2 Optimization via the EM Algorithm
+As we have mentioned, each of the three modules
+is a fine-tuned LLM. In this section, we propose
+an end-to-end training algorithm to jointly opti-
+mize the parameters across all three modules. The
+training objective is the likelihood of the distribu-
+tionpw,ϕ,θ(a|G, q)shown in Eq. (1). Since our
+model involves latent variables zrandzp, we adopt
+3the Expectation-Maximization (EM) algorithm—a
+principled approach for maximum likelihood esti-
+mation (MLE) in latent-variable models (Dempster
+et al., 1977; Sen et al., 2022; Qu et al., 2021).
+Unifying Reasoner and Aligner. In practice, we
+unify Reasoner and Aligner by merging their latent
+variables zrandzpinto a single one z= (zr, zp).
+This results in a consolidated module, referred to
+asReAligner , whose parameters denoted by ψ.
+Hence, instead of generating zrandzpseparately,
+ReAligner simultaneously outputs both a Reason-
+ing Chain and a Knowledge Path, treating it as a
+single instruction-tuning task with a prompt tem-
+plate (see App. F). With this simplification, the
+conditional distribution for the final answer ais:
+pw,ψ(a|G, q) =X
+zpw(a|q, z)pψ(z|G, q),(2)
+where Gdenotes the KG, qthe question, and zthe
+unified latent variable (combining the Reasoning
+Chain and Knowledge Path).
+Learning Objective. We aim to learn the param-
+eters (w, ψ)by maximizing the log-likelihood of
+the training data with respect to Eq. (2), written as:
+max
+w,ψO(w, ψ) = log Ez∼pψ(z|G,q)[pw(a|q, z)].
+(3)
+According to Jensen’s inequality, we have:
+O(w, ψ)≥Eq(z)log(pw(a|q, z)pψ(z|G, q)
+q(z))
+| {z }
+LELBO,
+(4)
+where q(z)is a variational distribution. Equality
+holds when q(z) =pw,ψ(z|G, q, a), the true poste-
+rior of z. The term LELBO is the Evidence Lower
+BOund (ELBO), and maximizing LELBO indirectly
+maximizes O(w, ψ).
+EM Algorithm. The EM algorithm alternates be-
+tween an E-step and an M-step until convergence:
+E-step. Given current parameters (w(t), ψ(t))
+at iteration t, E-step updates the varia-
+tional distribution q(t)(z)by minimizing
+KL(q(z)||pw(t),ψ(t)(z|G, q, a)). The solution is the
+posterior of zunder the current parameters:
+q(t)(z) =pw(t),ψ(t)(z|G, q, a). (5)
+M-step. Keeping q(t)(z)fixed, M-step maxi-
+mizes LELBO in Eq. (4) with respect to wandψ.Ignoring terms that do not depend on (w, ψ), the
+objective reduces to:
+Q(w, ψ|w(t), ψ(t))
+=X
+(G,q,a)X
+zq(t)(z) log[ pw(a|q, z)pψ(z|G, q)]
+=X
+(G,q,a)X
+zq(t)(z) logpw(a|q, z)
+| {z }
+QResponser (w)
++X
+(G,q,a)X
+zq(t)(z) logpψ(z|G, q)
+| {z }
+QReAligner (ψ),
+(6)
+which naturally divides into the instruction-tuning
+objective for Responser and ReAligner in Eq. (2).
+By iterative optimization with the EM algorithm,
+our framework progressively refines its understand-
+ing of the question. This iterative process gradu-
+ally corrects any flaws in Reasoning Chains and
+Knowledge Paths, leading to answers that are both
+higher in quality and more interpretable, while sig-
+nificantly reducing the risk of hallucination.
+The workflow of the EM algorithm is shown in
+Alg. 1, with more details in practice in App. A.
+Algorithm 1 The EM algorithm in RAR
+while not converge do
+For each instance, sample NReasoning
+Chains and Knowledge Paths zIfrom Re-
+Aligner pψ.
+For each instance, update Responser pwwith
+QResponser (w)in Eq. (6) using zI.
+⊡E-step:
+For each instance, identify Khigh-quality
+Reasoning Chains and Knowledge Paths zh
+I
+fromzIbased on Eq. (5).
+⊡M-step:
+For each instance, update ReAligner pψac-
+cording to QReAligner (ψ)in Eq. (6).
+end while
+2.3 Techniques During Inference
+During inference, given q, Reasoner generates zr,
+while Aligner produces zp. Responser synthesizes
+them to produce a. To enhance performance, we
+introduce three additional key techniques.
+KG-constrained Decoding. KG-constrained De-
+coding aims to prevent hallucinated triples that do
+4Types MethodsWebQSP CWQ
+Hit F1 Hit F1
+LLM ReasoningQwen2-7B (Yang et al., 2024) 50.8 35.5 25.3 21.6
+Llama-2-7B (Touvron et al., 2023) 56.4 36.5 28.4 21.4
+Llama-3.1-8B (Meta, 2024) 55.5 34.8 28.1 22.4
+GPT-4o-mini (OpenAI, 2024a) 63.8 40.5 63.8 40.5
+ChatGPT (OpenAI, 2022) 59.3 43.5 34.7 30.2
+ChatGPT+Few-shot (Brown et al., 2020) 68.5 38.1 38.5 28.0
+ChatGPT+CoT (Wei et al., 2022b) 73.5 38.5 47.5 31.0
+ChatGPT+Self-Consistency (Wang et al., 2024) 83.5 63.4 56.0 48.1
+Graph ReasoningGraftNet (Sun et al., 2018) 66.7 62.4 36.8 32.7
+NSM (He et al., 2021) 68.7 62.8 47.6 42.4
+SR+NSM (Zhang et al., 2022) 68.9 64.1 50.2 47.1
+ReaRev (Mavromatis and Karypis, 2022) 76.4 70.9 52.9 47.8
+KG+LLMKD-CoT (Wang et al., 2023a) 68.6 52.5 55.7 -
+EWEK-QA (Dehghan et al., 2024) 71.3 - 52.5 -
+ToG (GPT-4) (Sun et al., 2024) 82.6 - 68.5 -
+EffiQA (Dong et al., 2025) 82.9 - 69.5
+RoG (Llama-2-7B) (Luo et al., 2024b) 85.7 70.8 62.6 56.2
+GNN-RAG+RA (Mavromatis and Karypis, 2024) 90.7 73.5 68.7 60.4
+GCR(Llama-3.1-8B + GPT-4o-mini) (Luo et al., 2024c) 92.2 74.1 75.8 61.7
+RAR(Llama-3.1-8B + GPT-4o-mini) 93.3 87.7 91.0 84.8
+Table 1: Performance comparison with different baselines on the two KGQA datasets.
+not exist in the KG. When generating the Knowl-
+edge Path, Aligner may inadvertently produce
+triples absent from the KG. To address this, KG-
+constrained Decoding restricts the output tokens so
+that only tokens forming valid KG triples can be
+produced. In this way, the generated Knowledge
+Path strictly aligns with actual entities and relations
+in the KG. Related work (Luo et al., 2024c; Li et al.,
+2024) also attempts to mitigate similar issues; our
+approach is tailored specifically to our framework.
+Knowledge Path Expansion. Knowledge Path
+Expansion addresses the potential incompleteness
+of initially generated Knowledge Paths. To illus-
+trate, consider a question about countries that share
+borders with the United States. a Knowledge Path
+<ALIGN><TRI>(US,borders,Mexico)</TRI></ALIGN>
+is generated by Aligner. While correct, this repre-
+sents only one instance of a broader pattern. By
+abstracting the specific instance into a template:
+<ALIGN><TRI>(US,borders,?country)</TRI></ALIGN> ,
+where ?country is a variable, we capture the fun-
+damental relationship structure. Applied to the KG,this template retrieves all valid instances, such as:
+<ALIGN><TRI>(US,borders,Canada)</TRI></ALIGN> .
+This method transforms a single Knowledge Path
+into a comprehensive query template, enabling
+more complete and exhaustive answers.
+LLM-driven Consolidation. LLM-driven Con-
+solidation addresses the challenge of inconsisten-
+cies and noise that emerge when sampling multiple
+Reasoning Chains and Knowledge Paths. Multiple
+sampling helps increase coverage and improve the
+likelihood of correct answers, but inevitably intro-
+duces noise and conflicts between samples. To ad-
+dress this challenge, we propose using a powerful
+LLM as a “Consolidator” that analyzes and inte-
+grates multiple Reasoning Chains and Knowledge
+Paths to derive final answers, following the prompt
+template detailed in App. F. This approach effec-
+tively preserves the benefits of multiple sampling
+while leveraging the LLM’s analytical capabilities
+to produce reliable answers.
+53 Experiment
+3.1 Experiment Settings
+Datasets. Following previous research (Luo et al.,
+2024c; Sun et al., 2024), we evaluate our model on
+three datasets: WebQuestionSP (WebQSP)) (Yih
+et al., 2016), Complex WebQuestions (CWQ) (Tal-
+mor and Berant, 2018), and CommonsenseQA
+(CSQA) (Talmor et al., 2019). The first two
+datasets use Freebase (Bollacker et al., 2008) as
+the KG, while CSQA leverages ConceptNet (Speer
+et al., 2017), allowing us to assess model generaliz-
+ability across the unseen KG.
+Baselines. We compare RAR with 19 baselines
+across three categories: LLM reasoning methods,
+graph reasoning methods, and KG-enhanced LLM
+reasoning methods.
+Evaluation Metrics. For WebQSP and CWQ, we
+adopt Hit and F1 as evaluation metrics. Hit checks
+whether the generated predictions match any cor-
+rect answer, while F1 evaluates overall answer cov-
+erage by balancing precision and recall. For CSQA,
+a multiple-choice QA dataset, we use accuracy as
+the evaluation metric.
+Implementations. Our implementation uses
+Llama-3.1-8B (Meta, 2024) as the backbone for
+Reasoner, Aligner, and Responser. To enhance
+question decomposition, we pretrain both Reasoner
+and Aligner using 2,000 exemplars demonstrating
+step-by-step KG-based problem-solving. For each
+component, we generate top- 10candidates using
+KG-constrained Decoding and Knowledge Path Ex-
+pansion, with GPT-4o-mini handling LLM-driven
+Consolidation. Details are provided in App. C.
+3.2 Main Results
+Tab. 1 shows that RARachieves significant gains on
+both WebQSP and CWQ datasets, improving the
+state-of-the-art by 13.6% and 23.1% in F1, and by
+1.1% and 15.2% in Hit respectively. These remark-
+able improvements demonstrate the effectiveness
+of integrating structured KG knowledge with LLM
+reasoning.
+3.3 Ablation Study
+As shown in Tab. 2, removing LLM-driven Con-
+solidation (LC) lowers precision but increases re-
+call, since LC aims to eliminate noisy predictions.
+Excluding Reasoner causes a pronounced drop in
+precision but a rise in recall, indicating that Reason-
+ing Chains guide Aligner to explore the KG moreVariants F1 Precision Recall
+RAR 84.8 84.9 89.0
+RARw/o LC 83.0 81.8 91.2
+w/o Reasoner 80.3 75.6 94.7
+w/o KD 48.9 54.3 50.8
+w/o KPE 71.7 80.2 71.7
+Table 2: Impact of different components on CWQ.
+/uni000003ee/uni000003ec /uni000003f2/uni000003ec /uni000003ed/uni000003ec/uni000003ec /uni000003ee/uni000003ec/uni000003ec /uni000003ef/uni000003ec/uni000003ec
+/uni0000002f/uni0000019a/uni0000011e/uni0000018c/uni00000102/uni0000019a/uni0000015d/uni0000017d/uni00000176/uni00000003/uni0000005e/uni0000019a/uni0000011e/uni00000189/uni00000190/uni000003f0/uni000003f1/uni000003f1/uni000003f1/uni000003f2/uni000003f1/uni000003f3/uni000003f1
+/uni00000057/uni0000018c/uni0000011e/uni00000110/uni0000015d/uni00000190/uni0000015d/uni0000017d/uni00000176
+/uni0000005a/uni0000011e/uni00000110/uni00000102/uni0000016f/uni0000016f
+/uni00000026/uni000003ed
+Figure 3: Impact of iteration steps of the EM algorithm.
+accurately, reducing hallucination and noise. Dis-
+abling Knowledge Path Expansion (KPE) dimin-
+ishes performance, confirming its role in enriching
+Knowledge Paths. Most importantly, removing KG-
+constrained Decoding (KD) yields the largest per-
+formance decrease, underscoring the importance of
+restricting generation to valid KG paths.
+3.4 Further Analyses
+Impact of Iteration Steps. As shown in Fig. 3,
+RARexhibits consistent improvement across all met-
+rics during EM updates. The performance rises
+rapidly in early stages and continues to refine over
+iterations, eventually reaching convergence with
+minimal fluctuations.
+Quality of Reasoning Chains. Through manual
+evaluation of 500 randomly selected samples, we
+assess the quality of Reasoning Chains using two
+criteria: reasoning correctness and KG alignment.
+The correctness metric evaluates whether the Rea-
+soning Chain successfully solves the given ques-
+tion, while the alignment metric measures how well
+the reasoning steps correspond to valid KG paths.
+As shown in Fig. 4, RARsubstantially outperforms
+both GPT-4o and baseline methods across both
+metrics. These results demonstrate that by aligning
+Reasoning Chains to KG structures, our approach
+not only improves the reliability of the reasoning
+process but also enhances its interpretability.
+KG-constrained Decoding Effectiveness. We ex-
+amine the effectiveness of KG-constrained Decod-
+6/uni0000003e/uni0000016f/uni00000102/uni00000175/uni00000102/uni00000372/uni000003ef/uni00000358/uni000003ed/uni00000372/uni000003f4/uni00000011 /uni00000027/uni00000057/uni00000064/uni00000372/uni000003f0/uni0000017d /uni0000005a/uni00000004/uni0000005a406080100
+Alignment Ratio CorrectnessFigure 4: Human evaluation of reasoning chains on
+CWQ.
+Types Methods Hit Avg. Runtime (s)
+Path GenerationGNN-RAG 66.8 1.73
+RoG 62.6 2.68
+GCR 75.8 3.72
+Agent ExplorationToG 68.5 18.89
+EffiQA 69.5 -
+Ours RAR 91.0 4.38
+Table 3: Efficiency and performance of RARcompared
+to different methods on CWQ.
+ing in mitigating hallucinations and maintaining
+efficiency. Our method achieves zero hallucina-
+tions in Knowledge Paths when answers are cor-
+rect, while without constraints, even correct an-
+swers show a 44% hallucination rate. The effi-
+ciency evaluation reveals minimal computational
+overhead. Particularly noteworthy is the compari-
+son with GCR, the previous state-of-the-art method
+using KG constraints. Our approach achieves a
+15.2% improvement in answer accuracy over GCR,
+with only a marginal increase in runtime from Rea-
+soning Chain generation. This modest overhead
+is well justified by the significant gains in answer
+reliability and interpretability.
+Impact of Beam Size. As shown in Fig. 5, increas-
+ing beam size allows RARto explore more potential
+Reasoning Chains and Knowledge Paths, leading
+to improved performance across all metrics. This
+demonstrates that examining multiple candidate so-
+lutions helps identify better Reasoning Chains and
+Knowledge Paths for responses of higher quality.
+Impact of different LLM Backbone. Tab. 4
+demonstrates that larger LLMs generally achieve
+better performance, with Llama-3.1-8B and GPT-
+4o delivering the strongest results for backbone and
+LLM-based Consolidation (LC), respectively.
+Zero-shot Generalizability to Unseen KGs. Fol-
+lowing Luo et al. (2024c), we evaluate RAR’s zero-
+shot transfer capabilities on CSQA (Talmor et al.,
+1 3 5 1065707580
+Precision
+Recall
+F1Figure 5: Impact of different beam size on CWQ.
+Components Variants Hit F1
+Reasoner and
+AlignerLlama-2-7B 84.0 68.9
+Llama-3.1-8B 85.2 72.6
+Qwen2-0.5B 71.3 56.0
+Qwen2-1.5B 72.0 56.6
+Qwen2-7B 81.4 67.1
+LLM-driven
+ConsolidationGPT-4o-mini 91.0 84.8
+GPT-4o 92.8 84.9
+Qwen2-7B 88.7 82.2
+Llama-3.1-8B 90.6 83.7
+Llama-3.1-70B 92.4 83.0
+Table 4: Impact of using different LLM backbones for
+Reasoner, Aligner and LLM-driven Consolidation.
+2019) and MedQA (Jin et al., 2021). The results
+show that RARachieves superior zero-shot perfor-
+mance compared to GPT-4o-mini on both datasets.
+Notably, RARachieves comparable performance to
+GCR, as both methods leverage the KG to constrain
+the decoding process to enhance reasoning without
+requiring additional training on the target KG.
+3.5 Case study
+Fig. 6 illustrates the qualitative results by our RAR
+framework. To investigate the effect of EM itera-
+tions, in Fig. 7, we also present two representative
+cases that demonstrate the evolution of RAR’s be-
+havior across iterations of the EM algorithm. These
+cases showcase distinct improvements in RAR’s abil-
+ity to generate Reasoning Chains and Knowledge
+Paths. In Case 1, we examine RAR’s response to
+the query “What high school did the artist who
+recorded ’Girl Tonight’ attend?” The early-stage
+model demonstrates suboptimal verification behav-
+ior by directly searching for high school informa-
+tion without following the proper verification se-
+quence: first identifying educational institutions,
+then verifying the specific type as high school. This
+Reasoning Chain prevents proper alignment with
+7Question: What did dr josef mengeledo?Answer:PhysicianReasoning Chain generatedbyReasoner<THINK>Toreasontheanswerforthequestion,followthesesteps:1.Identifytheprofessionoroccupationassociatedwiththequeryentity"JosefMengele".Thisprofessionisrepresentedbytheanswerentity"x".</THINK>Knowledge PathgeneratedbyAligner<TRIPLE>(Josef Mengele,people.person.profession,Physician)</TRIPLE>KG-constrainedDecodingAnswergeneratedbyResponser:PhysicianQuestion: What type of Claude Debussy music appears in the filmBlack Tights?Answer: BalletReasoning Chain generatedbyReasoner<THINK>Toreasontheanswerforthequestion,followthesesteps:1.Beginbyidentifyingthetypeofmusicassociatedwiththequeryentity"ClaudeDebussy".Thistypeofmusicisrepresentedbytheanswerentity"x".ThisstepestablishesthegenreorstyleofmusicthatClaudeDebussyisknownfor.2.Next,determinewhetherthetypeofmusicrepresentedbytheanswerentity"x"appearsinthefilmnamedthequeryentity"BlackTights".ThisstepconfirmstheconnectionbetweenthegenreofClaudeDebussy'smusicandthefilminquestion.</THINK>Knowledge PathgeneratedbyAligner<TRIPLE>(Claude Debussy,music.artist.genre,Ballet)</TRIPLE><TRIPLE>(Ballet, film.film_genre.films_in_this_genre,Black Tights)</TRIPLE>KG-constrainedDecoding
+AnswergeneratedbyResponser:BalletQuestion:What high school did the artist who recorded "Girl Tonight" attend?Answer: Petersburg High SchoolReasoning Chain generatedbyReasoner<THINK>Toreasontheanswerforthequestion,followthesesteps:1.Startbyidentifyingtheartistrepresentedbytheintermediateentity"c"whoisassociatedwiththerecordingnamedthequeryentity"GirlTonight".Thisestablishesthatintermediateentity"c"istheartistwhorecordedthesong.2.Next,determinetheeducationalinstitutionsattendedbytheartistrepresentedbytheintermediateentity"c".Theseinstitutionsarerepresentedbytheanswerentity"x".3.Finally,confirmwhichoftheeducationalinstitutionsrepresentedbytheanswerentity"x"hasaschooltypelabeledasthequeryentity"Highschool".Thisstepensuresthatthespecifichighschoolattendedbytheartistisidentified.</THINK>Knowledge PathgeneratedbyAligner<TRIPLE>(Trey Songz,music.featured_artist.recordings,Girl Tonight)</TRIPLE><TRIPLE>(Trey Songz,people.person.education-education.education.institution,PetersburgHigh School)</TRIPLE><TRIPLE>(PetersburgHigh School, education.educational_institution.school_type, High school)</TRIPLE>KG-constrainedDecoding
+AnswergeneratedbyResponser:Petersburg High SchoolQuestion:Where did Tennessee Williams attend college, and has an organization headquarters located in New York City?Answer: The New SchoolReasoning Chain generatedbyReasoner<THINK>Toreasontheanswerforthequestion,followthesesteps:1.Beginbyidentifyingtheeducationalinstitutionattendedbythequeryentity"TennesseeWilliams".Thisinstitutionisrepresentedbytheanswerentity"x".ThisstepestablishestheconnectionbetweenTennesseeWilliamsandthecollegeoruniversityheattended.2.Next,verifythattheinstitutionrepresentedbytheanswerentity"x"belongstothecategoryof"College/University",whichisthequeryentity.Thisensuresthattheidentifiedinstitutionisindeedacollegeoruniversity.3.Finally,confirmthattheinstitutionrepresentedbytheanswerentity"x"hasitsheadquarterslocatedinthecityrepresentedbythequeryentity"NewYorkCity".Thisstepensuresthattheinstitutionmeetsthegeographicalcriterionspecifiedinthequestion.</THINK>Knowledge PathgeneratedbyAligner<TRIPLE>(Tennessee Williams,people.person.education-education.education.institution,The New School)</TRIPLE> <TRIPLE>(The New School,common.topic.notable_types,College/University)</TRIPLE><TRIPLE>(The New School,organization.organization.headquarters-location.mailing_address.citytown,New York City)</TRIPLE>KG-constrainedDecoding
+AnswergeneratedbyResponser:The New SchoolJosef MengelePhysicianpeople.person.profession1 ✗undecodableClaude DebussyBalletfilm.film_genre.films_in_this_genremusic.artist.genreBlack Tights1 2✗undecodable
+education.educational_institution.school_typeGirl TonightPetersburgHigh Schoolpeople.person.education-education.education.institutionmusic.featured_artist.recordingsTrey SongzHigh school1 23✗undecodable
+people.person.education-education.education.institutionTennessee WilliamsThe New Schoolcommon.topic.notable_typesorganization.organization.headquarters-location.mailing_address.citytownCollege/UniversityNew York City1 23✗undecodableFigure 6: Examples of Reasoning Chains and Knowledge Paths generated by RARunder different iteration steps.
+Model CSQA MedQA
+GPT-4o-mini 91 75
+GCR 94 79
+RAR 94 80
+Table 5: Zero-shot transferability to unseen KG.
+the Knowledge Path in the KG. In contrast, the later-
+stage model generates both Reasoning Chains and
+Knowledge Paths effectively, producing a higher
+quality Reasoning Chain that successfully aligns
+with the Knowledge Path in the KG. Case 2 ex-
+amines RAR’s handling of “What type of Claude
+Debussy music appears in the film Black Tights?”
+Here, we observe a different pattern of improve-
+ment. While the early-stage model generates the
+same Reasoning Chain as the later-stage model, it
+fails to generate Knowledge Paths that fully align
+with and reflect this reasoning, resulting in a mis-
+aligned Knowledge Path that do not lead to the
+correct answer. The later-stage model maintains
+consistency between Reasoning Chains and Knowl-
+edge Paths, thus arriving at the correct answer.These cases validate the effectiveness of the EM
+approach.
+4 Related Work
+LLM Reasoning. Recent progress in LLMs have
+spurred extensive research to improve deep rea-
+soning. One line of work focuses on prompting-
+based methods, which elicit intermediate reasoning
+steps during inference, such as Chain-of-Thought
+(CoT) prompting (Wei et al., 2022a). Building on
+CoT, self-consistency (Wang et al., 2023b) gener-
+ates multiple reasoning traces and selects the most
+consistent answer. Tree-of-Thought (Yao et al.,
+2023) explores branching steps in a tree structure
+to uncover optimal solutions. Beyond prompting,
+researchers have investigated fine-tuning LLMs
+on reasoning tasks (Yu et al., 2022; Hoffman
+et al., 2023), including reinforcement learning
+methods (OpenAI, 2024b; Guo et al., 2025) that en-
+courage more complex multi-step reasoning before
+arriving at a final answer.
+KG-enhanced LLM Reasoning. Despite their re-
+markable performance, LLMs still face limitations
+8such as incomplete or outdated domain knowledge,
+interpretability challenges, and the potential for
+hallucinations. To address these issues, a growing
+body of work has focused on integrating LLMs
+with KGs (Pan et al., 2024). KD-CoT (Wang et al.,
+2023a) enhances CoT by retrieving relevant facts
+from external KGs, guiding LLMs with more re-
+liable information. RoG (Luo et al., 2024b) em-
+ploys a plan–retrieve–reason pipeline that explic-
+itly fetches KG-based reasoning paths to ground
+the final answer. GCR (Luo et al., 2024c) fur-
+ther mitigates hallucinations by enforcing graph-
+constrained decoding, ensuring that every reason-
+ing step aligns with valid KG connections. GNN-
+RAG (Mavromatis and Karypis, 2024) leverages
+a graph neural network for effective KG retrieval,
+while StructGPT (Jiang et al., 2023) and ToG (Sun
+et al., 2024) treat the LLM as an agent that navi-
+gates the KG, assembling multi-hop paths to pro-
+duce more trustworthy answers.
+5 Conclusion
+In this paper, we present RAR, a novel frame-
+work that integrates LLM reasoning with knowl-
+edge graphs for KGQA through three key com-
+ponents—Reasoner, Aligner, and Responser. We
+formulate this process as a probabilistic model and
+optimize it using the Expectation-Maximization al-
+gorithm. Through extensive experiments on multi-
+ple benchmarks, we demonstrate that RARachieves
+state-of-the-art performance while maintaining in-
+terpretability and computational efficiency. These
+results demonstrate that RARsuccessfully bridges
+the gap between LLM reasoning and structured
+knowledge, offering a promising direction for build-
+ing reliable and interpretable QA systems.
+Limitations
+One limitation of our framework lies in the compu-
+tational overhead introduced by Reasoner. In cer-
+tain cases, especially for complex queries, the Rea-
+soning Chain generated by Reasoner can become
+relatively long, increasing resource consumption.
+However, our experimental results demonstrate that
+the performance gains from incorporating Reason-
+ing Chain justify this additional cost, striking a
+practical balance between efficiency and effective-
+ness. Another limitation concerns the generalizabil-
+ity to specialized domains. Though our framework,
+trained on Freebase-based KGQA datasets, shows
+improved generalization to unseen KGs comparedto previous methods, its performance on highly
+specialized knowledge graphs ( e.g, medical KGs)
+remains to be enhanced. Improving adaptation to
+domain-specific KGs presents a promising direc-
+tion for future research.
+References
+Forrest Bao, Chenyu Xu, and Ofer Mendelevitch. 2025.
+Deepseek-r1 hallucinates more than deepseek-v3.
+Accessed: 2025-02-10.
+Kurt D. Bollacker, Colin Evans, Praveen K. Paritosh,
+Tim Sturge, and Jamie Taylor. 2008. Freebase: a
+collaboratively created graph database for structuring
+human knowledge. In Proceedings of the ACM SIG-
+MOD International Conference on Management of
+Data, SIGMOD 2008, Vancouver, BC, Canada, June
+10-12, 2008 , pages 1247–1250. ACM.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, et al. 2020. Language models are few-shot
+learners. Advances in Neural Information Processing
+Systems , 33:1877–1901.
+Sitao Cheng, Ziyuan Zhuang, Yong Xu, Fangkai Yang,
+Chaoyun Zhang, Xiaoting Qin, Xiang Huang, Ling
+Chen, Qingwei Lin, Dongmei Zhang, Saravan Ra-
+jmohan, and Qi Zhang. 2024. Call me when nec-
+essary: LLMs can efficiently and faithfully reason
+over structured environments. In Findings of the As-
+sociation for Computational Linguistics: ACL 2024 ,
+pages 4275–4295, Bangkok, Thailand. Association
+for Computational Linguistics.
+Mohammad Dehghan, Mohammad Alomrani, Sunyam
+Bagga, David Alfonso-Hermelo, Khalil Bibi, Ab-
+bas Ghaddar, Yingxue Zhang, Xiaoguang Li, Jianye
+Hao, Qun Liu, Jimmy Lin, Boxing Chen, Prasanna
+Parthasarathi, Mahdi Biparva, and Mehdi Reza-
+gholizadeh. 2024. EWEK-QA : Enhanced web and
+efficient knowledge graph retrieval for citation-based
+question answering systems. In Proceedings of the
+62nd Annual Meeting of the Association for Compu-
+tational Linguistics (Volume 1: Long Papers) , pages
+14169–14187, Bangkok, Thailand. Association for
+Computational Linguistics.
+Arthur P Dempster, Nan M Laird, and Donald B Rubin.
+1977. Maximum likelihood from incomplete data
+via the em algorithm. Journal of the royal statistical
+society: series B (methodological) , 39(1):1–22.
+Zixuan Dong, Baoyun Peng, Yufei Wang, Jia Fu, Xi-
+aodong Wang, Xin Zhou, Yongxue Shan, Kangchen
+Zhu, and Weiguo Chen. 2025. Effiqa: Efficient
+question-answering with strategic multi-model col-
+laboration on knowledge graphs. In Proceedings of
+the 31st International Conference on Computational
+Linguistics, COLING 2025, Abu Dhabi, UAE, Jan-
+uary 19-24, 2025 , pages 7180–7194. Association for
+Computational Linguistics.
+9Yu Gu, Yiheng Shu, Hao Yu, Xiao Liu, Yuxiao Dong,
+Jie Tang, Jayanth Srinivasa, Hugo Latapie, and Yu Su.
+2024. Middleware for LLMs: Tools are instrumen-
+tal for language agents in complex environments.
+InProceedings of the 2024 Conference on Empir-
+ical Methods in Natural Language Processing , pages
+7646–7663, Miami, Florida, USA. Association for
+Computational Linguistics.
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song,
+Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma,
+Peiyi Wang, Xiao Bi, et al. 2025. Deepseek-r1: In-
+centivizing reasoning capability in llms via reinforce-
+ment learning. arXiv preprint arXiv:2501.12948 .
+Muhammad Usman Hadi, Rizwan Qureshi, Abbas Shah,
+Muhammad Irfan, Anas Zafar, Muhammad Bilal
+Shaikh, Naveed Akhtar, Jia Wu, Seyedali Mirjalili,
+et al. 2023. A survey on large language models:
+Applications, challenges, limitations, and practical
+usage. Authorea Preprints , 3.
+Gaole He, Yunshi Lan, Jing Jiang, Wayne Xin Zhao, and
+Ji-Rong Wen. 2021. Improving multi-hop knowledge
+base question answering by learning intermediate
+supervision signals. In Proceedings of the 14th ACM
+international conference on web search and data
+mining , pages 553–561.
+Matthew Douglas Hoffman, Du Phan, David Dohan,
+Sholto Douglas, Tuan Anh Le, Aaron Parisi, Pavel
+Sountsov, Charles Sutton, Sharad Vikram, and Rif A.
+Saurous. 2023. Training chain-of-thought via latent-
+variable inference. In Advances in Neural Infor-
+mation Processing Systems 36: Annual Conference
+on Neural Information Processing Systems 2023,
+NeurIPS 2023, New Orleans, LA, USA, December 10
+- 16, 2023 .
+Lei Huang, Weijiang Yu, Weitao Ma, Weihong Zhong,
+Zhangyin Feng, Haotian Wang, Qianglong Chen,
+Weihua Peng, Xiaocheng Feng, Bing Qin, et al. 2025.
+A survey on hallucination in large language models:
+Principles, taxonomy, challenges, and open questions.
+ACM Transactions on Information Systems , 43(2):1–
+55.
+Xiang Huang, Sitao Cheng, Shanshan Huang, Jiayu
+Shen, Yong Xu, Chaoyun Zhang, and Yuzhong Qu.
+2024. QueryAgent: A reliable and efficient reason-
+ing framework with environmental feedback based
+self-correction. In Proceedings of the 62nd Annual
+Meeting of the Association for Computational Lin-
+guistics (Volume 1: Long Papers) , pages 5014–5035,
+Bangkok, Thailand. Association for Computational
+Linguistics.
+Jinhao Jiang, Kun Zhou, Zican Dong, Keming Ye,
+Wayne Xin Zhao, and Ji-Rong Wen. 2023. Structgpt:
+A general framework for large language model to
+reason over structured data. In Proceedings of the
+2023 Conference on Empirical Methods in Natural
+Language Processing , pages 9237–9251.
+Jinhao Jiang, Kun Zhou, Xin Zhao, and Ji-Rong Wen.
+2022. Unikgqa: Unified retrieval and reasoning forsolving multi-hop question answering over knowl-
+edge graph. In The Eleventh International Confer-
+ence on Learning Representations .
+Di Jin, Eileen Pan, Nassim Oufattole, Wei-Hung Weng,
+Hanyi Fang, and Peter Szolovits. 2021. What disease
+does this patient have? a large-scale open domain
+question answering dataset from medical exams. Ap-
+plied Sciences , 11(14):6421.
+Kun Li, Tianhua Zhang, Xixin Wu, Hongyin Luo, James
+Glass, and Helen Meng. 2024. Decoding on graphs:
+Faithful and sound reasoning on knowledge graphs
+through generation of well-formed chains. arXiv
+preprint arXiv:2410.18415 .
+Tianle Li, Xueguang Ma, Alex Zhuang, Yu Gu, Yu Su,
+and Wenhu Chen. 2023. Few-shot in-context learning
+on knowledge base question answering. In Proceed-
+ings of the 61st Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers) ,
+pages 6966–6980, Toronto, Canada. Association for
+Computational Linguistics.
+Linhao Luo, Yuan-Fang Li, Gholamreza Haffari, and
+Shirui Pan. 2024a. Reasoning on graphs: Faithful
+and interpretable large language model reasoning. In
+The Twelfth International Conference on Learning
+Representations, ICLR 2024, Vienna, Austria, May
+7-11, 2024 . OpenReview.net.
+Linhao Luo, Yuan-Fang Li, Gholamreza Haffari, and
+Shirui Pan. 2024b. Reasoning on graphs: Faithful
+and interpretable large language model reasoning. In
+International Conference on Learning Representa-
+tions .
+Linhao Luo, Zicheng Zhao, Chen Gong, Gholamreza
+Haffari, and Shirui Pan. 2024c. Graph-constrained
+reasoning: Faithful reasoning on knowledge graphs
+with large language models. CoRR , abs/2410.13080.
+Costas Mavromatis and George Karypis. 2022. Rearev:
+Adaptive reasoning for question answering over
+knowledge graphs. In Findings of the Association
+for Computational Linguistics: EMNLP 2022 , pages
+2447–2458.
+Costas Mavromatis and George Karypis. 2024. Gnn-
+rag: Graph neural retrieval for large language model
+reasoning. arXiv preprint arXiv:2405.20139 .
+Meta. 2024. Build the future of ai with meta llama 3.
+Zhijie Nie, Richong Zhang, Zhongyuan Wang, and
+Xudong Liu. 2024. Code-style in-context learning for
+knowledge-based question answering. In Proceed-
+ings of the AAAI Conference on Artificial Intelligence ,
+volume 38, pages 18833–18841.
+OpenAI. 2022. Introducing chatgpt.
+OpenAI. 2024a. Hello gpt-4o.
+OpenAI. 2024b. Learning to reason with llms.
+10Shirui Pan, Linhao Luo, Yufei Wang, Chen Chen, Ji-
+apu Wang, and Xindong Wu. 2024. Unifying large
+language models and knowledge graphs: A roadmap.
+IEEE Transactions on Knowledge and Data Engi-
+neering (TKDE) .
+Meng Qu, Junkun Chen, Louis-Pascal A. C. Xhonneux,
+Yoshua Bengio, and Jian Tang. 2021. Rnnlogic:
+Learning logic rules for reasoning on knowledge
+graphs. In 9th International Conference on Learning
+Representations, ICLR 2021, Virtual Event, Austria,
+May 3-7, 2021 . OpenReview.net.
+Prithviraj Sen, Breno W. S. R. de Carvalho, Ryan Riegel,
+and Alexander G. Gray. 2022. Neuro-symbolic in-
+ductive logic programming with logical neural net-
+works. In Thirty-Sixth AAAI Conference on Artificial
+Intelligence, AAAI 2022, Thirty-Fourth Conference
+on Innovative Applications of Artificial Intelligence,
+IAAI 2022, The Twelveth Symposium on Educational
+Advances in Artificial Intelligence, EAAI 2022 Vir-
+tual Event, February 22 - March 1, 2022 , pages 8212–
+8219. AAAI Press.
+Robyn Speer, Joshua Chin, and Catherine Havasi. 2017.
+Conceptnet 5.5: An open multilingual graph of gen-
+eral knowledge. In Proceedings of the AAAI confer-
+ence on artificial intelligence , volume 31.
+Haitian Sun, Bhuwan Dhingra, Manzil Zaheer, Kathryn
+Mazaitis, Ruslan Salakhutdinov, and William Cohen.
+2018. Open domain question answering using early
+fusion of knowledge bases and text. In Proceedings
+of the 2018 Conference on Empirical Methods in
+Natural Language Processing , pages 4231–4242.
+Jiashuo Sun, Chengjin Xu, Lumingyuan Tang, Saizhuo
+Wang, Chen Lin, Yeyun Gong, Lionel Ni, Heung-
+Yeung Shum, and Jian Guo. 2024. Think-on-graph:
+Deep and responsible reasoning of large language
+model on knowledge graph. In The Twelfth Interna-
+tional Conference on Learning Representations .
+Alon Talmor and Jonathan Berant. 2018. The web as
+a knowledge-base for answering complex questions.
+InProceedings of the 2018 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies,
+Volume 1 (Long Papers) , pages 641–651.
+Alon Talmor, Jonathan Herzig, Nicholas Lourie, and
+Jonathan Berant. 2019. Commonsenseqa: A question
+answering challenge targeting commonsense knowl-
+edge. In Proceedings of the 2019 Conference of
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies, Volume 1 (Long and Short Papers) , pages
+4149–4158.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+Bhosale, et al. 2023. Llama 2: Open founda-
+tion and fine-tuned chat models. arXiv preprint
+arXiv:2307.09288 .Keheng Wang, Feiyu Duan, Sirui Wang, Peiguang
+Li, Yunsen Xian, Chuantao Yin, Wenge Rong, and
+Zhang Xiong. 2023a. Knowledge-driven cot: Ex-
+ploring faithful reasoning in llms for knowledge-
+intensive question answering. arXiv preprint
+arXiv:2308.13259 .
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V .
+Le, Ed H. Chi, Sharan Narang, Aakanksha Chowd-
+hery, and Denny Zhou. 2023b. Self-consistency
+improves chain of thought reasoning in language
+models. In The Eleventh International Conference
+on Learning Representations, ICLR 2023, Kigali,
+Rwanda, May 1-5, 2023 . OpenReview.net.
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le,
+Ed H Chi, Sharan Narang, Aakanksha Chowdhery,
+and Denny Zhou. 2024. Self-consistency improves
+chain of thought reasoning in language models. In
+The Eleventh International Conference on Learning
+Representations .
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V . Le,
+and Denny Zhou. 2022a. Chain-of-thought prompt-
+ing elicits reasoning in large language models. In
+Advances in Neural Information Processing Systems
+35: Annual Conference on Neural Information Pro-
+cessing Systems 2022, NeurIPS 2022, New Orleans,
+LA, USA, November 28 - December 9, 2022 .
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+et al. 2022b. Chain-of-thought prompting elicits rea-
+soning in large language models. Advances in Neural
+Information Processing Systems , 35:24824–24837.
+An Yang, Baosong Yang, Binyuan Hui, Bo Zheng,
+Bowen Yu, Chang Zhou, Chengpeng Li, Chengyuan
+Li, Dayiheng Liu, Fei Huang, Guanting Dong, Hao-
+ran Wei, Huan Lin, Jialong Tang, Jialin Wang, Jian
+Yang, Jianhong Tu, Jianwei Zhang, Jianxin Ma, Jin
+Xu, Jingren Zhou, Jinze Bai, Jinzheng He, Junyang
+Lin, Kai Dang, Keming Lu, Keqin Chen, Kexin Yang,
+Mei Li, Mingfeng Xue, Na Ni, Pei Zhang, Peng
+Wang, Ru Peng, Rui Men, Ruize Gao, Runji Lin,
+Shijie Wang, Shuai Bai, Sinan Tan, Tianhang Zhu,
+Tianhao Li, Tianyu Liu, Wenbin Ge, Xiaodong Deng,
+Xiaohuan Zhou, Xingzhang Ren, Xinyu Zhang, Xipin
+Wei, Xuancheng Ren, Yang Fan, Yang Yao, Yichang
+Zhang, Yu Wan, Yunfei Chu, Yuqiong Liu, Zeyu
+Cui, Zhenru Zhang, and Zhihao Fan. 2024. Qwen2
+technical report. arXiv preprint arXiv:2407.10671 .
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+Tom Griffiths, Yuan Cao, and Karthik Narasimhan.
+2023. Tree of thoughts: Deliberate problem solving
+with large language models. In Advances in Neural
+Information Processing Systems 36: Annual Confer-
+ence on Neural Information Processing Systems 2023,
+NeurIPS 2023, New Orleans, LA, USA, December 10
+- 16, 2023 .
+Wen-tau Yih, Matthew Richardson, Christopher Meek,
+Ming-Wei Chang, and Jina Suh. 2016. The value of
+11semantic parse labeling for knowledge base question
+answering. In Proceedings of the 54th Annual Meet-
+ing of the Association for Computational Linguistics,
+ACL 2016, August 7-12, 2016, Berlin, Germany, Vol-
+ume 2: Short Papers . The Association for Computer
+Linguistics.
+Ping Yu, Tianlu Wang, Olga Golovneva, Badr
+AlKhamissy, Gargi Ghosh, Mona T. Diab, and Asli
+Celikyilmaz. 2022. ALERT: adapting language mod-
+els to reasoning tasks. CoRR , abs/2212.08286.
+Jing Zhang, Xiaokang Zhang, Jifan Yu, Jian Tang, Jie
+Tang, Cuiping Li, and Hong Chen. 2022. Subgraph
+retrieval enhanced model for multi-hop knowledge
+base question answering. In Proceedings of the 60th
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers) , pages 5773–
+5784.
+Tianyang Zhong, Zhengliang Liu, Yi Pan, Yutong
+Zhang, Yifan Zhou, Shizhe Liang, Zihao Wu, Yan-
+jun Lyu, Peng Shu, Xiaowei Yu, Chao Cao, Hanqi
+Jiang, Hanxu Chen, Yiwei Li, Junhao Chen, Huawen
+Hu, Yihen Liu, Huaqin Zhao, Shaochen Xu, Haixing
+Dai, Lin Zhao, Ruidong Zhang, Wei Zhao, Zhenyuan
+Yang, Jingyuan Chen, Peilong Wang, Wei Ruan, Hui
+Wang, Huan Zhao, Jing Zhang, Yiming Ren, Shihuan
+Qin, Tong Chen, Jiaxi Li, Arif Hassan Zidan, Afrar
+Jahin, Minheng Chen, Sichen Xia, Jason Holmes,
+Yan Zhuang, Jiaqi Wang, Bochen Xu, Weiran Xia,
+Jichao Yu, Kaibo Tang, Yaxuan Yang, Bolun Sun, Tao
+Yang, Guoyu Lu, Xianqiao Wang, Lilong Chai, He Li,
+Jin Lu, Lichao Sun, Xin Zhang, Bao Ge, Xintao Hu,
+Lian Zhang, Hua Zhou, Lu Zhang, Shu Zhang, Ning-
+hao Liu, Bei Jiang, Linglong Kong, Zhen Xiang,
+Yudan Ren, Jun Liu, Xi Jiang, Yu Bao, Wei Zhang,
+Xiang Li, Gang Li, Wei Liu, Dinggang Shen, Andrea
+Sikora, Xiaoming Zhai, Dajiang Zhu, and Tianming
+Liu. 2024. Evaluation of openai o1: Opportunities
+and challenges of AGI. CoRR , abs/2409.18486.A Rationale and Details of the EM
+Algorithm
+We provide the motivation and the details of apply-
+ing the EM algorithm to optimize our framework.
+A.1 Overview
+We have two modules:
+•ReAligner , parameterized by ψ, which gener-
+ates Graph-aware Reasoning Chains zgiven
+(G, q).
+•Responser , parameterized by w, which pre-
+dicts the final answer agiven the question q
+and candidate Graph-aware Reasoning Chain
+z.
+Given a training set of triples {(G, q, a)}, our
+objective is to maximize:
+O(w, ψ) =X
+(G,q,a)log
+Ez∼pψ(z|G,q)
+pw(a|q, z)
+.
+Because exact marginalization over zcan be ex-
+pensive, we employ an EM-style approach to itera-
+tively refine both modules.
+A.2 Rationale
+The selection of the EM algorithm is fundamentally
+motivated by the central challenge and objective
+of the RAR: generating latent natural language (NL)
+reasoning steps for KGQA.
+A.2.1 Core Challenge: Generating Latent NL
+Reasoning
+•RARaims to produce complex, human-like NL
+reasoning chains – the intermediate “thought
+process” connecting a question to its answer
+using a Knowledge Graph (KG).
+•Crucially, these detailed reasoning steps are
+not available in standard KGQA training
+datasets. They constitute latent variables
+within our model.
+A.2.2 Inadequacy of Direct Supervision
+Methods
+•In standard SFT applied within RoG (Luo
+et al., 2024a), relation sequences absent from
+the original training data are often generated.
+To label these sequences for training, the pro-
+cess frequently relies on heuristics to create
+pseudo-gold labels, such as identifying the
+shortest KG path between query and answer
+entities, which can be potentially noisy.
+12•This heuristic-based supervision is insufficient
+for training models to generate the complex,
+multi-step, logically nuanced NL reasoning
+thatRARtargets, especially when multiple con-
+straints are involved.
+A.2.3 EM as the Principled Approach for
+Latent Variables
+•EM is the standard, principled approach for
+parameter estimation in models with latent
+variables.
+•It provides a formal framework to optimize
+the Reasoner (generating the latent NL chain)
+and the Aligner (grounding the chain to the
+KG) without requiring explicit supervision
+for the intermediate NL reasoning steps.
+•Optimization is guided indirectly by maximiz-
+ing the likelihood of observing the correct
+final answer, conditioned on the feasibility of
+the generated reasoning chain being aligned
+to the KG.
+A.2.4 Necessity of Iterative Refinement
+•Generating coherent, long-form NL reason-
+ing is challenging. Initial attempts, especially
+early in training, are likely to be imperfect or
+logically flawed.
+•The iterative nature of the EM algorithm is
+well-suited for this progressive refinement: E-
+step identifies the most likely or “best” la-
+tent reasoning chains produced by the current
+model that successfully link the question to
+the correct answer via a feasible KG align-
+ment. This step essentially evaluates the cur-
+rent reasoning quality based on outcomes; M-
+step updates the parameters of the Reasoner
+and Aligner models by training them on these
+high-quality reasoning chains identified in the
+E-step. This step aims to make the models
+generate more chains similar to the successful
+ones.
+•This iterative E-M loop allows the system to
+gradually improve the quality, logical coher-
+ence, and KG-alignability of the generated la-
+tent reasoning, as demonstrated qualitatively
+in Fig. 4.
+A.2.5 Connections to Reinforcement Learning
+Connection to Implicit RL. The EM algorithm, as
+applied in RAR, can be viewed as a form of implicit
+Reinforcement Learning:•The E-step acts like a selection or filtering
+mechanism based on the quality of the reason-
+ing chain, implicitly assigning a high reward
+(e.g, 1) to successful chains (reaching the cor-
+rect answer via KG alignment) and low reward
+(e.g, 0) to unsuccessful ones.
+•The M-step , particularly the Reasoner up-
+date (maximizing logp(zhatI|q)for selected
+high-quality chains zhatI), mathematically
+resembles a policy gradient update ( E[R∗
+∇logp(z|q)]≈R∗∇logp(ˆz|q)) where Ris
+effectively this implicit binary reward.
+Thus, EM reinforces the generation of “good” rea-
+soning chains without the need for explicit reward
+engineering.
+Why EM Was Preferred Over Explicit Rein-
+forcement Learning. While the EM process here
+shares similarities with RL (see next point), we
+opted for EM over explicit RL formulations (like
+PPO) for several practical reasons:
+•Reward Function Design: Crafting a good
+reward function (‘R‘) that accurately captures
+the quality of multi-step NL reasoning is non-
+trivial.
+•Training Complexity and Cost: Explicit RL
+methods often lead to higher computational
+costs and potentially unstable training.
+•Efficiency and Simplicity: EM, derived natu-
+rally from the maximum likelihood objective
+for latent variable models, offers a more direct,
+mathematically grounded, and often simpler
+optimization pathway for our specific problem
+structure.
+A.3 Details of EM Algorithm
+A.3.1 Step 1: Updating Responser
+1.Sample Candidate Graph-aware Reason-
+ing Chains. For each training example
+(G, q, a), sample KGraph-aware Reasoning
+Chains:
+zk∼pψ(z| G, q), k = 1, . . . , K.
+Letˆz={z1, z2, . . . , z K}.
+2.Approximate the Objective for w.The term
+logEz∼pψ(z|G,q)
+pw(a|q, z)
+13is approximated by
+log
+1
+KKX
+k=1pw(a|q, zk)
+.
+We then take gradients (w.r.t. w) and update w
+so that pw(a|q, z)is more likely to produce
+the correct afor the sampled Graph-aware
+Reasoning Chains.
+3.Result. After updating w, Responser pw(a|
+q, z)is better aligned with whatever Graph-
+aware Reasoning Chains pψcurrently emits.
+A.3.2 Step 2: EM-Style Update for ReAligner
+After wis updated, we refine the ReAligner pψ(z|
+G, q). In EM terms, we view zas a latent variable:
+E-Step (Posterior Inference)
+•Compute / Re-rank Graph-aware Reason-
+ing Chains. Re-sample or re-rank the K
+Graph-aware Reasoning Chains using the up-
+dated pw. We want Graph-aware Reasoning
+Chains that are “most aligned” with the cor-
+rect answer a. Formally:
+pw,ψ(z| G, q, a)∝pw(a|q, z)pψ(z| G, q).
+•Scoring. For a single Graph-aware Reasoning
+Chain z, define
+S(z) = log pw(a|q, z) + log pψ(z| G, q).
+•Selecting High-Quality Graph-aware
+Reasoning Chains. Rank (or sam-
+ple) Graph-aware Reasoning Chains
+byS(z)and select the top set zI=
+{top-KGraph-aware Reasoning Chains }.
+M-Step (Update ψ)
+•Treat zI(the selected high-quality Graph-
+aware Reasoning Chains) as if they were ob-
+served.
+• Update ψby maximizing:
+logpψ(zI| G, q) =X
+z∈zIlogpψ(z| G, q)
+•In practice, this amounts to standard fine-
+tuning (e.g., instruction tuning or teacher forc-
+ing) of pψon the newly identified high-quality
+Graph-aware Reasoning Chains.A.3.3 Complete Iteration
+A single iteration of our EM-style algorithm pro-
+ceeds as follows:
+1.(Update w):For each sample (G, q, a), draw
+KGraph-aware Reasoning Chains from pψ,
+then update wby maximizing
+log 
+1
+KKX
+k=1pw(a|q, zk)!
+.
+2.(E-Step): Using the updated w, compute
+pw,ψ(z| G, q, a)∝pw(a|q, z)pψ(z| G, q).
+Select high-quality Graph-aware Reasoning
+Chains zIfrom the candidates.
+3.(M-Step): Update ψby maximizing
+logpψ(zI| G, q), i.e. fine-tune pψso that it is
+more likely to emit zIin the future.
+This loop can be repeated until convergence or
+for a fixed number of epochs.
+A.3.4 Practical Variations
+1.Top-Kvs. Full Posterior. Instead of sum-
+ming/sampling over all subsets, it is simpler
+to pick the top- KGraph-aware Reasoning
+Chains by S(·).
+2.Skipping Responser Optimization. To fur-
+ther improve efficiency, we can skip op-
+timizing Responser. LLMs often possess
+strong zero-shot summarization or question-
+answering capabilities, which means they
+can produce high-quality answers from given
+Graph-aware Reasoning Chains without ad-
+ditional training. As a result, we can treat
+an LLM as a pre-optimized Responser and
+focus solely on updating ReAligner, thereby
+reducing overall computation.
+B More Related Work
+B.1 Comparison with Agent Exploration
+Methods
+To situate RARwithin the KGQA landscape, we first
+contrast it with representative agent exploration
+methods such as ToG (Sun et al., 2024). Although
+both paradigms comprise stages that can be infor-
+mally mapped to reasoning andgrounding , their
+internal principles diverge markedly.
+14Training methodology and optimization. RAR
+is trained with a mathematically grounded expec-
+tation–maximisation (EM) procedure that explic-
+itly and stably refines two complementary capabili-
+ties: the NL Reasoner and the KG -aware Aligner .
+By contrast, many agent methods rely more heav-
+ily on prompt or workflow engineering (Cheng
+et al., 2024; Gu et al., 2024; Huang et al., 2024; Li
+et al., 2023; Nie et al., 2024); they seldom perform
+task-specific optimization that directly targets the
+core reasoning mechanism.
+Accuracy, reliability, and complexity han-
+dling. The synergy between NL reasoning,
+KG-constrained alignment, and EM -guided super-
+vised fine -tuning translates into markedly higher ac-
+curacy and robustness for RAR(see Tab. 1). Empiri-
+cally, its explicit decomposition allows it to cope
+well with multi -hop and conjunctive constraints
+that are challenging for purely prompt -driven
+agents.
+Resource consumption. Once training is fin-
+ished, inference in RARcan be carried out by a col-
+lection of relatively small, specialized, fine -tuned
+models—one each for the Reasoner, Aligner, and
+Responser. This modularity yields the efficiency
+gains reported in Tab. ??. Agent systems, in con-
+trast, often incur higher latency and cost because
+they perform several large -LLM calls while explor-
+ing the KG.
+Taken together, these differences show that
+RAR is not a mere variant of the agent
+paradigm; its EM -centered optimization strategy
+and KG -constrained decoding constitute a distinct
+design that offers both practical efficiency and
+stronger empirical performance.
+B.2 Comparison with Path Generation
+Methods
+RARalso differs fundamentally from path genera-
+tion methods such as RoG (Luo et al., 2024a) and
+GCR (Luo et al., 2024c). Where those systems
+directly predict a linear sequence of KG relations,
+ours maintains a higher -level, human -readable plan
+in natural language and lets the Aligner ground
+each step to KG triples.
+Specifically, (i)the Reasoner produces a
+multi -step NL chain that expresses the conceptual
+logic; (ii)the Aligner incrementally matches every
+NL step to concrete triples through KG -constrained
+decoding; and (iii)the Responser integrates evi-
+dence from both the NL chain and the aligned KGpath to craft the final answer. Training again relies
+on EM—iteratively improving latent NL chains
+that can be aligned and that ultimately yield correct
+answers—whereas RoG and related work usually
+depend on direct SFT with shortest KG paths that
+may be noisy supervision signals.
+Illustrative example. For the query “What did
+Dr Josef Mengele do?” the two paradigms unfold
+differently:
+•RoG. An LLM planner outputs the rela-
+tion people.person.profession ; a sym-
+bolic retriever then follows this edge in the
+KG to obtain the triple (Josef Mengele,
+profession, Physician) , and the answer
+Physician is returned.
+•RAR.Step 1 (A Reasoner step) proposes:
+“Identify the profession associated with
+Josef Mengele .” The Aligner grounds this to
+the same triple as above. The Responser fi-
+nally reports Physician , explicitly citing both
+the reasoning chain and the grounded path.
+Handling complex constraints. Because RoG
+represents reasoning as a single linear relation se-
+quence, it struggles with conjunctive queries such
+as“presidents who were also actors” ; after follow-
+ingprofession →Actor , it cannot backtrack to
+verify profession →President .RAR, in con-
+trast, naturally decomposes the query into two suc-
+cessive NL steps (“find presidents” →“filter those
+who are actors”) and grounds each step separately,
+ensuring both constraints are satisfied.
+Robustness to noisy supervision. Shortest -path
+supervision can be incorrect when more seman-
+tically plausible paths exist. By letting EM dis-
+cover latent NL chains that are both alignable and
+answer -bearing, RAR avoids this brittleness and
+achieves the quality gains visualized in Fig. 4 of
+the submission.
+In summary, the collaboration of an explicit
+NL Reasoner, a KG -constrained Aligner, and
+EM-based optimization endows RARwith a distinc-
+tive combination of interpretability, flexibility, and
+empirical strength that is not achieved by prior
+agent exploration or path generation methods.
+15C Experimental Setup
+C.1 Fine-tuning Datasets and Knowledge
+Graph
+For evaluation, we use two benchmark KGQA
+datasets: WebQuestionSP (WebQSP) (Yih et al.,
+2016) and Complex WebQuestions (CWQ) (Tal-
+mor and Berant, 2018). To ensure fair comparison,
+we adopt identical train and test splits as previous
+works (Jiang et al., 2022; Luo et al., 2024b). The
+detailed statistics of these datasets are presented
+in Tab. 6. Both WebQSP and CWQ are based on
+Freebase (Bollacker et al., 2008). To reduce com-
+putational overhead and memory consumption, we
+utilize the same subgraphs as previous work (Luo
+et al., 2024b). Additionally, we preprocess Free-
+base by converting CVT (Compound Value Type)
+nodes, which represent n-ary relationships, into
+binary relationships by concatenating edge labels
+with “-” as the delimiter, following Li et al. (2024).
+C.2 Datasets for Cold Starting
+To initialize the training of Reasoner and Aligner,
+we leverage high-quality Reasoning Chains and
+Knowledge Paths derived from SPARQL queries
+in the WebQSP and CWQ datasets. This approach
+prevents the models from generating malformed
+outputs during early training stages.
+The SPARQL queries in these datasets represent
+the gold-standard Reasoning Chain that human ex-
+perts would use to solve questions using the KG.
+We decompose these SPARQL queries according to
+a predefined grammar, breaking them into atomic
+chunks that each represent a single reasoning step.
+For each chunk, we query Freebase to obtain the
+corresponding triples, then use GPT-4o to generate
+natural language reasoning chains based on these
+retrieved triples. Through this process, we generate
+a dataset of 2,000 high-quality Reasoning Chains
+with their corresponding Knowledge Paths for each
+question. This dataset enables us to perform cold-
+start pretraining of Reasoner and Aligner, teach-
+ing them to generate well-structured, step-by-step
+Reasoning Chains and Knowledge Paths with ap-
+propriate special tokens, a crucial foundation for
+subsequent optimization using the EM algorithm.
+C.3 Hyperparameters
+For Responser, we adopt Llama-3.1-8B (Meta,
+2024) without fine-tuning based on our prelimi-
+nary experiments (detailed analysis in App. A.3.4).
+For both Reasoner and Aligner, we conduct exten-sive experiments with various lightweight LLMs
+ranging from 0.5B to 8B parameters (Yang et al.,
+2024; Touvron et al., 2023; Meta, 2024). All mod-
+els share the same hyperparameter configuration:
+training for 3 epochs with a batch size of 4 and a
+learning rate of 2e-5. We employ a cosine learning
+rate scheduler with a warmup ratio of 0.03. The
+training is performed on 4 A6000 GPUs for each
+model variant.
+D Details of KG-constrained Decoding
+For efficient knowledge graph operations, we im-
+plemented a Virtuoso-based Freebase instance with
+distributed high-speed SPARQL querying capabil-
+ities. Our system achieves a throughput of 2,000
+requests per second, enabling rapid graph traversal
+and neighborhood node retrieval during the con-
+strained decoding process. This high-performance
+infrastructure allows us to efficiently retrieve next-
+hop candidates for token constraints directly from
+the knowledge graph.
+E Case Study of Different Iteration Steps
+In Fig. 7, we provide two examples to investigate
+the effect of iteration steps of the EM algorithm.
+F Templates and Prompts
+In this section, we illustrate all the prompts used in
+the experiments.
+Reasoning Chain Template. The template of Rea-
+soning Chains generated by Reasoner is shown in
+Fig. 8, where each siis a discrete reasoning step in
+natural language.
+Knowledge Path Template. The template of
+Knowledge Path generated by Aligner is shown
+in Fig. 9, where eabdrdenotes the entities and
+relations from the KG.
+ReAligner Prompt. The prompt for instructing
+ReAligner is shown in Fig. 10, where the task is
+to generate the Reasoning Chain and Knowledge
+Path given the question and the KG.
+Responser Prompt. The prompt for instructing
+Responser is shown in Fig. 11, where the task is
+to generate the final answer based on the given the
+question and the generated Reasoning Chain and
+Knowledge Path.
+LLM-driven Consolidation Prompt. The prompt
+for LLM-driven Consolidation is shown in Fig. 12.
+We use RARto generate KKnowledge Paths and
+hypothesis answers for each question. The Knowl-
+edge Paths and hypothesis answers are provided
+16DatasetDataset Statistics Statistics of Answer Numbers
+#Train #Test #Ans = 1 2 ≥#Ans≤4 5≥#Ans≤9 #Ans ≥10
+WebQSP 2,826 1,628 51.2% 27.4% 8.3% 12.1%
+CWQ 27,639 3,531 70.6% 19.4% 6% 4%
+Table 6: Statistics of datasets.
+Case1Question: What high school did the artist who recorded “Girl Tonight” attend? Answer: Petersburg.Steps20100Reasoning Chain &Knowledge PathFirst,identify the artist “c” associated with the recording“Girl Tonight”. <John H. Guyer, school_type, High school> Next,determinethe highschoolattended by the artist“c”.<John H. Guyer, notable_object, High school> First,identify the artist “c” associated with the recording“Girl Tonight”.        <Trey Songz,recordings,Girl Tonight >Next,determine the educational institutions“x”attended by artist“c”.<Trey Songz,education_institution,Petersburg>Finally, confirm which of educational institutions “x”isahighschool.<Petersburg, school_type, High school> ResponseJohn H. Guyer✗Petersburg✓Case2Question: What type of Claude Debussy music appears in the filmBlack Tights?Answer: Ballet.Steps20100Reasoning Chain &Knowledge PathFirst,identifythe type of music “x” associated with Claude Debussy.<Claude Debussy,compositions,En blanc et noir>Next,confirm that the type of music “x”is featured in the film Black Tights.<En blanc et noir,composer,Claude Debussy>First,identifythe type of music “x” associated with Claude Debussy.<Claude Debussy,genre,Ballet>Next,determine whether the type of music “x” appears in the filmBlack Tights.<Ballet, films_in_this_genre,Black Tights>ResponseEn blanc et noir✗Ballet✓
+mismatch(John H. Guyer, school_type,High school) Trey Songz <|> music.featured_artist.recordings <|> Girl Tonight <|> </TRIPLE><TRIPLE> <|> Trey Songz <|> people.person.education-education.education.institution <|> Petersburg High School <|> </TRIPLE><TRIPLE> <|> Petersburg High School <|> education.educational_institution.school_type <|> High school <|> </TRIPLE></ALIGN>\nSummarization:\n<|> intermediate | Trey Songz <|> answer | Petersburg High School
+Figure 7: Examples of Reasoning Chains and Knowledge Paths generated by RARunder different iteration steps.
+Reasoning Chain Template
+<THINK> s1s2s3. . . sn</THINK>
+Figure 8: The template for the Reasoning Chain gener-
+ated by Reasoner.
+to general LLMs to answer the questions without
+fine-tuning.
+17Knowledge Path Template
+<ALIGN><TRIPLE> <|>e1<|>r1<|>e′
+1</TRIPLE> . . .<TRIPLE> <|>en<|>rn<|>e′
+n</TRIPLE></ALIGN>
+Figure 9: The template of Knowledge Paths generated by Aligner.
+ReAligner Prompt
+============================= Prompt Input ================================
+Generate a step-by-step thinking process for the given question. Ensure the thinking process is aligned with triples in
+the knowledge base.
+Question:
+<Question>
+Query entities:
+<Question Entities>
+============================= LLM Output ================================
+Thinking process:
+<Reasoning Chain>
+Align Process:
+<Knowledge Path>
+Figure 10: The prompt template for ReAligner.
+Responser Prompt
+============================= Prompt Input ================================
+Generate a step-by-step thinking process for the given question. Ensure the thinking process is aligned with triples in
+the knowledge base.
+Question:
+<Question>
+Query entities:
+<Question Entities>
+Thinking process:
+<Reasoning Chain>
+Align Process:
+<Knowledge Path>
+Summarization:
+============================= LLM Output ================================
+<Answer>
+Figure 11: The prompt template for Responser.
+18LLM-driven Consolidation Prompt
+============================= Prompt Input ================================
+Relevant triples:
+<Knowledge Path 1> . Therefore, a possible answer could be: <Hypothesis Answer 1>
+. . .
+<Knowledge Path K> . Therefore, a possible answer could be: <Hypothesis Answer K>
+Question:
+<Question>
+Based on the reasoning paths, please answer the given question. Please keep the answer as simple as possible and only
+return answers. Please return each answer in a new line.
+============================= LLM Output ================================
+<Answer 1>
+<Answer 2>
+. . .
+Figure 12: The prompt template for LLM-driven Consolidation.
+19

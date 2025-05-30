@@ -1,0 +1,580 @@
+arXiv:2505.20737v1  [cs.AI]  27 May 2025Preprint. Under review.
+RRO: LLM Agent Optimization Through Rising Reward
+Trajectories
+Zilong Wang1Jingfeng Yang2Sreyashi Nag2Samarth Varshney2
+Xianfeng Tang2Haoming Jiang2Jingbo Shang1Sheikh Muhammad Sarwar2
+1University of California, San Diego2Amazon
+{zlwang, jshang}@ucsd.edu smsarwar@amazon.com
+Abstract
+Large language models (LLMs) have exhibited extraordinary performance
+in a variety of tasks while it remains challenging for them to solve complex
+multi-step tasks as agents. In practice, agents sensitive to the outcome of
+certain key steps which makes them likely to fail the task because of a subtle
+mistake in the planning trajectory. Recent approaches resort to calibrating
+the reasoning process through reinforcement learning. They reward or pe-
+nalize every reasoning step with process supervision, as known as Process
+Reward Models (PRMs). However, PRMs are difficult and costly to scale up
+with a large number of next action candidates since they require extensive
+computations to acquire the training data through the per-step trajectory ex-
+ploration. To mitigate this issue, we focus on the relative reward trend across
+successive reasoning steps and propose maintaining an increasing reward
+in the collected trajectories for process supervision, which we term Re-
+ward Rising Optimization (RRO ). Specifically, we incrementally augment the
+process supervision until identifying a step exhibiting positive reward dif-
+ferentials, i.e. rising rewards , relative to its preceding iteration. This method
+dynamically expands the search space for the next action candidates, effi-
+ciently capturing high-quality data. We provide mathematical groundings
+and empirical results on the WebShop and InterCode-SQL benchmarks,
+showing that our proposed RRO achieves superior performance while
+requiring much less exploration cost.
+1 Introduction
+Large language models (LLMs) have achieved remarkable advancements in numerous
+domains, ranging from natural language understanding to code generation (Brown et al.,
+2020; Kojima et al., 2022; Wei et al., 2022; Chen et al., 2023b; Zhou et al., 2023; Zhong et al.,
+2024). Their ability to process and generate human-like text has significantly expanded their
+utility in real-world applications. However, solving complex multistep tasks that require
+reasoning and decision-making capabilities continue to pose substantial challenges for these
+models (Lightman et al., 2024; Wang et al., 2024b; Song et al., 2024). This limitation has
+led researchers to explore novel methodologies to enhance the reasoning abilities of LLMs,
+particularly in the context of agentic tasks requiring temporal sequential decision-making
+based on the environment feedback (Song et al., 2024; Xiong et al., 2024).
+Recent efforts have introduced the reinforcement learning framework into the agent train-
+ing. They leverage Process Reward Models (PRMs) to evaluate and guide every reasoning
+step (Wang et al., 2024c; Luo et al., 2024; Xiong et al., 2024). PRMs utilize reinforcement
+signals from each step to encourage effective reasoning trajectories while penalizing subop-
+timal steps, thereby enhancing problem-solving. Despite their promise, the scalability of
+PRMs remains a tricky problem. Acquiring training data for these models often relies on the
+next action exploration for every reasoning step, which is computationally expensive and
+time-intensive (Wang et al., 2024b; Xiong et al., 2024; Luo et al., 2024). Such requirements
+1Preprint. Under review.
+(b) Process Reward Estimation(a) Direct Preference Optimization
+LLM<latexit sha1_base64="LvGrjKY5OkOcsLoQv1QJyK+Df7o=">AAACD3icbVC7SgNBFJ2NrxhfUUub0aBEkLAbIdoIARsthCjGBJKwzE5mkyGzD2buimHZP7DxV2wsFLG1tfNH7EQnj0KNBy4czrmXe+9xQsEVmOa7kZqanpmdS89nFhaXlleyq2tXKogkZVUaiEDWHaKY4D6rAgfB6qFkxHMEqzm944Ffu2ZS8cC/hH7IWh7p+NzllICW7OyOtOMmsBuIKxdnSZJXNt/DxOa7+Ag3XUloXEzi/cTO5syCOQSeJNaY5MpW8vG5+VWo2Nm3Zjugkcd8oIIo1bDMEFoxkcCpYEmmGSkWEtojHdbQ1CceU614+E+Ct7XSxm4gdfmAh+rPiZh4SvU9R3d6BLrqrzcQ//MaEbiHrZj7YQTMp6NFbiQwBHgQDm5zySiIviaESq5vxbRLdAqgI8zoEKy/L0+Sq2LBKhVK51aufIpGSKMNtIXyyEIHqIxOUAVVEUW36B49oifjzngwno2XUWvKGM+so18wXr8BUOmgAQ==</latexit>rPRM(si,ai)=23Average the outcome rewardsTrajectory Prefix Trajectory Rollouts
+<latexit sha1_base64="3aVaCPh1LM7+otU8z03RZi03pRk=">AAAB7nicbVA9SwNBEJ2LXzF+RS1tFoNgFe4sop0BG+0imA9IjjC32UuW7O0du3tCOPIjbCwUsfXniJ3/xs0lhSY+GHi8N8PMvCARXBvX/XYKa+sbm1vF7dLO7t7+QfnwqKXjVFHWpLGIVSdAzQSXrGm4EayTKIZRIFg7GN/M/PYjU5rH8sFMEuZHOJQ85BSNldq9EZoMp/1yxa26Ocgq8Rakcv0JORr98ldvENM0YtJQgVp3PTcxfobKcCrYtNRLNUuQjnHIupZKjJj2s/zcKTmzyoCEsbIlDcnV3xMZRlpPosB2RmhGetmbif953dSEV37GZZIaJul8UZgKYmIy+50MuGLUiIklSBW3txI6QoXU2IRKNgRv+eVV0rqoerVq7d6r1O/maUARTuAUzsGDS6jDLTSgCRTG8AQv8OokzrPz5rzPWwvOYuYY/sD5+AEBuJDQ</latexit>ˆa<latexit sha1_base64="3aVaCPh1LM7+otU8z03RZi03pRk=">AAAB7nicbVA9SwNBEJ2LXzF+RS1tFoNgFe4sop0BG+0imA9IjjC32UuW7O0du3tCOPIjbCwUsfXniJ3/xs0lhSY+GHi8N8PMvCARXBvX/XYKa+sbm1vF7dLO7t7+QfnwqKXjVFHWpLGIVSdAzQSXrGm4EayTKIZRIFg7GN/M/PYjU5rH8sFMEuZHOJQ85BSNldq9EZoMp/1yxa26Ocgq8Rakcv0JORr98ldvENM0YtJQgVp3PTcxfobKcCrYtNRLNUuQjnHIupZKjJj2s/zcKTmzyoCEsbIlDcnV3xMZRlpPosB2RmhGetmbif953dSEV37GZZIaJul8UZgKYmIy+50MuGLUiIklSBW3txI6QoXU2IRKNgRv+eVV0rqoerVq7d6r1O/maUARTuAUzsGDS6jDLTSgCRTG8AQv8OokzrPz5rzPWwvOYuYY/sD5+AEBuJDQ</latexit>ˆa<latexit sha1_base64="3aVaCPh1LM7+otU8z03RZi03pRk=">AAAB7nicbVA9SwNBEJ2LXzF+RS1tFoNgFe4sop0BG+0imA9IjjC32UuW7O0du3tCOPIjbCwUsfXniJ3/xs0lhSY+GHi8N8PMvCARXBvX/XYKa+sbm1vF7dLO7t7+QfnwqKXjVFHWpLGIVSdAzQSXrGm4EayTKIZRIFg7GN/M/PYjU5rH8sFMEuZHOJQ85BSNldq9EZoMp/1yxa26Ocgq8Rakcv0JORr98ldvENM0YtJQgVp3PTcxfobKcCrYtNRLNUuQjnHIupZKjJj2s/zcKTmzyoCEsbIlDcnV3xMZRlpPosB2RmhGetmbif953dSEV37GZZIaJul8UZgKYmIy+50MuGLUiIklSBW3txI6QoXU2IRKNgRv+eVV0rqoerVq7d6r1O/maUARTuAUzsGDS6jDLTSgCRTG8AQv8OokzrPz5rzPWwvOYuYY/sD5+AEBuJDQ</latexit>ˆa
+<latexit sha1_base64="VQE8sLzyI29SOkQiYxrOdZboiG0=">AAAB6nicbZDLSgMxFIbP1EtrvVVdihIsgqsy46K6LLhRVxXtBdqhZNJMG5pJhiSjlKGP4MaFIm59Inc+gw+h6WWhrT8EPv7/HHLOCWLOtHHdTyeztLyyms2t5dc3Nre2Czu7dS0TRWiNSC5VM8CaciZozTDDaTNWFEcBp41gcDHOG/dUaSbFnRnG1I9wT7CQEWysdYs7rFMouiV3IrQI3gyKlcPvr+z1w0G1U/hodyVJIioM4VjrlufGxk+xMoxwOsq3E01jTAa4R1sWBY6o9tPJqCN0bJ0uCqWyTxg0cX93pDjSehgFtjLCpq/ns7H5X9ZKTHjup0zEiaGCTD8KE46MROO9UZcpSgwfWsBEMTsrIn2sMDH2Onl7BG9+5UWon5a8cql84xUrVzBVDvbhCE7AgzOowCVUoQYEevAIz/DicOfJeXXepqUZZ9azB3/kvP8AiauQ/Q==</latexit>ai<latexit sha1_base64="e8nay6vVnMUaWrP3Q0jT+UAshI8=">AAAB6nicbZDLSgMxFIbP1EtrvVVdihIsgqsy46K6LLhRVxXtBdqhZNJMG5pJhiSjlKGP4MaFIm59Inc+gw+h6WWhrT8EPv7/HHLOCWLOtHHdTyeztLyyms2t5dc3Nre2Czu7dS0TRWiNSC5VM8CaciZozTDDaTNWFEcBp41gcDHOG/dUaSbFnRnG1I9wT7CQEWysdSs7rFMouiV3IrQI3gyKlcPvr+z1w0G1U/hodyVJIioM4VjrlufGxk+xMoxwOsq3E01jTAa4R1sWBY6o9tPJqCN0bJ0uCqWyTxg0cX93pDjSehgFtjLCpq/ns7H5X9ZKTHjup0zEiaGCTD8KE46MROO9UZcpSgwfWsBEMTsrIn2sMDH2Onl7BG9+5UWon5a8cql84xUrVzBVDvbhCE7AgzOowCVUoQYEevAIz/DicOfJeXXepqUZZ9azB3/kvP8Anv+RCw==</latexit>oiStep-level Preference Data<latexit sha1_base64="2s/7/b9xXczdcPhXWSNOibBfe1Q=">AAAB7HicbZDLSsNAFIZPvLXWW9WlKMEiuCqJi+qy4EZdVTBtoQ1lMp20QyeTMHOilNBncONCEbc+kDufwYfQ6WWhrT8MfPz/Ocw5J0gE1+g4n9bS8srqWi6/XtjY3NreKe7u1XWcKso8GotYNQOimeCSechRsGaiGIkCwRrB4HKcN+6Z0jyWdzhMmB+RnuQhpwSN5ZFOhqNOseSUnYnsRXBnUKoefX/lbh4Oa53iR7sb0zRiEqkgWrdcJ0E/Iwo5FWxUaKeaJYQOSI+1DEoSMe1nk2FH9olxunYYK/Mk2hP3d0dGIq2HUWAqI4J9PZ+Nzf+yVorhhZ9xmaTIJJ1+FKbCxtgeb253uWIUxdAAoYqbWW3aJ4pQNPcpmCO48ysvQv2s7FbKlVu3VL2GqfJwAMdwCi6cQxWuoAYeUODwCM/wYknryXq13qalS9asZx/+yHr/AV8RkhQ=</latexit>at<latexit sha1_base64="lHRYJPLdtJRKZBgIpy9Ti5JYWOw=">AAAB6nicbZDLSgMxFIYz9dJab1WXogSL4KrMuKguC27UVUV7gXYomTTThmaSITmjlKGP4MaFIm59Inc+gw+h6WWhrT8EPv7/HHLOCWLBDbjup5NZWl5ZzebW8usbm1vbhZ3dulGJpqxGlVC6GRDDBJesBhwEa8aakSgQrBEMLsZ5455pw5W8g2HM/Ij0JA85JWCtW9WBTqHoltyJ8CJ4MyhWDr+/stcPB9VO4aPdVTSJmAQqiDEtz43BT4kGTgUb5duJYTGhA9JjLYuSRMz46WTUET62TheHStsnAU/c3x0piYwZRoGtjAj0zXw2Nv/LWgmE537KZZwAk3T6UZgIDAqP98ZdrhkFMbRAqOZ2Vkz7RBMK9jp5ewRvfuVFqJ+WvHKpfOMVK1doqhzaR0foBHnoDFXQJaqiGqKohx7RM3pxhPPkvDpv09KMM+vZQ3/kvP8Ar6uRFg==</latexit>ot<latexit sha1_base64="uaoEeDf+D9Zui5LG//6IAeM9gLc=">AAAB8nicbZDLSsNAFIYn9VbrrerSTbAIQqFkXFSXBTcKLirYC6SxTKaTdugkE2ZOhBLyGG5EFHHrO7h078538CGcXhba+sPAx/+fw5xz/FhwDY7zZeWWlldW1/LrhY3Nre2d4u5eU8tEUdagUkjV9olmgkesARwEa8eKkdAXrOUPz8d5644pzWV0A6OYeSHpRzzglICxXHKblrNuCmWcdYslp+JMZC8CnkGpht+/+48fV/Vu8bPTkzQJWQRUEK1d7MTgpUQBp4JlhU6iWUzokPSZazAiIdNeOhk5s4+M07MDqcyLwJ64vztSEmo9Cn1TGRIY6PlsbP6XuQkEZ17KozgBFtHpR0EibJD2eH+7xxWjIEYGCFXczGrTAVGEgrlSwRwBz6+8CM2TCq5Wqte4VLtEU+XRATpExwijU1RDF6iOGogiie7RE3q2wHqwXqzXaWnOmvXsoz+y3n4AfZOVMg==</latexit>a+t+1
+<latexit sha1_base64="W1qM2dV0B5pA2EEqpjtZJ++HX0k=">AAAB8nicbZDLSsNAFIYn9VbrrerSzWARBLEkLqrLghsFFxXsBdJYJtNJO3QyCTMnQgl5DDciirj1HVy6d+c7+BBOLwtt/WHg4//PYc45fiy4Btv+snILi0vLK/nVwtr6xuZWcXunoaNEUVankYhUyyeaCS5ZHTgI1ooVI6EvWNMfnI/y5h1TmkfyBoYx80LSkzzglICxXHKbHmedFI6crFMs2WV7LDwPzhRKVef9u/f4cVXrFD/b3YgmIZNABdHadewYvJQo4FSwrNBONIsJHZAecw1KEjLtpeORM3xgnC4OImWeBDx2f3ekJNR6GPqmMiTQ17PZyPwvcxMIzryUyzgBJunkoyARGCI82h93uWIUxNAAoYqbWTHtE0UomCsVzBGc2ZXnoXFSdirlyrVTql6iifJoD+2jQ+SgU1RFF6iG6oiiCN2jJ/RsgfVgvVivk9KcNe3ZRX9kvf0AgKmVNA==</latexit>a→t+1
+Optimize the LLMwith DPO LossDPO with Process Rewards
+<latexit sha1_base64="lHRYJPLdtJRKZBgIpy9Ti5JYWOw=">AAAB6nicbZDLSgMxFIYz9dJab1WXogSL4KrMuKguC27UVUV7gXYomTTThmaSITmjlKGP4MaFIm59Inc+gw+h6WWhrT8EPv7/HHLOCWLBDbjup5NZWl5ZzebW8usbm1vbhZ3dulGJpqxGlVC6GRDDBJesBhwEa8aakSgQrBEMLsZ5455pw5W8g2HM/Ij0JA85JWCtW9WBTqHoltyJ8CJ4MyhWDr+/stcPB9VO4aPdVTSJmAQqiDEtz43BT4kGTgUb5duJYTGhA9JjLYuSRMz46WTUET62TheHStsnAU/c3x0piYwZRoGtjAj0zXw2Nv/LWgmE537KZZwAk3T6UZgIDAqP98ZdrhkFMbRAqOZ2Vkz7RBMK9jp5ewRvfuVFqJ+WvHKpfOMVK1doqhzaR0foBHnoDFXQJaqiGqKohx7RM3pxhPPkvDpv09KMM+vZQ3/kvP8Ar6uRFg==</latexit>ot
+K candidatesK candidates(c) Next Action Exploration for DPO DataFixed-sized Exploration Space (Baselines)
+<latexit sha1_base64="XDGaogh950I8tkxEEcvr+8FACBg=">AAAB9HicbVC7SgNBFJ31GeMramkzGISIEHYsomXARsEignlAsobZyWwyZPbhzN1AWPY7bFIoYusvWNrb+Q9+hJNHoYkHLhzOuZd773EjKTTY9pe1tLyyurae2chubm3v7Ob29ms6jBXjVRbKUDVcqrkUAa+CAMkbkeLUdyWvu/3LsV8fcKVFGNzBMOKOT7uB8ASjYCSH3icFcpK2EzglaTuXt4v2BHiRkBnJl8n7d3f0cVNp5z5bnZDFPg+ASap1k9gROAlVIJjkabYVax5R1qdd3jQ0oD7XTjI5OsXHRulgL1SmAsAT9fdEQn2th75rOn0KPT3vjcX/vGYM3oWTiCCKgQdsusiLJYYQjxPAHaE4Azk0hDIlzK2Y9aiiDExOWRMCmX95kdTOiqRULN2SfPkaTZFBh+gIFRBB56iMrlAFVRFDD+gRPaFna2CNrBfrddq6ZM1mDtAfWG8/UMaVnQ==</latexit>a(1)t+1Dynamic Exploration Space (RRO)
+<latexit sha1_base64="BVCh8QFqGyeBPgEcgHU4mhvP6ec=">AAAB9HicbVDLSgNBEOyNrxhfUY9eFoMQEcKOQvQY8KLgIYJ5QLKG2clsMmR2dp2ZDYQl3+ElB0W8+gsevXvzH/wIJ4+DJhY0FFXddHd5EWdKO86XlVpaXlldS69nNja3tneyu3tVFcaS0AoJeSjrHlaUM0ErmmlO65GkOPA4rXm9y7Ff61OpWCju9CCiboA7gvmMYG0kF98n+bPjYSvRJ2jYyuacgjOBvUjQjORK6P27M/q4Kbeyn812SOKACk04VqqBnEi7CZaaEU6HmWasaIRJD3dow1CBA6rcZHL00D4yStv2Q2lKaHui/p5IcKDUIPBMZ4B1V817Y/E/rxFr/8JNmIhiTQWZLvJjbuvQHidgt5mkRPOBIZhIZm61SRdLTLTJKWNCQPMvL5LqaQEVC8VblCtdwxRpOIBDyAOCcyjBFZShAgQe4BGe4NnqWyPrxXqdtqas2cw+/IH19gNT3pWf</latexit>a(3)t+1
+<latexit sha1_base64="XVug4smEUT7MJGkszmb1LeHOcJ0=">AAACBHicbVDLSsNAFL2pr1pfUZfdBIugCCVxUV0W3Oiugn1AGsNkOmmHTh7MTIQyBHTjr7hxoYhbP8Kdf+OkdaGtBy4czrmXe+8JUkaFtO0vo7S0vLK6Vl6vbGxube+Yu3sdkWQckzZOWMJ7ARKE0Zi0JZWM9FJOUBQw0g3GF4XfvSNc0CS+kZOUeBEaxjSkGEkt+WZVoVt1kvtK5rnqR0iOglC5Tt328tw3a3bdnsJaJM4PqTWP76FAyzc/+4MEZxGJJWZICNexU+kpxCXFjOSVfiZIivAYDYmraYwiIjw1fSK3DrUysMKE64qlNVV/TygUCTGJAt1ZnCnmvUL8z3MzGZ57isZpJkmMZ4vCjFkysYpErAHlBEs20QRhTvWtFh4hjrDUuVV0CM78y4ukc1p3GvXGtVNrXsEMZajCARyBA2fQhEtoQRswPMATvMCr8Wg8G2/G+6y1ZPzM7MMfGB/fZgKZWw==</latexit>a+t[1.0]
+<latexit sha1_base64="1gDBt0s6KUtTp6GRsV9ojGqXEvY=">AAAB8nicbZDLSgMxFIYz9VbrrepSF4NFaBHKjIvqsiCC7irYC0zHkkkzbWgmGZIzQhn6GN24UMStj+AbuHPn25heFtr6Q+Dj/88h55wg5kyD43xbmZXVtfWN7GZua3tndy+/f9DQMlGE1onkUrUCrClngtaBAaetWFEcBZw2g8HVJG8+UqWZFPcwjKkf4Z5gISMYjOXhh7TolkadFEadfMEpO1PZy+DOoVAtHV9/fpyNa538V7srSRJRAYRjrT3XicFPsQJGOB3l2ommMSYD3KOeQYEjqv10OvLIPjVO1w6lMk+APXV/d6Q40noYBaYywtDXi9nE/C/zEggv/ZSJOAEqyOyjMOE2SHuyv91lihLgQwOYKGZmtUkfK0zAXClnjuAurrwMjfOyWylX7txC9RbNlEVH6AQVkYsuUBXdoBqqI4IkGqNn9GKB9WS9Wm+z0ow17zlEf2S9/wDtgpQM</latexit>a(1)t
+<latexit sha1_base64="UJl36bDnuaflvk+x6aUKBMZ6kF4=">AAAB8nicbZDLSgMxFIYzXmu9VV3qYrAILUKZcVFdFkRQ3FSwF5iOJZNm2tBMMiRnhDL0MbpxoYhbH8E3cOfOtzG9LLT1h8DH/59DzjlBzJkGx/m2lpZXVtfWMxvZza3tnd3c3n5dy0QRWiOSS9UMsKacCVoDBpw2Y0VxFHDaCPqX47zxSJVmUtzDIKZ+hLuChYxgMJaHH9LCbXHYTmHYzuWdkjORvQjuDPKV4tHV58fpqNrOfbU6kiQRFUA41tpznRj8FCtghNNhtpVoGmPSx13qGRQ4otpPJyMP7RPjdOxQKvME2BP3d0eKI60HUWAqIww9PZ+Nzf8yL4Hwwk+ZiBOggkw/ChNug7TH+9sdpigBPjCAiWJmVpv0sMIEzJWy5gju/MqLUD8rueVS+c7NV27QVBl0iI5RAbnoHFXQNaqiGiJIohF6Ri8WWE/Wq/U2LV2yZj0H6I+s9x8VlZQm</latexit>a(K)t<latexit sha1_base64="UJl36bDnuaflvk+x6aUKBMZ6kF4=">AAAB8nicbZDLSgMxFIYzXmu9VV3qYrAILUKZcVFdFkRQ3FSwF5iOJZNm2tBMMiRnhDL0MbpxoYhbH8E3cOfOtzG9LLT1h8DH/59DzjlBzJkGx/m2lpZXVtfWMxvZza3tnd3c3n5dy0QRWiOSS9UMsKacCVoDBpw2Y0VxFHDaCPqX47zxSJVmUtzDIKZ+hLuChYxgMJaHH9LCbXHYTmHYzuWdkjORvQjuDPKV4tHV58fpqNrOfbU6kiQRFUA41tpznRj8FCtghNNhtpVoGmPSx13qGRQ4otpPJyMP7RPjdOxQKvME2BP3d0eKI60HUWAqIww9PZ+Nzf8yL4Hwwk+ZiBOggkw/ChNug7TH+9sdpigBPjCAiWJmVpv0sMIEzJWy5gju/MqLUD8rueVS+c7NV27QVBl0iI5RAbnoHFXQNaqiGiJIohF6Ri8WWE/Wq/U2LV2yZj0H6I+s9x8VlZQm</latexit>a(K)t
+<latexit sha1_base64="XUgLPn0O5hWonwGSqfpBbPVEiCQ=">AAAB8nicbZDLSgMxFIYzXmu9VV3qYrAILUKZ6aK6LIiguwr2Au1YMmmmDc0kQ3JGKMM8RjcuFHHrI/gG7tz5NqaXhbb+EPj4/3PIOcePONPgON/Wyura+sZmZiu7vbO7t587OGxoGStC60RyqVo+1pQzQevAgNNWpCgOfU6b/vBqkjcfqdJMinsYRdQLcV+wgBEMxmrjbgLpQ1IoF9NuLu+UnKnsZXDnkK8WT64/P87HtW7uq9OTJA6pAMKx1m3XicBLsAJGOE2znVjTCJMh7tO2QYFDqr1kOnJqnxmnZwdSmSfAnrq/OxIcaj0KfVMZYhjoxWxi/pe1YwguvYSJKAYqyOyjIOY2SHuyv91jihLgIwOYKGZmtckAK0zAXClrjuAurrwMjXLJrZQqd26+eotmyqBjdIoKyEUXqIpuUA3VEUESjdEzerHAerJerbdZ6Yo17zlCf2S9/wDyapQN</latexit>a(2)t
+<latexit sha1_base64="JY91ywa+6w2PXIOf4AoD2G93uSg=">AAACAnicbVDLSsNAFL3xWesr6krcBIvQbkIiWF0W3Oiugn1AGsNkOmmHTh7MTIQSgi78FTcuFHHrV7jzb5y0XWjrgQuHc+7l3nv8hFEhLetbW1peWV1bL22UN7e2d3b1vf22iFOOSQvHLOZdHwnCaERakkpGugknKPQZ6fijy8Lv3BMuaBzdynFC3BANIhpQjKSSPP0QeZnM77KqXct7IZJDP8gcyzxzc0+vWKY1gbFI7BmpNGqPUKDp6V+9fozTkEQSMySEY1uJdDPEJcWM5OVeKkiC8AgNiKNohEIi3GzyQm6cKKVvBDFXFUljov6eyFAoxDj0VWdxpZj3CvE/z0llcOFmNEpSSSI8XRSkzJCxUeRh9CknWLKxIghzqm418BBxhKVKraxCsOdfXiTtU9Oum/Ubu9K4hilKcATHUAUbzqEBV9CEFmB4gGd4hTftSXvR3rWPaeuSNps5gD/QPn8AltSXsg==</latexit>a(1)t[0.5]
+<latexit sha1_base64="XVug4smEUT7MJGkszmb1LeHOcJ0=">AAACBHicbVDLSsNAFL2pr1pfUZfdBIugCCVxUV0W3Oiugn1AGsNkOmmHTh7MTIQyBHTjr7hxoYhbP8Kdf+OkdaGtBy4czrmXe+8JUkaFtO0vo7S0vLK6Vl6vbGxube+Yu3sdkWQckzZOWMJ7ARKE0Zi0JZWM9FJOUBQw0g3GF4XfvSNc0CS+kZOUeBEaxjSkGEkt+WZVoVt1kvtK5rnqR0iOglC5Tt328tw3a3bdnsJaJM4PqTWP76FAyzc/+4MEZxGJJWZICNexU+kpxCXFjOSVfiZIivAYDYmraYwiIjw1fSK3DrUysMKE64qlNVV/TygUCTGJAt1ZnCnmvUL8z3MzGZ57isZpJkmMZ4vCjFkysYpErAHlBEs20QRhTvWtFh4hjrDUuVV0CM78y4ukc1p3GvXGtVNrXsEMZajCARyBA2fQhEtoQRswPMATvMCr8Wg8G2/G+6y1ZPzM7MMfGB/fZgKZWw==</latexit>a+t[1.0]<latexit sha1_base64="+4LDv9F/fo/JvwnROrQroUc1eM0=">AAAB/3icbVDLSsNAFL2pr1pfUcGNm8EiKEJJXFTdFdzoroJ9QBvDZDpph04ezEyEEgP6K25cKOLW33Dn3zhpu9DWAwOHc+7lnjlezJlUlvVtFBYWl5ZXiqultfWNzS1ze6cpo0QQ2iARj0Tbw5JyFtKGYorTdiwoDjxOW97wMvdb91RIFoW3ahRTJ8D9kPmMYKUl19zDd+lJ5irUDbAaeH7asSoXTuaaZatijYHmiT0l5drxI+Sou+ZXtxeRJKChIhxL2bGtWDkpFooRTrNSN5E0xmSI+7SjaYgDKp10nD9Dh1rpIT8S+oUKjdXfGykOpBwFnp7MU8pZLxf/8zqJ8s+dlIVxomhIJof8hCMVobwM1GOCEsVHmmAimM6KyAALTJSurKRLsGe/PE+apxW7Wqne2OXaNUxQhH04gCOw4QxqcAV1aACBB3iGV3gznowX4934mIwWjOnOLvyB8fkDRjKWaQ==</latexit>a+t[0.9]
+<latexit sha1_base64="PN2iacPuBusOWAbJDrLh46PhGkM=">AAACAHicbVBNS8NAEJ3Ur1q/oh48eAkWQQ+WxEP1WPCitwr2A9IYNttNu3SzCbsboYSA+Fe8eFDEqz/Dm//GTduDtj4YeLw3w8y8IGFUKtv+NkpLyyura+X1ysbm1vaOubvXlnEqMGnhmMWiGyBJGOWkpahipJsIgqKAkU4wuir8zgMRksb8To0T4kVowGlIMVJa8s0DdJ+d5X6m8l6E1DAIM9euOV7um1W7Zk9gLRJnRqqN00co0PTNr14/xmlEuMIMSek6dqK8DAlFMSN5pZdKkiA8QgPiaspRRKSXTR7IrWOt9K0wFrq4sibq74kMRVKOo0B3FlfKea8Q//PcVIWXXkZ5kirC8XRRmDJLxVaRhtWngmDFxpogLKi+1cJDJBBWOrOKDsGZf3mRtM9rTr1Wv3WqjRuYogyHcAQn4MAFNOAamtACDDk8wyu8GU/Gi/FufExbS8ZsZh/+wPj8AbjTl0U=</latexit>a→t[0.1]Case 1: Over-exploredCase 2: Under-exploredCase 3: Scale up to the exploration until finding the action with the rising reward
+<latexit sha1_base64="4rVwKXPpXZPcx5F9blRpWAVVF50=">AAAB+nicbVDLSsNAFL3xWesr1aWbwSLopiQuqsuCG91VsA9IQ5hMJ+3QySTMTJQSC/6IGxeKuPVL3Pk3TtoutPXAwOGce7lnTphyprTjfFsrq2vrG5ulrfL2zu7evl05aKskk4S2SMIT2Q2xopwJ2tJMc9pNJcVxyGknHF0VfueeSsUScafHKfVjPBAsYgRrIwV2BQc5m/RirIdhlHvSnwR21ak5U6Bl4s5JtXH2BAWagf3V6ycki6nQhGOlPNdJtZ9jqRnhdFLuZYqmmIzwgHqGChxT5efT6BN0YpQ+ihJpntBoqv7eyHGs1DgOzWSRUS16hfif52U6uvRzJtJMU0Fmh6KMI52gogfUZ5ISzceGYCKZyYrIEEtMtGmrbEpwF7+8TNrnNbdeq9+61cYNzFCCIziGU3DhAhpwDU1oAYEHeIZXeLMerRfr3fqYja5Y851D+APr8wcmnJVe</latexit>ai[r]i: Step Indexr: Process Reward
+Action with thelowest rewardAction with therising reward compared the preceding action
+<latexit sha1_base64="vqovqI5AAWuo94RP5IiW/XqZOyk=">AAAB8HicbZDLSgMxFIbP1Futt6pLN8EiurHOuKguC25014K9SDuUTJppQ5PMkGSEMvQN3LlxoYhbH0dQ8G1MLwtt/SHw8f/nkHNOEHOmjet+O5ml5ZXVtex6bmNza3snv7tX11GiCK2RiEeqGWBNOZO0ZpjhtBkrikXAaSMYXI3zxj1VmkXy1gxj6gvckyxkBBtr3aW4k5pTbzTq5Atu0Z0ILYI3g0L5+LP69cDOKp38R7sbkURQaQjHWrc8NzZ+ipVhhNNRrp1oGmMywD3asiixoNpPJwOP0JF1uiiMlH3SoIn7uyPFQuuhCGylwKav57Ox+V/WSkx46adMxomhkkw/ChOOTITG26MuU5QYPrSAiWJ2VkT6WGFi7I1y9gje/MqLUD8veqViqeoVyjcwVRYO4BBOwIMLKMM1VKAGBAQ8wjO8OMp5cl6dt2lpxpn17MMfOe8/e16T7A==</latexit>at→1
+<latexit sha1_base64="AQa2Q0X2ae8aKvI+LVqUOtMeFXw=">AAAB7HicbZDNSsNAFIVv6l+tf1WXbgaLoJuQuGi7LLjRXQXTFtJQJtNJO3QyCTMToYSCb+DGhSJufSB3vo2TtgttPTDwcc69zL03TDlT2nG+rdLG5tb2Tnm3srd/cHhUPT7pqCSThHok4YnshVhRzgT1NNOc9lJJcRxy2g0nN0XefaRSsUQ86GlKgxiPBIsYwdpYnu/YzWBQrTm2MxdaB3cJtdbVExRqD6pf/WFCspgKTThWynedVAc5lpoRTmeVfqZoiskEj6hvUOCYqiCfDztDF8YZoiiR5gmN5u7vjhzHSk3j0FTGWI/ValaY/2V+pqNmkDORZpoKsvgoyjjSCSo2R0MmKdF8agATycysiIyxxESb+1TMEdzVldehc227dbt+79Zad7BQGc7gHC7BhQa04Bba4AEBBs/wCm+WsF6sd+tjUVqylj2n8EfW5w8BSY7y</latexit>[0.8]
+Figure 1: Reward Rising Optimization: We dynamically adjust the scope of the next action
+exploration and prioritize action steps that exhibit a “rising reward trend” compared to their
+predecessors, avoiding the over-exploration or under-exploration. (a) The illustration of
+Direct Preference Optimization (Rafailov et al., 2024) where a pair of the preference data is
+used to optimize the LLM agent. (b) The process reward estimation used in RRO where the
+average outcome reward of a set of rollouts serves as the process reward of an intermediate
+step. (c) The comparison of different strategies in the next action exploration stage where
+our RRO achieves a balance between the computation and data quality.
+limit the feasibility of deploying PRMs at scale, particularly in scenarios requiring extensive
+exploration of decision paths.
+In this paper, we address these challenges by rethinking the process supervision paradigm.
+Rather than uniformly expanding data collection efforts for every step, we propose a novel
+approach, Reward Rising Optimization (RRO) , that prioritizes actions exhibiting a “rising
+reward” trend compared to their predecessors, as shown in Figure 1. By focusing on the
+relative reward tendencies of neighboring reasoning steps, our method dynamically adjusts
+the scope of candidate action exploration to efficiently identify high-quality data points.
+This strategy significantly reduces the computational burden in terms of the number of
+action candidates that need to be explored, while preserving the ability to capture critical
+decision-making patterns, enabling scalable process supervision for LLMs.
+We provide theoretical foundations to support our approach, demonstrating the feasibility
+of exploring the action candidate with the rising rewards. Additionally, we conduct compre-
+hensive empirical evaluations on automated agent benchmarks, WebShop (Yao et al., 2022)
+and InterCode-SQL (Yang et al., 2023). The results highlight the efficacy of our method in
+improving task performance while maintaining computational efficiency. By redefining
+the data collection paradigm for process supervision, our work paves the way for scalable
+and effective reinforcement learning frameworks in enhancing the reasoning capabilities of
+LLMs. We summarize our contribution as follows,
+•We propose Reward Rising Optimization ( RRO ), a scalable process supervision
+framework that prioritizes reasoning steps with rising reward trends, reducing the
+burden of extensive data collection.
+•The proposed dynamic expansion strategy for sampling next action candidates
+efficiently identifies and captures high-quality data for training.
+2Preprint. Under review.
+•We provide theoretical insights and empirical evidence demonstrating the feasibility
+of the dynamic expansion strategy and the improved performance and computa-
+tional efficiency of RRO, on diverse benchmarks, InterCode-SQL and WebShop.
+2 Preliminary
+Task Formulation Automated agents play a crucial role in real-world applications. The
+overall paradigm can be formulated as a partially observable Markov decision process
+(POMDP) defined by the elements (U,S,A,O,T,R). Here, we denote the instruction space
+asU, the state space as S, the action space as A, the observation space as O, the transition
+function as T:S × A → S , and the reward function as R:S × A → [0, 1]. Since we
+investigate automated agents powered by LLMs in this paper, U,A,Oare represented in the
+form of natural language. Formally, given a task description u∈ U, the LLM-based agent,
+serving as a policy model πθ, generates the next action a∈ A and observes the execution
+result o∈ O , iteratively. The whole trajectory follows the ReAct style (Yao et al., 2023)
+and can be formulated as e= [u,a1,o1, ...,an−1,on−1,an], where nis the number of steps,
+ai∼πθ(·|u,a1,o1, ...,oi−1)∈ A, and the last action anserves as the final outcome from the
+agent. The interaction loop between the agent and the execution environment repeats until
+the task completes or exceeds the maximum iteration limit.
+Outcome Supervision The outcome reward model (ORM) rewards or penalizes the policy
+model based on the final outcome of a trajectory, which is formulated as rORM(u,e)∈
+[0, 1], where uis the task description and eis the generated trajectory. This outcome
+supervision evaluates the ultimate success of the agent in accomplishing the specified task
+rather than focusing on intermediate steps. The normalized reward range [0, 1]provides
+a standardized measure of task completion quality, with higher values indicating more
+successful outcomes. Unlike process-level rewards that provide feedback on individual
+actions, outcome supervision captures the holistic performance of the entire action sequence,
+enabling the model to learn task completion strategies that may involve different valid
+approaches to reach the same successful outcome.
+Process Supervision To further enhance the capability of LLM-based agents, process
+supervision has been proposed to capture the fine-grained rewards for each action in the
+trajectory (Lightman et al., 2023; Xiong et al., 2024), also known as the process reward
+model (PRM). Unlike outcome supervision that evaluates only the final result, process
+supervision provides feedback on individual actions, enabling more precise guidance
+throughout the decision-making sequence. Formally, we denote a prefix of trajectory
+ase1:t= [u,a1,o1, ...,at,ot], where uis the task description, airepresents actions, and oi
+represents observations or environment feedback. The process reward model is represented
+asr(st,at)∈[0, 1], where stand atare the state and action at the tthstep. This formulation
+allows for evaluating the quality of each decision point within the trajectory. Recent work
+has leveraged Monte Carlo tree search (MCTS) (Wang et al., 2024a;c; Xiong et al., 2024) to
+build effective step-wise reward models. In this paper, we also adopt the MCTS-based
+process reward model which is formulated as:
+rPRM(st,at) =1
+mm
+∑
+jrORM(u,e1:t⊕ˆe(j)
+t+1:n)
+where ⊕represents the concatenation operation and ˆe(j)
+t+1:ndenotes one of the sampled
+rollouts subsequent to the prefix e1:t. The approach involves sampling mpossible future
+trajectories from the current state-action pair and calculating the average of their correspond-
+ing outcome rewards. This Monte Carlo estimation provides a measure of the expected
+future return when taking action atin state st.
+3Preprint. Under review.
+3 Reward Rising Optimization
+As introduced in the preliminary (§2), the process supervision is promising in improving
+the LLM-based agents. However, how to effectively sample candidates during next action
+exploration and construct a robust training set for reinforcement learning algorithms remains
+an open question. In this paper, we focus on the relative reward trend of successive reasoning
+steps and propose to scale up the exploration till finding a step with rising rewards compared
+with the previous step. The complete pipeline of our proposed Reward Rising Optimization
+(RRO ) contains three stages: (1) supervised fine-tuning (§3.1); (2) reward rising sampling
+(§3.2); and (3) agent optimization (§3.4).
+3.1 Supervised Fine-tuning
+Similar to previous work (Song et al., 2024; Xiong et al., 2024), we introduce the basic
+knowledge of the targeted task by first fine-tuning our base model with a supervised dataset
+to develop basic planning capabilities and adhere to the expected format for each task. We
+denote this fine-tuned model as πSFT. The supervised dataset consists of expert trajectories
+for the agent tasks, providing demonstrations of successful task completion sequences.
+We denote the supervised dataset as D=n
+(u,e)(i)o|D|
+i=1where urepresents the user instruc-
+tion or task specification, and e= [u,a1,o1, ...,at]is the corresponding expert trajectory. The
+loss function for the supervised fine-tuning stage is formulated as:
+LSFT(πθ) =−E(u,e)∼D[logπθ(e|u)]=−E(u,e)∼D"
+n
+∑
+t=1logπθ(at|e1:t−1)#
+This formulation decomposes the trajectory modeling problem into a sequence of next-
+action predictions, where atis the action subsequent to the trajectory prefix e1:t−1. By
+maximizing the log likelihood of expert trajectories with this loss function, πSFTlearns
+to imitate the decision-making process demonstrated in the expert data. This supervised
+learning phase is crucial as it provides the initial policy that will later be refined through
+preference optimization techniques.
+3.2 Reward Rising Sampling
+After the supervised fine-tuning phase, the supervised fine-tuned model πSFTacquires
+fundamental planning capabilities for the target agent task and can function effectively as a
+policy model. The subsequent challenge lies in better aligning this policy with the specific
+requirements and objectives of the agent task. Before delving into the agent optimization
+paradigm (§3.4), we introduce in this section our novel Reward Rising Sampling approach,
+which dynamically scales the exploration process for next action candidates while efficiently
+capturing the reward rising tendency.
+The preference data for process supervision consists of contrastive action pairs (a+
+t,a−
+t)
+where a+
+t≻a−
+t|e1:t−1, indicating that action a+
+tis preferred over action a−
+tgiven the
+trajectory prefix e1:t−1. To generate these contrastive pairs, we sample multiple action
+candidates using the policy model: a(i)
+t∈ {ˆat|ˆat∼πSFT(·|e1:t−1)}
+A straightforward approach to constructing contrastive action pairs would be to select
+the action candidate with the highest process reward as the chosen sample and the action
+candidate with the lowest process reward as the rejected sample. However, this naive
+approach presents a critical trade-off: scaling up the sampling size would increase the
+probability of generating stronger preferred candidates but would simultaneously introduce
+substantial computational costs. This raises an important question: what criteria should
+determine when to stop the sampling process, ensuring that the sampled action candidate
+is sufficiently strong to serve as a good preferred sample?
+Our key insight is to focus on the relative reward tendency between neighboring actions
+rather than pursuing an absolute maximum. Specifically, we stop scaling up the sampling
+4Preprint. Under review.
+Algorithm 1: Reward Rising Optimization (RRO)
+Data: uis the task instruction; πθis the supervised fine-tuned policy model; e1:tis the trajectory
+prefix from step 1 to t;mis the number of samples in Monte-Carlo Tree Search.
+1Function ProcessReward( u, e 1:t= [u,a1,o1, ...,at,ot],πθ, m):
+2 MC←[ ]
+3 fori=1to m do
+4 ˆet+1:n∼πθ(·|e1:t) ▷Sample the rollout ˆet+1:nfrom the policy model πθ
+5 e←e1:t⊕ˆet+1:n ▷Concatenate the trajectory prefix and rollout to have the full trajectory e.
+6 MC.append (rORM(u,e)) ▷Evaluate the outcome reward based on the full trajectory.
+7 end
+8 rPRM←1
+m∑rORM∈MCrORM ▷Estimate the process reward with the average outcome rewards.
+9return rPRM
+10
+11Function RRO( u,πθ, t):
+12 e1:t−1= [u,a1,o1, ...,at−1,ot−1]∼πθ(u) ▷Sample t−1 steps as the trajectory prefix.
+13 rPRM ,t−1←ProcessReward (u,e1:t−1,πθ,m)▷Estimate the process reward via Monte-Carlo Sampling.
+14 Cand←[ ]
+15 repeat
+16 ˆat∼πθ(·|e1:t−1) ▷Explore the candidates for the next action.
+17 e1:t←e1:t⊕ˆat
+18 rPRM ,t←ProcessReward (u,e1:t,πθ,m)▷Estimate the process reward for the next action candidate.
+19 Cand .append ((ˆat,rPRM ,t))
+20 until rPRM ,t≥rPRM ,t−1 ▷Stop the exploration until showing a rising reward compared to at−1.
+21 a+
+t←arg max rPPM,t{ˆat|(ˆat,rPRM ,t)∈Cand}
+22 a−
+t←arg min rPPM,t{ˆat|(ˆat,rPRM ,t)∈Cand}
+23 πθ←DPO(πθ,(a+
+t,a−
+t)) ▷Update the policy model with the preference pair from the sampling.
+size when we identify an action candidate with a higher process reward compared to
+its preceding action, as detailed in Algorithm 1. This approach offers a more efficient
+exploration strategy while maintaining the quality of preference data.
+The algorithm operates as follows: suppose our last action in the trajectory prefix is at−1
+with a process reward of rt−1=r(st−1,at−1), we sample the next action candidate and
+calculate the corresponding process reward iteratively:
+a(i)
+t∈ {ˆat|ˆat∼πθ(·|e1:t−1)};r(i)
+t=r(st,a(i)
+t)
+In this iterative sampling process, we compare the reward of each sampled action with that
+of its preceding action in the trajectory, meaning we compare rt−1andr(i)
+t. Once we sample
+an action a(τ)
+twhose process reward r(τ)
+tis greater than or equal to the preceding action’s
+reward rt−1, we terminate the sampling process and designate a(τ)
+tas our preferred sampled
+action in the preference data. We then select the candidate with the lowest process reward
+encountered during sampling as the rejected action in the preference data.
+This reward rising criterion provides an efficient stopping condition that balances explo-
+ration quality with computational efficiency. By identifying actions that improve upon
+the current reward state, we can construct meaningful preference pairs without exhaus-
+tively sampling the action space. This approach is particularly valuable in complex agent
+environments where the action space is vast and the computation of rewards can be resource-
+intensive.
+3.3 Math Grounding
+In this section, we provide math grounding on the feasibility of the dynamic sampling
+strategy based on the process reward setting adopted in RRO . Following previous work,
+5Preprint. Under review.
+we define the process reward as:
+rPRM(st,at) =1
+mm
+∑
+j=1rORM(u,e1:t⊕ˆe(j)
+t+1:n)
+which represents the expected success probability of the current action. Expanding this
+further, we express the process reward as:
+rPRM(st,at) =1
+mm
+∑
+j=1rORM(u,e1:t⊕ˆe(j)
+t+1:n) =P(1|u,a1,o1, . . . , at,ot) =P(1|e1:t).
+Using the law of total probability, we rewrite the probability of success as:
+P(1|e1:t) =∑
+at+1P(1|e1:t,at+1)P(at+1|e1:t) =∑
+at+1P(1|e1:t+1)P(at+1|e1:t).
+We now replace the probability terms with their corresponding process rewards:
+rPRM(st,at) =∑
+at+1P(1|e1:t+1)P(at+1|e1:t) =∑
+at+1rPRM(st+1,at+1)P(at+1|e1:t)
+Since P(at+1|e1:t)∈[0, 1], there must exist at least one sampled action a(τ)
+t+1such that its
+corresponding process reward satisfies:
+rPRM(st+1,a(τ)
+t+1)≥rPRM(st,at).
+This result follows from the fact that the process reward is an expectation over multiple
+sampled outcomes, and at least one of them must meet or exceed the previous step’s reward.
+Furthermore, this formulation aligns naturally with the Bellman equation, reinforcing the
+iterative improvement of the expected success probability.
+3.4 Agent Optimization
+We follow the classic Direct Preference Optimization (DPO) training paradigm and continu-
+ously train the supervised fine-tuned model πSFTthrough DPO on the collected preference
+data. This approach enables us to effectively align the model with human preferences
+without requiring a separate reward model. The resulting model is denoted as πDPO.
+The DPO training objective is formulated as:
+LDPO(πθ) =−E(x,yw,yl)
+log
+σ
+βlogπθ(yw)
+πref(yw)−βlogπθ(yl)
+πref(yl)
+where (x,yw,yl)represents a preference data point with input prompt xand a pair of model
+responses where yw≻ylindicates our sampled preference data shows ywis preferred
+over yl. The action ywis considered superior to ylunder the policy model πθthat we are
+optimizing.
+The DPO objective effectively maximizes the likelihood of the model correctly ranking
+preferred responses higher than non-preferred ones, while maintaining reasonable proximity
+to the original reference model distribution. The sigmoid function σ(·)converts the log
+probability ratio differences into a probability space, allowing the model to learn from
+preference comparisons rather than absolute reward values.
+4 Experiments
+4.1 Dataset
+We evaluate our method on two representative agent datasets that cover distinct interactive
+domains: WebShop (Yao et al., 2022) for web navigation and InterCode-SQL (Yang et al.,
+2023) for SQL database querying.
+6Preprint. Under review.
+WebShop WebShop presents a simulated e-commerce environment where agents must
+navigate through product listings, apply filters, and make purchase decisions based on
+specific user requirements. This dataset effectively captures the challenges of sequential
+decision-making in web interfaces, requiring agents to understand natural language instruc-
+tions and translate them into appropriate navigation actions.
+InterCode-SQL InterCode-SQL focuses on database interaction scenarios where agents
+must formulate and execute SQL queries to retrieve, manipulate, or analyze data according
+to user specifications. This dataset tests the agent’s ability to understand database schemas,
+compose syntactically correct SQL statements, and iteratively refine queries based on
+execution results.
+Both WebShop and InterCode-SQL provide a dense reward scale from 0 to 1 to measure the
+task completion, enabling fine-grained evaluation of agent performance. We employ the
+average reward as the evaluation metric for all tasks, which effectively captures the overall
+performance across varying difficulty levels within each dataset.
+4.2 Baseline
+In our experimental evaluation, we compare our proposed Reward Rising Optimization
+(RRO) approach against several established baselines using Gemma-2 2Bas the base model.
+These baselines represent the current state-of-the-art methods in agent planning for WebShop
+and InterCode-SQL tasks.
+•Few-shot: This approach uses in-context learning with a small number of examples,
+without any additional training. It serves as our most basic baseline to demonstrate
+the performance gap between zero/few-shot prompting and more sophisticated
+techniques.
+•Supervised Fine-tuning (SFT) (Chen et al., 2023a): Supervised Fine-Tuning uses
+direct imitation learning to train the model on expert demonstrations, capturing the
+mapping from inputs to desired outputs.
+•Exploration-based Trajectory Optimization (ETO) (Song et al., 2024): Exploration-
+based Trajectory Optimization improves upon SFT by focusing on trajectories that
+maximize the outcome reward, showing modest improvements over standard SFT.
+•Iterative Step-level Process Refinement (IPR) (Xiong et al., 2024): Iterative Step-
+level Process Refinement iteratively improves the agent’s planning and execution
+steps through feedback on intermediate processes.
+•Fixed-sized Exploration: We sample a fixed number of candidates for the next
+action and select the one with the highest reward as the chosen action and the one
+with the lowest reward as the rejected action. The key difference from our proposed
+RRO is the absence of the dynamic exploration of next actions and the reward rising
+selection criteria.
+Our proposed RRO builds upon these process supervision approaches, introducing a
+novel optimization strategy that dynamically extends the exploration space. This approach
+achieves superior performance while significantly reducing computational costs, as demon-
+strated by the results in Table 1.
+4.3 Implementation
+We are utilizing the Gemma-2 2B-base model, as the foundation for our experimentation.
+Our computational infrastructure consists of 8 NVIDIA A100-80G GPUs. This hardware
+configuration supports the computational demands of our preference optimization approach
+while allowing for thorough ablation studies across different experimental settings.
+7Preprint. Under review.
+Table 1: Agent planning results of RRO and the baselines on Webshop and InterCode-SQL.
+The methods are using Gemma-2 2Bas the base model. ( underline denotes the second-best
+performance; bold denotes the best performance; the improvement is measured against the
+second-best performing method.)
+Base Model MethodAgent Planning
+WebShop InterCode-SQL
+Reward ↑ # Sample ↓Reward ↑ # Sample ↓
+Gemma-2 2BWithout Post-training
++ Few Shot 12.62 0 3.86 0
+Outcome Supervision
++ SFT (Chen et al., 2023a) 48.94 0 45.33 0
++ ETO (Song et al., 2024) 52.34 1 47.13 1
+Process Supervision
++ IPR (Xiong et al., 2024) 61.39 4 52.39 3
++ Fixed-sized Exploration 61.20 5 54.68 5
++ Reward Rising Optimization (RRO) 62.91 (+1.52) 1.86 55.08 (+0.40) 1.64
+4.4 Main Results
+We compare our method with the strong baseline methods listed in Table 1. Based on
+the results, the proposed RRO demonstrates superior performance compared to other ap-
+proaches across both WebShop and InterCode-SQL. RRO achieves the highest reward scores
+(62.91 for WebShop and 55.08 for InterCode-SQL) while requiring a reasonable number of
+samples (1.86 and 1.64 respectively). This represents a significant improvement over both
+outcome supervision methods (SFT and ETO) and other process supervision approaches
+(IPR and Fixed-sized Exploration). The results clearly show that RRO outperforms existing
+techniques, suggesting that the dynamic exploration strategy and reward rising criteria
+effectively balances exploration and reward maximization in agent planning scenarios. This
+empirical evidence strongly supports the effectiveness of the RRO method as a promising
+advancement in improving language model performance on complex reasoning tasks.
+4.5 Sampling Efficiency Analysis
+Based on Figure 2, the results show that our proposed RRO significantly outperforms IPR in
+terms of sampling efficiency across both WebShop and InterCode-SQL tasks. For WebShop
+(Figure 2a), RRO achieves a high reward of 62.91 using only 1.86 sampled trajectories on
+average, while IPR requires 5 trajectories in the iterative DPO training to reach a comparable
+reward of 61.32, with performance improving gradually from 47.8 to 61.39 as trajectory
+count increases. Similarly, for InterCode-SQL (Figure 2b), RRO attains a reward of 55.08
+with just 1.64 sampled trajectories on average, whereas IPR shows a peak performance of
+52.39 at 3 trajectories before declining to 42.5 at 5 trajectories. These results demonstrate
+RRO ’s superior efficiency, requiring fewer sampled trajectories to achieve higher rewards
+across both benchmarks.
+4.6 Rising Rewards Analysis
+We analyze the reward tendency in the trajectories generated by the supervised fine-tuned
+model πSFTand the reward rising optimized model πRRO. Specifically, we check if the
+neighboring actions demonstrate a rising tendency and calculate the proportion of actions
+with the rising rewards. We divide each trajectory into three equal stages ( Initial ,Middle ,
+andFinal ), with each covering one-third of the trajectory length. As shown in Table 2, we
+find that πRRO consistently outperforms πSFTacross both WebShop and InterCode-SQL
+datasets. On WebShop, our method shows modest improvements in the Middle (+1.20%)
+and Final (+1.36%) phases, while initially performing slightly lower (-0.58%). The benefits
+are more pronounced on InterCode-SQL, with significant gains across all stages: Initial
+(+6.75%), Middle (+2.08%), and Final (+4.42%). By the Final phase, our approach achieves
+45.29% of actions with rising reward versus 40.87% for the baseline method, demonstrating
+more effective optimization and better reward alignment throughout the trajectory.
+8Preprint. Under review.
+1 2 3 4 5
+Number of Required Sampled Trajectories (RRO vs IPR)45.047.550.052.555.057.560.062.565.0Reward
+RRO achieves 62.91 reward
+with only 1.86 trajectories
+47.847.1851.9961.39 61.32
+Reward Rising Optimization (RRO) IPR (Xiong et al., 2024)
+(a) WebShop
+1 2 3 4 5
+Number of Required Sampled Trajectories (RRO vs IPR)40.042.545.047.550.052.555.057.5Reward
+RRO achieves 55.08 reward
+with only 1.64 trajectories
+44.2249.5752.39
+45.7
+42.5
+Reward Rising Optimization (RRO) IPR (Xiong et al., 2024) (b) InterCode-SQL
+Figure 2: Sampling efficiency of RRO and IPR on WebShop and InterCode-SQL.
+Table 2: Reward tendency of RRO and SFT on WebShop and InterCode-SQL in the Initial,
+Middle, and Final stages (each covering one-third of the trajectory length).
+MethodProportion of Actions with Rising Reward (%)
+WebShop InterCode-SQL
+Initial Middle Final Initial Middle Final
+Supervised Fine-tuning 1.33 32.75 9.00 15.67 41.75 40.87
+Reward Rising Optimization 0.75 (-0.58) 33.95 (+1.20) 10.36 (+1.36) 22.42 (+6.75) 43.83 (+2.08) 45.29 (+4.42)
+5 Related Work
+Reinforcement Learning Fine-tuning large language models (LLMs) with reinforcement
+learning has proven effective for aligning model outputs with user preferences. Instruct-
+GPT (Ouyang et al., 2022) demonstrated the potential of reinforcement learning from human
+feedback (RLHF) to improve truthfulness and reduce toxicity in generated outputs. How-
+ever, RLHF’s complexity and instability have motivated simpler alternatives, such as Direct
+Preference Optimization (DPO), which leverages a closed-form optimal policy to align
+LLMs with human preferences more efficiently (Rafailov et al., 2024). Proximal Policy Opti-
+mization (PPO) (Schulman et al., 2017), a foundational algorithm in reinforcement learning,
+also underpins many RLHF methods by enabling stable policy updates through surrogate
+objectives. These advancements highlight the growing body of work aimed at enhancing
+the alignment and utility of LLMs.
+Process Reward Model Recent advancements in reinforcement learning have explored
+process reward models (PRMs) to enhance agent training by evaluating intermediate actions
+or decision-making steps. Christiano et al. (2017) introduced reward models based on
+human preferences, demonstrating the potential of fine-grained feedback for aligning
+agent behavior with human expectations. Bai et al. (2022) extended this by incorporating
+iterative feedback for multi-step tasks, enabling more effective supervision in reasoning-
+heavy domains. In the context of structured decision-making, Fu et al. (2022) proposed
+leveraging hierarchical rewards to guide agents through complex processes, improving
+sample efficiency and task generalization. These works collectively highlight the role of
+PRMs in bridging the gap between traditional RL and multi-step reasoning tasks.
+6 Conclusion
+In conclusion, we propose Reward Rising Optimization ( RRO ) which dynamically extends
+the next action exploration in training process reward models and focuses on the relative
+reward tendencies between reasoning steps. By identifying steps with rising rewards, the
+proposed RRO offers a more efficient and scalable solution to process reward modeling
+compared to traditional computational-intensive approaches. The mathematical foundations
+9Preprint. Under review.
+and empirical evidence across WebShop and InterCode-SQL underscore the potential of this
+technique to improve multi-step reasoning capabilities in large language models. Future
+work could explore the generalizability of this method across diverse task domains and
+further optimize the reward identification mechanism.
+References
+Yuntao Bai, Andy Jones, Kamal Ndousse, Amanda Askell, Anna Chen, Nova DasSarma,
+Dawn Drain, Stanislav Fort, Deep Ganguli, Tom Henighan, et al. Training a helpful and
+harmless assistant with reinforcement learning from human feedback. arXiv preprint
+arXiv:2204.05862 , 2022.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla
+Dhariwal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, et al.
+Language models are few-shot learners. Advances in neural information processing systems ,
+33:1877–1901, 2020.
+Baian Chen, Chang Shu, Ehsan Shareghi, Nigel Collier, Karthik Narasimhan, and Shunyu
+Yao. Fireact: Toward language agent fine-tuning. arXiv preprint arXiv:2310.05915 , 2023a.
+Wenhu Chen, Xueguang Ma, Xinyi Wang, and William W. Cohen. Program of thoughts
+prompting: Disentangling computation from reasoning for numerical reasoning tasks.
+Transactions on Machine Learning Research , 2023b.
+Paul F Christiano, Jan Leike, Tom Brown, Miljan Martic, Shane Legg, and Dario Amodei.
+Deep reinforcement learning from human preferences. Advances in neural information
+processing systems , 30, 2017.
+Yao Fu, Hao Peng, Ashish Sabharwal, Peter Clark, and Tushar Khot. Complexity-based
+prompting for multi-step reasoning. In The Eleventh International Conference on Learning
+Representations , 2022.
+Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yutaka Matsuo, and Yusuke Iwasawa.
+Large language models are zero-shot reasoners. Advances in neural information processing
+systems , 35:22199–22213, 2022.
+Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy
+Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step.
+InThe Twelfth International Conference on Learning Representations , 2023.
+Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy
+Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step.
+InThe Twelfth International Conference on Learning Representations , 2024.
+Liangchen Luo, Yinxiao Liu, Rosanne Liu, Samrat Phatale, Harsh Lara, Yunxuan Li, Lei Shu,
+Yun Zhu, Lei Meng, Jiao Sun, et al. Improve mathematical reasoning in language models
+by automated process supervision. arXiv preprint arXiv:2406.06592 , 2024.
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin,
+Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language
+models to follow instructions with human feedback. Advances in neural information
+processing systems , 35:27730–27744, 2022.
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and
+Chelsea Finn. Direct preference optimization: Your language model is secretly a reward
+model. Advances in Neural Information Processing Systems , 36, 2024.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal
+policy optimization algorithms. arXiv preprint arXiv:1707.06347 , 2017.
+10Preprint. Under review.
+Yifan Song, Da Yin, Xiang Yue, Jie Huang, Sujian Li, and Bill Yuchen Lin. Trial and error:
+Exploration-based trajectory optimization of LLM agents. In Lun-Wei Ku, Andre Martins,
+and Vivek Srikumar (eds.), Proceedings of the 62nd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers) , pp. 7584–7600, Bangkok, Thailand,
+August 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.acl-long.
+409. URL https://aclanthology.org/2024.acl-long.409 .
+Peiyi Wang, Lei Li, Zhihong Shao, Runxin Xu, Damai Dai, Yifei Li, Deli Chen, Yu Wu, and
+Zhifang Sui. Math-shepherd: Verify and reinforce LLMs step-by-step without human
+annotations. In Lun-Wei Ku, Andre Martins, and Vivek Srikumar (eds.), Proceedings of
+the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long
+Papers) , pp. 9426–9439, Bangkok, Thailand, August 2024a. Association for Computational
+Linguistics. doi: 10.18653/v1/2024.acl-long.510. URL https://aclanthology.org/
+2024.acl-long.510 .
+Peiyi Wang, Lei Li, Zhihong Shao, Runxin Xu, Damai Dai, Yifei Li, Deli Chen, Yu Wu, and
+Zhifang Sui. Math-shepherd: Verify and reinforce llms step-by-step without human
+annotations. In Proceedings of the 62nd Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers) , pp. 9426–9439, 2024b.
+Zihan Wang, Yunxuan Li, Yuexin Wu, Liangchen Luo, Le Hou, Hongkun Yu, and Jingbo
+Shang. Multi-step problem solving through a verifier: An empirical analysis on model-
+induced process supervision. arXiv preprint arXiv:2402.02658 , 2024c.
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V
+Le, Denny Zhou, et al. Chain-of-thought prompting elicits reasoning in large language
+models. Advances in neural information processing systems , 35:24824–24837, 2022.
+Weimin Xiong, Yifan Song, Xiutian Zhao, Wenhao Wu, Xun Wang, Ke Wang, Cheng Li, Wei
+Peng, and Sujian Li. Watch every step! llm agent learning via iterative step-level process
+refinement. arXiv preprint arXiv:2406.11176 , 2024.
+John Yang, Akshara Prabhakar, Karthik Narasimhan, and Shunyu Yao. Intercode: Standard-
+izing and benchmarking interactive coding with execution feedback. Advances in Neural
+Information Processing Systems , 36:23826–23854, 2023.
+Shunyu Yao, Howard Chen, John Yang, and Karthik Narasimhan. Webshop: Towards
+scalable real-world web interaction with grounded language agents. In S. Koyejo,
+S. Mohamed, A. Agarwal, D. Belgrave, K. Cho, and A. Oh (eds.), Advances in Neural
+Information Processing Systems , volume 35, pp. 20744–20757. Curran Associates, Inc.,
+2022. URL https://proceedings.neurips.cc/paper_files/paper/2022/
+file/82ad13ec01f9fe44c01cb91814fd7b8c-Paper-Conference.pdf .
+Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, and
+Yuan Cao. React: Synergizing reasoning and acting in language models. In International
+Conference on Learning Representations (ICLR) , 2023.
+Li Zhong, Zilong Wang, and Jingbo Shang. Debug like a human: A large language model
+debugger via verifying runtime execution step by step. In Lun-Wei Ku, Andre Martins,
+and Vivek Srikumar (eds.), Findings of the Association for Computational Linguistics, ACL
+2024, Bangkok, Thailand and virtual meeting, August 11-16, 2024 , pp. 851–870. Association
+for Computational Linguistics, 2024. doi: 10.18653/V1/2024.FINDINGS-ACL.49. URL
+https://doi.org/10.18653/v1/2024.findings-acl.49 .
+Denny Zhou, Nathanael Schärli, Le Hou, Jason Wei, Nathan Scales, Xuezhi Wang, Dale
+Schuurmans, Claire Cui, Olivier Bousquet, Quoc V Le, et al. Least-to-most prompting en-
+ables complex reasoning in large language models. In The Eleventh International Conference
+on Learning Representations , 2023.
+11

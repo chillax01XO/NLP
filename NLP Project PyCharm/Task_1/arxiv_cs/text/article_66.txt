@@ -1,0 +1,1554 @@
+arXiv:2505.21119v1  [cs.LG]  27 May 2025Universal Value-Function Uncertainties
+Moritz A. Zanger, Max Weltevrede, Yaniv Oren, Pascal R. Van der Vaart,
+Caroline Horsch, Wendelin Böhmer, Matthijs T. J. Spaan
+Department of Intelligent Systems
+Delft University of Technology
+Delft, 2628 XE, The Netherlands
+Correspondence: m.a.zanger@tudelft.nl
+Abstract
+Estimating epistemic uncertainty in value functions is a crucial challenge for
+many aspects of reinforcement learning (RL), including efficient exploration, safe
+decision-making, and offline RL. While deep ensembles provide a robust method
+for quantifying value uncertainty, they come with significant computational over-
+head. Single-model methods, while computationally favorable, often rely on
+heuristics and typically require additional propagation mechanisms for myopic
+uncertainty estimates. In this work we introduce universal value-function uncer-
+tainties (UVU), which, similar in spirit to random network distillation (RND),
+quantify uncertainty as squared prediction errors between an online learner and a
+fixed, randomly initialized target network. Unlike RND, UVU errors reflect policy-
+conditional value uncertainty , incorporating the future uncertainties any given
+policy may encounter. This is due to the training procedure employed in UVU:
+the online network is trained using temporal difference learning with a synthetic
+reward derived from the fixed, randomly initialized target network. We provide an
+extensive theoretical analysis of our approach using neural tangent kernel (NTK)
+theory and show that in the limit of infinite network width, UVU errors are exactly
+equivalent to the variance of an ensemble of independent universal value functions.
+Empirically, we show that UVU achieves equal performance to large ensembles on
+challenging multi-task offline RL settings, while offering simplicity and substantial
+computational savings.
+1 Introduction
+Deep reinforcement learning (RL) has emerged as an essential paradigm for addressing difficult
+sequential decision-making problems [Mnih et al., 2015, Silver et al., 2016, Vinyals et al., 2019]
+but a more widespread deployment of agents to real-world applications remains challenging. Open
+problems such as efficient exploration, scalable offline learning and safety pose persistent obstacles to
+this transition. Central to these capabilities is the quantification of epistemic uncertainty , an agent’s
+uncertainty due to limited data. In the context of RL, uncertainty estimation relating to the value
+function is of particular importance as it reflects uncertainty about long-term consequences of actions.
+However, computationally tractable estimation of value-function uncertainty remains a challenge.
+Bayesian RL approaches, both in its model-based [Ghavamzadeh et al., 2015] and model-free [Dear-
+den et al., 1998] flavors, typically come with sound theoretical underpinnings but face significant
+computational hurdles due to the general intractability of posterior inference. Theoretical guarantees
+of the latter are moreover often complicated by the use of training procedures like temporal difference
+(TD) learning with bootstrapping. Conversely, deep ensembles [Lakshminarayanan et al., 2017]
+have emerged as a reliable standard for practical value uncertainty estimation in deep RL [Osband
+et al., 2016, Chen et al., 2017]. Empirically, independently trained value functions from random
+Preprint. Under review.initialization provide effective uncertainty estimates that correlate well with true estimation errors. Al-
+though in general more tractable than full posterior inference, this approach remains computationally
+challenging for larger models where a manyfold increase in computation and memory severely limits
+scalability. Various single-model approaches like random network distillation (RND) [Burda et al.,
+2019], pseudo counts [Bellemare et al., 2016] or intrinsic curiosity [Pathak et al., 2017] efficiently
+capture myopic epistemic uncertainty but require additional propagation mechanisms to obtain value
+uncertainties [O’Donoghue et al., 2018, Janz et al., 2019, Zhou et al., 2020] and often elude a thor-
+ough theoretical understanding. We conclude that there persists a lack of computationally efficient
+single-model approaches with the ability to directly estimate policy-dependent value uncertainties
+with a strong theoretical foundation.
+To this end, we introduce universal value-function uncertainties (UVU), a novel method designed
+to estimate epistemic uncertainty of value functions for any given policy using a single-model
+architecture. Similar in spirit to the well-known RND algorithm, UVU quantifies uncertainty through
+a prediction error between an online learner uand a fixed, randomly initialized target network g.
+Crucially, and in contrast to the regression objective of RND, UVU optimizes its online network
+uusing temporal difference (TD) learning with a synthetic reward rggenerated entirely from the
+target network g. By construction, the reward rgimplies a value learning problem to which the
+target function gitself is a solution, forcing the online learner uto recover gthrough minimization of
+TD losses. UVU then quantifies uncertainty as the squared prediction error between online learner
+and fixed target function. Unlike previous methods, our design requires no training of multiple
+models (e.g., ensembles) nor separate value and uncertainty models (e.g., RND, ICM). Furthermore,
+we design UVU as a universal policy-conditioned model (comparable to universal value function
+approximators [Schaul et al., 2015]), that is, it takes as input a state, action, and policy encoding and
+predicts the epistemic uncertainty associated with the value function for the encoded policy.
+A key contribution of our work is a thorough theoretical analysis of UVU using the framework of
+neural tangent kernels (NTK) [Jacot et al., 2018]. Specifically, we characterize the learning dynamics
+of wide neural networks with TD losses and gradient descent to obtain closed-form solutions for the
+convergence and generalization behavior of neural network value functions. In the limit of infinite
+network width, we then show that prediction errors generated by UVU are equivalent to the variance
+of an ensemble of universal value functions, both in expectation and with finite sample estimators.
+We validate UVU empirically on an offline multi-task benchmark from the minigrid suite where
+agents are required to reject tasks they cannot perform to achieve maximal scores. We show that
+UVU’s uncertainty estimates perform comparably to large deep ensembles, while drastically reducing
+the computational footprint.
+2 Preliminaries
+We frame our work within the standard Markov Decision Process (MDP) [Bellman, 1957] formalism,
+defined by the tuple (S,A,R, γ, P, µ ). Here, Sis the state space, Ais the action space, R:S×A →
+P(R)is the distribution of immediate rewards, γ∈[0,1)is the discount factor, P:S ×A → P(S)
+is the transition probability kernel, and µ:P(S)is the initial state distribution. An RL agent
+interacts with this environment by selecting actions according to a policy π:S →P(A). At each
+timestep t, the agent is in state St, takes action At∼π(·|St), receives a reward Rt∼ R(·|St, At),
+and transitions to a new state St+1∼P(·|St, At). We quantify the merit of taking actions At=a
+in state St=sand subsequently following policy πby the action-value function, or Q-function
+Qπ:S × A − → R, which accounts for the cumulative discounted future rewards and adheres to a
+recursive consistency condition described by the Bellman equation
+Qπ(s, a) =ER,π,P[R0+γQπ(S1, A1)|S0=s, A0=a]. (1)
+The agent’s objective then is to maximize expected returns J(π) =ES0∼µ,A 0∼π(·|S0)[Qπ(S0, A0)].
+Often, we may be interested in agents capable of operating a variety of policies to achieve different
+goals. Universal value function approximators (UVFAs) [Schaul et al., 2015] address this by
+conditioning value functions additionally on an encoding z∈ Z. This encoding specifies a current
+policy context, indicating for example a task or goal. We denote such universal Q-functions as
+Q(s, a, z ). In the context of this work, we consider zto be a parameterization or indexing of a
+specific policy π(·|s, z), or in other words Q:S × A × Z − → R, Q (s, a, z )≡Qπ(·|s,z)(s, a).
+2Both in the single and multi task settings, obtaining effective policies may require efficient exploration
+and an agent’s ability to reason about epistemic uncertainty. This source of uncertainty, in contrast
+toaleatoric uncertainty, stems from a lack of knowledge and may in general be reduced by the
+acquisition of data. In the context of RL, we make an additional distinction between myopic
+uncertainty andvalue uncertainty .
+2.1 Myopic Uncertainty and Neural Tangent Kernels
+Myopic uncertainty estimation methods, such as RND or ensembles predicting immediate rewards
+or next states, quantify epistemic uncertainty without explicitly accounting for future uncertainties
+along trajectories. We first briefly recall the RND algorithm [Burda et al., 2019] , before introducing
+the neural tangent kernel (NTK) [Jacot et al., 2018] framework.
+Random network distillation comprises two neural networks: A fixed, randomly initialized target
+network g(x;ψ0), and a predictor network u(x;ϑt). The online predictor u(x;ϑt)is trained via
+gradient descent to minimize a square loss between its own predictions and the target network’s
+output on a set of data points X={xi∈Rdin}ND
+i=1. The RND prediction error at a test point xthen
+serves as an uncertainty or novelty signal. The loss and error function of RND are then given as
+Lrnd(θt) =1
+2(u(X;θt)−g(X;ψ0))2,and ϵ2
+rnd(x;ϑt, ψ0) =1
+2(u(x;ϑt)−g(x;ψ0))2.(2)
+This mechanism relies on the idea that the predictor network recovers the outputs of the target
+network only for datapoints contained in the dataset xi∈ X, while a measurable error ϵ2
+rndpersists
+for out-of-distribution test samples xT/∈ X, yielding a measure of epistemic uncertainty.
+Next, we introduce the framework of neural tangent kernels, an analytical framework we intend to
+employ for the study of neural network and deep ensemble behavior. Consider a neural network
+f(x, θt) :Rnin→Rwith hidden layer widths n1, . . . , n L=nand inputs x∈Rnin, a dataset X,
+and labels Y={yi∈R}ND
+i=1. Inputs ximay, for example, be state-action tuples and labels yimay
+be rewards. The network parameters θ0∈Rnpare initialized randomly θ0∼ N(0,1)and updated
+with gradient descent with infinitesimal step sizes, also called gradient flow. In the limit of infinite
+width n, the function initialization f(·, θ0), as shown by Lee et al. [2018], is equivalent to a Gaussian
+process prior with a specific kernel κ:Rnin×Rnin− →Rcalled the neural network Gaussian process
+(NNGP). The functional evolution of fthrough gradient flow is then governed by a gradient inner
+product kernel Θ :Rnin×Rnin− →Ryielding
+Θ(x, x′) =∇θf(x, θ0)⊤∇θf(x′, θ0),and κ(x, x′) =E[f(x, θ0)f(x′, θ0)]. (3)
+Remarkably, seminal work by Jacot et al. [2018] showed that in the limit of infinite width and appro-
+priate parametrization1, the kernel Θbecomes deterministic and remains constant throughout training.
+This limiting kernel, referred to as the neural tangent kernel (NTK), leads to analytically tractable
+training dynamics for various loss functions, including the squared loss L(θt) =1
+2∥f(X;θt)− Y∥2
+2.
+Owing to this, one can show [Jacot et al., 2018, Lee et al., 2020] that for t− → ∞ post conver-
+gence function evaluations f(XT, θ∞)on a set of test points XT, too, are Gaussian with mean
+E[f(XT, θ∞)] = Θ XTXΘ−1
+XXYand covariance
+Cov[f(XT, θ∞)] =κXTXT− 
+ΘXT,XΘ−1
+XXκXXT+h.c.
++ ΘXTXΘ−1
+XXκXXΘ−1
+XXΘXXT,(4)
+where h.c. denotes the Hermitian conjugate of the preceding term and we used the shorthands
+ΘX1X2= Θ(X1,X2)andκX1X2=κ(X1,X2). This expression provides a closed-form solution for
+the epistemic uncertainty captured by an infinite ensemble of NNs in the NTK regime trained with
+square losses. For example, the predictive variances of such ensembles are easily obtained as the
+diagonal entries of Eq. 4. While requiring an idealized setting, NTK theory offers a solid theoretical
+grounding for quantifying the behavior of deep ensembles and, by extension, myopic uncertainty
+estimates from related approaches. However, this analysis does not extend to value functions trained
+with TD losses and bootstrapping as is common in practical reinforcement learning settings.
+2.2 Value Uncertainty
+In contrast to myopic uncertainties, value uncertainty quantifies a model’s lack of knowledge in the
+value Qπ(s, a). As such it inherently depends on future trajectories induced by policies π. Due to
+1so-called NTK parametrization scales forward/backward passes appropriately, see Jacot et al. [2018]
+3this need to account for accumulated uncertainties over potentially long horizons, value uncertainty
+estimation typically renders more difficult than its myopic counterpart.
+A widely used technique[Osband et al., 2016, Chen et al., 2017, An et al., 2021] to this end is the use
+of deep ensembles of value functions Q(s, a, θ t) :S × A − → Rfrom random initializations θ0.Q-
+functions are trained on transitional data XTD={si, ai}ND
+i=1,X′
+TD={s′
+i, a′
+i}ND
+i=1, and r={ri}ND
+i=1,
+where s′
+iare samples from the transition kernel Panda′
+iare samples from a policy π.Q-functions
+are then optimized through gradient descent on a temporal difference (TD) loss given by
+L(θt) =1
+2∥[γQπ(X′
+TD, θt)]sg+r−Qπ(XTD, θt)∥2
+2, (5)
+where [·]sgindicates a stop-gradient operation. Due to the stopping of gradient flow through Q(X′, θt),
+we refer to this operation as semi-gradient updates. Uncertainty estimates can then be obtained as the
+variance σ2
+q(s, a) =Vθ0[Q(s, a, θ t)]between ensembles of Q-functions from random initializations.
+While empirically successful, TD-trained deep ensembles are not as well understood as the supervised
+learning setting outlined in the previous section 2.1. Due to the use of bootstrapped TD losses, the
+closed-form NTK regime solutions in Eq. 4 do not apply to deep value function ensembles.
+An alternative to the above approach is the propagation of myopic uncertainty estimates. Several prior
+methods[O’Donoghue et al., 2018, Zhou et al., 2020, Luis et al., 2023] formalize this setting under a
+model-based perspective, where transition models ˜P(·|s, a)are sampled from a Bayesian posterior
+conditioned on transition data up to t. For acyclic MDPs, this setting permits a consistency condition
+similar to the Bellman equation that upper bounds value uncertainties recursively. While this approach
+devises a method for obtaining value uncertainties from propagated myopic uncertainties, several
+open problems remain, such as the tightness of model-free bounds of this kind [Janz et al., 2019,
+Van der Vaart et al., 2025] as well as how to prevent underestimation of these upper bounds due to
+the use of function approximation [Rashid et al., 2020, Zanger et al., 2024].
+3 Universal Value-Function Uncertainties
+Our method, universal value-function uncertainties (UVU), measures epistemic value uncertainty as
+the prediction errors between an online learner and a fixed target network, similar in spirit to random
+network distillation [Burda et al., 2019]. However, while RND quantifies myopic uncertainty through
+immediate prediction errors, UVU modifies the training process of the online learner such that the
+resulting prediction errors reflect value-function uncertainties, that is, uncertainty about long-term
+returns under a given policy.
+Our method centers around the interplay of two distinct neural networks: an online learner
+u(s, a, z, ϑ t) :S × A × Z − → R, parameterized by weights ϑt, and a fixed, randomly initial-
+ized target network g(s, a, z, ψ 0) :S ×A×Z − → R, parameterized by weights ψ0. Given a transition
+(s, a, s′)and policy encoding z, we draw subsequent actions a′from a policy π(·|s′, z). Then, we
+use the fixed target network gto generate synthetic rewards as
+rz
+g(s, a, s′, a′) =g(s, a, z, ψ 0)−γg(s′, a′, z, ψ 0). (6)
+While the weights ψ0of the target network remain fixed at initialization, the online network uis
+trained to minimize a TD loss using the synthetic reward rπ
+g. Given a dataset X={si, ai, zi}ND
+i=1, we
+have
+L(ϑt) =1
+2NDNDP
+i 
+γ[u(s′
+i, a′
+i, zi, ϑt)]sg+rz
+g(si, ai, s′
+i, a′
+i)−u(si, ai, zi, ϑt)2, (7)
+where [·]sgindicates a stop-gradient operation. For any tuple (s, a, z )(∈ X or not), we measure
+predictive uncertainties as squared prediction errors between the learner and the target function
+ϵ(s, a, z, ϑ t, ψ0)2= 
+u(s, a, z, ϑ t)−g(s, a, z, ψ 0)2. (8)
+The intuition behind this design is that, by construction, the value-function associated with policy
+π(·|s, z)and the synthetic rewards rz
+g(s, a, s′, a′)exactly equals the fixed target network g(s, a, z, ψ 0).
+As a sanity check, note that the target function g(s, a, z, ψ 0)itself satisfies the Bellman equation for
+the policy π(·|s, z)and the synthetic reward definition in Eq. (6), constituting a random value function
+torz
+gand hence achieves zero-loss according to Eq. (7). Therefore, if the dataset Xsufficiently covers
+the dynamics induced by π(·|s, z), the online network u(s, a, z, ϑ 0)is able to recover g(s, a, z, ψ 0)
+4Figure 2: ( left:) Illustration of uncertainty estimation in tabular UVU with 4independently initialized
+tables for uandg. Access to full trajectory data allows uto recover g. (right :) By executing action
+“b”, trajectories are effectively truncated, preventing ufrom recovering g. All plots use γ= 0.7.
+exactly, nullifying prediction errors. However, when data coverage is incomplete for the evaluated
+policy, minimization of the TD loss 7 is not sufficient for the online network u(s, a, z, ϑ 0)to recover
+target network predictions g(s, a, z, ψ 0). This discrepancy is captured by the prediction errors, which
+quantify epistemic uncertainty regarding future gaps of the available data.
+3.1 Building Intuition by an Example
+aa ab?
+b?
+b?
+...
+a
+Figure 1: Chain MDP of length N
+with unexplored actions b.To build intuition for how UVU operates and captures value
+uncertainty, we first consider a tabular setting with a simple
+chain MDP as illustrated in Figure 1. Suppose we collect data
+from a deterministic policy πdusing action aexclusively. Given
+this dataset, suppose we would like to estimate the uncertainty
+associated with the value Qπ(·|s,z)(s, a)of a policy π(·|s, z)
+that differs from the data-collection policy in that it chooses action “ b” ins3. In our tabular setting,
+we then initialize random tables usaandgsa. For every transition (st, at, st+1)contained in our single-
+trajectory dataset, we draw at+1∼π(·|s, z), compute the reward rg,tasrg,t=gstat−γgst+1at+1
+and update table entries with the rule ustat← −rg,t+γust+1at+1. Fig. 2 visualizes this process
+for several independently initialized tables (rows in Fig. 2) for the data-collecting policy πd(left),
+and for the altered policy π(·|s, z)(right), which chooses action “ b” ins3. We outline how this
+procedure yields uncertainty estimates: We first note, that one may regard gas a randomly generated
+value-function, for which we derive the corresponding reward function as rg. Asgsa, by construction,
+is the value-function corresponding to rg, one may expect that the update rule applied to usacauses
+usato recover gsa. Crucially, however, this is only possible if sufficient data is available for the
+evaluated policy. When a policy diverges from available data, as occurs under π(·|s, z)ins3, this
+causes an effective truncation of the collected trajectory. Consequently, us1aandus2areceive updates
+fromus3b, which remains at its initialization, rather than inferring the reward-generating function gsa.
+In the absence of long-term data, the empirical Bellman equations reflected in our updates do not
+uniquely determine the underlying value function gsa. Indeed, both usaandgsaincur zero TD-error
+in the r.h.s. of Fig. 2, yet differ significantly from each other. It is this ambiguity that UVU errors
+(gsa−usa)2quantify. To ensure urecovers g, longer rollouts under the policy π(·|s, z)are required
+to sufficiently constrain the solution space dictated by the Bellman equations (as seen in Fig. 2 left).
+Figure 3 illustrates uncertainty estimates for the shown chain MDP using neural networks and for a
+whole family of policies π(·|s, z)which select the unexplored action bwith probability 1−z. We
+analyze the predictive variance of an ensemble of 128universal Q-functions, each conditioned on
+the policy π(·|s, z). In the bottom row, we plot the squared prediction error of a single UVU model,
+averaged over 128independent heads. Both approaches show peaked uncertainty in early sections, as
+policies are more likely to choose the unknown action “ b” eventually, and low uncertainty closer to
+the terminal state and for zclose to 1. A comparison with RND is provided in the Appendix B.3.
+4 What Uncertainties Do Universal Value-Function Uncertainties Learn?
+While the previous section provided intuition for UVU, we now derive an analytical characterization
+of the uncertainties captured by the prediction errors ϵbetween a converged online learner uand the
+fixed target g. We turn to NTK theory to characterize the generalization properties of the involved
+neural networks in the limit of infinite width, allowing us to draw an exact equality between the
+squared predictions errors of UVU and the variance of universal value function ensembles.
+In the following analysis, we use the notational shorthand x= (s, a, z )andx′= (s′, a′, z)and
+denote a neural network f(x, θt)with hidden layer widths n1, . . . , n L=n, transitions from X=
+50
+5
+10
+15
+20s0.50.6
+0.7
+0.8
+0.9
+1.0z       Ensem
+ble 
+[Q(s,a0,z)] - 128 m
+odels
+0
+5
+10
+15
+20s0.50.6
+0.7
+0.8
+0.9
+1.0z      UVU 
+(s,a0,z)2 - 1 m
+odel
+Figure 3: From left to right, (1. and 2.): Variance of an ensemble of 128 universal Q-functions trained
+on a chain MDP dataset. (3. and 4.): Value uncertainty as measured by UVU prediction errors with a
+single 128-headed model. All plots evaluate the “ a” action of the chain MDP.
+{(si, ai, zi)}ND
+i=1toX′={(s′
+i, a′
+i, zi)}ND
+i=1, where a′
+i∼π(·|s′
+i, zi), and rewards r={ri}ND
+i=1. The
+evolution of the parameters θtunder gradient descent with infinitesimal step sizes, also called gradient
+flow, is driven by the minimization of TD losses with
+d
+dtθt=−α∇θL(θt),andL(θt) =1
+2∥[γf(X′, θt)]sg+r−f(X, θt)∥2
+2. (9)
+We study the dynamics induced by this parameter evolution in the infinite-width limit n→ ∞ . In this
+regime, the learning dynamics of fbecome linear as the NTK becomes deterministic and stationary,
+permitting explicit closed-form expressions for the evolution of the function f(x, θt). In particular,
+we show that the post convergence function limt− →∞f(x, θt)is given by
+f(x, θ∞) =f(x, θ0)−ΘxX(ΘXX−γΘX′X)−1(f(X, θ0)−(γf(X′, θ0) +r)), (10)
+where Θxx′is the NTK of f. Proof is given in Appendix A.1. This identity is useful to our analysis
+as it delineates any converged function f(x, θ∞)trained with TD losses 9 through its initialization
+f(x, θ0). Theorem 1 leverages this deterministic dependency to express the distribution of post
+convergence functions over random initializations θ0.
+Theorem 1. Letf(x, θt)be a NN with Lhidden layers of width n1, . . . , n L=ntrained with
+gradient flow to reduce the TD loss L(θt) =1
+2∥γ[f(X′, θt)]sg+r−f(X, θt)∥2
+2. In the limit of
+infinite width n− → ∞ and time t− → ∞ , the distribution of predictions f(XT, θ∞)on a set of test
+points XTconverges to a Gaussian with mean and covariance given by
+Eθ0
+f(XT, θ∞)
+= ΘXTX∆−1
+Xr,
+Covθ0
+f(XT, θ∞)
+=κXTXT−(ΘXTX∆−1
+XΛXT+h.c.)+(Θ XTX∆−1
+X(ΛX−γΛX′)∆−1⊤
+XΘXXT),
+where Θxx′is the NTK, κxx′is the NNGP kernel, h.c.denotes the Hermitian conjugate, and
+∆˜X= ΘX˜X−γΘX′˜X,and Λ˜X=κX˜X−γκX′˜X.
+Proof is provided in Appendix A.1. Theorem 1 is significant as it allows us to formalize explicitly
+the expected behavior and uncertainties of neural networks trained with semi-gradient TD losses,
+including universal value function ensembles and the prediction errors of UVU. In particular, the
+variance of an ensemble of universal Q-functions Q(XT, θ∞)over random initializations θ0is readily
+given by the diagonal entries of the covariance matrix Cov[Q(XT, θ∞)]. Applied to the UVU setting,
+Theorem 1 gives an expression for the converged online network u(x, ϑ∞) = Θ xX∆−1
+Xrz
+gtrained
+with the synthetic rewards rz
+g=g(X, ψ0)−γg(X′, ψ0). From this, It is straightforward to obtain
+the distribution of post convergence prediction errors1
+2ϵ(x, ϑ∞, ψ0)2. In Corollary 1, we use this
+insight to conclude that the expected squared prediction errors of UVU precisely match the variance
+of value functions Q(x, θ∞)from random initializations θ0.
+Corollary 1. Under the conditions of Theorem 1, let u(x, ϑ∞)be a converged online predictor
+trained with synthetic rewards generated by the fixed target network g(x, ψ0)withrz
+g=g(X, ψ0)−
+γg(X′, ψ0). Furthermore denote the variance of converged universal Q-functions Vθ0[Q(x, θ∞)].
+Assume u,g, and Qare architecturally equal and parameters are drawn i.i.d. θ0, ϑ0, ψ0∼ N(0,1).
+The expected squared prediction error coincides with Q-function variance
+Eϑ0,ψ01
+2ϵ(x, ϑ∞, ψ0)2
+=Vθ0
+Q(x, θ∞)
+, (11)
+where the l.h.s. expectation and r.h.s. variance are taken over random initializations ϑ0, ψ0, θ0.
+664 128 256 512 1024 2048
+Network width0246Avg. ReturnsWidth ablation
+BDQNP(8)
+UVU
+DQN
+BDQNP(35) BDQNP(15) BDQNP(3)UVU
+BDQNP(1)020406080Avg. Runtime (min) 100k Gradient StepsRuntime Analysis
+(a) (b) (c)
+Figure 4: (a) Ablation on GoToDoor -10with different network widths. Shaded region indicates
+standard deviations over 5 seeds. (b) Runtime of various ensemble sizes vs. UVU. Ensembles are
+implemented with vmap in JAX[Bradbury et al., 2018]. (c) Illustration of the GoToDoor environment.
+The agent (red triangle) must navigate to the door indicated by the task specification z.
+Proof is given in Appendix A.1.3. This result provides the central theoretical justification for UVU: in
+the limit of infinite width, our measure of uncertainty, the expected squared prediction error between
+the online and target network, is mathematically equivalent to the variance one would obtain by
+training an ensemble of universal Q-functions.
+In practice, we are moreover interested in the behavior of finite estimators, that is, ensemble variances
+are estimated with a finite number of models. We furthermore implement UVU with a number
+of multiple independent heads uiandgiwith shared hidden layers. Corollary 2 shows that the
+distribution of the sample mean squared prediction error from Mheads is identical to the distribution
+of the sample variance of an ensemble of M+ 1independently trained universal Q-functions.
+Corollary 2. Under the conditions of Theorem 1, consider online and target networks with M
+independent heads ui, gi,i= 1, . . . , M , each trained to convergence with errors ϵi(x, ϑ∞, ψ0). Let
+1
+2¯ϵ(x, ϑ∞, ψ0)2=1
+2MPM
+i=1ϵi(x, ϑ∞, ψ0)2be the sample mean squared prediction error over M
+heads. Moreover, consider M+ 1independent converged Q-functions Qi(x;θ∞)and denote their
+sample variance ¯σ2
+Q(x, θ∞) =1
+MPM+1
+i=1(Qi(x;θ∞)−¯Q(x;θ∞))2, where ¯Qis the sample mean.
+The two estimators are identically distributed according to a scaled Chi-squared distribution
+1
+2¯ϵ(x, ϑ∞, ψ0)2D= ¯σ2
+Q(x, θ∞),¯σ2
+Q(x, θ∞)∼σ2
+Q
+Mχ2(M), (12)
+withMdegrees of freedom and σ2
+Q(x, θ∞) =Vθ0[Q(x, θ∞)]is the analytical variance of converged
+Q-functions given by Theorem 1.
+Proof is provided in Appendix A.2.3. The distributional equivalence of these finite sample estimators
+provides theoretical motivation for using a multi headed architecture with shared hidden layers within
+a single UVU model and its use as an estimator for ensemble variances of universal Q-functions.
+While the assumptions of infinite width and gradient flow are theoretical idealizations, several
+empirical results suggest that insights from the NTK regime can translate well to practical finite
+width deep learning models [Lee et al., 2020, Liu et al., 2020, Tsilivis and Kempe, 2022], motivating
+further empirical investigation in Section 5.
+5 Empirical Analysis
+Our empirical analysis is designed to assess whether UVU can effectively quantify value function
+uncertainty in practical settings, comparing its performance against established baselines, particularly
+deep ensembles. Specifically, we aim to address the following questions:
+1.Does the theoretical motivation for UVU hold in practice and do its uncertainty estimates
+enable effective decision-making comparable to deep ensembles?
+2.How are uncertainty estimates generated by UVU affected by deviations from our theoretical
+analysis, namely finite network width?
+To address these questions, we focus on an offline multitask RL setting with incomplete data where
+reliable uncertainty estimation is crucial to attain high performance.
+7Table 1: Results of offline multitask RL with task rejection on different variations of the GoToDoor
+environment. Results are average evaluation returns of the best-performing policy over 105gradient
+steps and intervals are 90% student’s tconfidence intervals.
+Size DQN BDQNP(3) BDQNP(15) BDQNP(35) DQN-RND DQN-RND-P UVU (Ours)
+5 5 .50±.15 8 .69±.24 10.50±.04 10 .58±.03 3.94±.50 10.41±.12 10 .54±.03
+6 4 .93±.12 7 .66±.09 9 .39±.04 9.57±.04 1.99±.40 9 .28±.12 9.54±.03
+7 4 .58±.09 6 .61±.16 8 .49±.05 8.75±.06 2.66±.43 8 .12±.23 8.73±.04
+8 4 .06±.12 5 .91±.10 7 .68±.05 7 .92±.05 2 .53±.54 7 .40±.14 8.03±.04
+9 3 .66±.09 5 .04±.08 6 .69±.07 7 .03±.13 2 .39±.38 6 .39±.19 7.29±.10
+10 3 .39±.11 4 .64±.14 6 .09±.13 6.53±.16 2.25±.48 5 .64±.17 6.72±.12
+5.1 Experimental Setup
+In our experimental analysis, we use an offline variant of the GoToDoor environment from the
+Minigrid benchmark suite [Chevalier-Boisvert et al., 2023]. An example view is shown in Figure 4
+(c). In this task, the agent navigates a grid world containing four doors of different colors, placed at
+random locations and receives a task specification zindicating a target door color. Upon opening the
+correct door, the agent receives a reward and is placed in a random different location. Episodes are of
+fixed length and feature a randomly generated grid layout and random door positions / colors. In our
+experiments, we use variations of different difficulties by increasing maximum grid sizes.
+Dataset Collection. A dataset D={(si, ai, ri, zi, s′
+i,)}ND
+i=1is collected using a policy that per-
+forms expertly but systematically fails for certain task/grid combinations (e.g., it can not successfully
+open doors on the “north” wall, irrespective of color or grid layout). Policies seeking to improve
+upon the behavior policy thus ought to deviate from the dataset, inducing value uncertainty.
+Task Rejection Protocol. All baselines implement a DQN-based agent trained in an offline fashion
+onD. As the agents aim to learn an optimal policy for all grids and tasks contained in D, the resulting
+greedy policy tends to deviate from the available data when the collecting policy is suboptimal. We
+employ a task-rejection protocol to quantify an agent’s ability to recognize this divergence and the
+associated value uncertainty. As most task/grid combinations are contained in D, though with varying
+levels of policy expertise, myopic uncertainty is not sufficient for fulfilling this task. Specifically,
+upon encountering the initial state s0, the agent is given opportunity to reject a fixed selection of tasks
+(here door colors). It is subsequently given one of the remaining, non-rejected tasks and performance
+is measured by the average return achieved on the attempted task. Successful agents must thus either
+possess uncertainty estimates reliable enough to consistently reject tasks associated with a data/policy
+mismatch or rely on out-of-distribution generalization. Similar protocols, known as accuracy rejection
+curves, have been used widely in the supervised learning literature[Nadeem et al., 2009].
+5.2 Results
+We conduct experiments according to the above protocol and perform a quantitative evaluation
+of UVU and several baseline algorithms. All agents are trained offline and use the basic DQN
+architecture [Mnih et al., 2015] adapted for universal value functions, taking the task encoding z
+as an additional input to the state (details are provided in Appendix B). Specifically, we compare
+UVU against several baselines: A DQN baseline with random task rejection (DQN); Bootstrapped
+DQN with randomized priors (BDQNP) [Osband et al., 2019]; A DQN adaptation of random
+network distillation (DQN-RND) [Burda et al., 2019] and a version adapted with the uncertainty
+prior mechanism proposed by Zanger et al. [2024] (DQN-RND-P). Except for the DQN baseline, all
+algorithms reject tasks based on the highest uncertainty estimate, given the initial state s0and action
+a0, which is chosen greedily by the agent.
+Table 1 shows the average return achieved by each method on the GoToDoor experiment across
+different maximum grid sizes, with average runtimes displayed in Fig. 4 (b). This result addresses
+our first research question regarding the practical effectiveness of UVU compared to ensembles and
+other baseline methods. As shown, the standard DQN baseline performs significantly worse than
+uncertainty-based algorithms, indicating that learned Q-functions do not generalize sufficiently to
+counterbalance inadequate uncertainty estimation. Both small and large ensembles significantly
+improve performance by leveraging uncertainty to reject tasks and policies associated with missing
+data. RND-based agents perform well when intrinsic reward priors are used. Our approach scores
+8highly and outperforms many of the tested baselines with statistical significance, indicating that it is
+indeed able to effectively quantify value uncertainty using a single-model multi-headed architecture.
+We furthermore ablate UVU’s dependency on network width, given that our theoretical analysis
+is situated in the infinite width limit. Fig. 4 (a) shows that UVU’s performance scales similarly
+with network width to DQN and BDQNP baselines, indicating that finite-sized networks, provided
+appropriate representational capacity, are sufficient for effective uncertainty estimates.
+6 Related Work
+A body of literature considers the quantification of value function uncertainty in the context of
+exploration. Early works [Dearden et al., 1998, Engel et al., 2005] consider Bayesian adoptions of
+model-free RL algorithms. More recent works provide theoretical analyses of the Bayesian model-
+free setting and correct applications thereof [Fellows et al., 2021, Schmitt et al., 2023, Van der Vaart
+et al., 2025], which is a subject of debate due to the use TD losses. Several works furthermore derive
+provably efficient model-free algorithms using frequentist upper bounds on values in tabular [Strehl
+et al., 2006, Jin et al., 2018] and linear settings [Jin et al., 2020]. Similarly, Yang et al. [2020] derive
+provably optimisic bounds of value functions in the NTK regime, but in contrast to our work uses
+local bonuses to obtain these. The exact relationship between bounds derived from local bonuses and
+the functional variance in ensemble or Bayesian settings remains open.
+The widespread use and empirical success of ensembles for uncertainty quantification in deep learning
+[Dietterich, 2000, Lakshminarayanan et al., 2017] has motivated several directions of research towards
+a better theoretical understanding of their behavior. Following seminal works by Jacot et al. [2018]
+and Lee et al. [2020] who characterize NN learning dynamics in the NTK regime, a number of works
+have connected deep ensembles to Bayesian interpretations [He et al., 2020, D’Angelo and Fortuin,
+2021]. Moreover, a number of papers have studied the learning dynamics of model-free RL: in the
+overparametrized linear settings [Xiao et al., 2021]; in neural settings for single [Cai et al., 2019]
+and multiple layers [Wai et al., 2020]; to analyze generalization behavior [Lyle et al., 2022] with
+linear and second-order approximations. It should be noted that the aforementioned do not focus on
+probabilistic descriptions of posterior distributions in the NTK regime. In contrast, our work provides
+probabilistic closed-form solutions for this setting with semi-gradient TD learning.
+In practice, the use of deep ensembles is common in RL, with applications ranging from efficient
+exploration [Osband et al., 2016, Chen et al., 2017, Osband et al., 2019, Nikolov et al., 2019, Zanger
+et al., 2024] to off-policy or offline RL [An et al., 2021, Chen et al., 2021, Lee et al., 2021] and
+conservative or safe RL [Lütjens et al., 2019, Lee et al., 2022, Hoel et al., 2023]. Single model
+methods that aim to reduce the computational burden of ensemble methods typically operate as
+myopic uncertainty estimators [Burda et al., 2019, Pathak et al., 2017, Lahlou et al., 2021, Zanger
+et al., 2025] and require additional mechanisms [O’Donoghue et al., 2018, Janz et al., 2019, Zhou
+et al., 2020, Luis et al., 2023].
+7 Limitations and Discussion
+In this work, we introduced universal value-function uncertainties (UVU), an efficient single-model
+method for uncertainty quantification in value functions. Our method measures uncertainties as
+prediction error between a fixed, random target network and an online learner trained with a tem-
+poral difference (TD) loss. This induces prediction errors that reflect long-term, policy-dependent
+uncertainty rather than myopic novelty. One of our core contributions is a thorough theoretical
+analysis of this approach via neural tangent kernel theory, which, in the limit of infinite network
+width, establishes an equivalence between UVU errors and the variance of ensembles of universal
+value functions. Empirically, UVU achieves performance comparable and sometimes superior to
+sizeable deep ensembles and other baselines in challenging offline task-rejection settings, while
+offering substantial computational savings.
+We believe our work opens up several avenues for future research: Although our NTK analysis
+provides a strong theoretical backing, it relies on idealized assumptions, notably the limit of infinite
+network width (a thoroughgoing exposition of our approximations is provided in Appendix A.3).
+Our experiments suggest UVU’s performance is robust in practical finite-width regimes (Figure 4),
+yet bridging this gap between theory and practice remains an area for future work. On a related
+9note, analysis in the NTK regime typically eludes feature learning. Combinations of UVU with
+representation learning approaches such as self-predictive auxiliary losses [Schwarzer et al., 2020,
+Guo et al., 2022, Fujimoto et al., 2023] are, in our view, a very promising avenue for highly challenging
+exploration problems. Furthermore, while our approach estimates uncertainty for given policies,
+it does not devise a method for obtaining diverse policies and encodings thereof. We thus believe
+algorithms from the unsupervised RL literature[Touati and Ollivier, 2021, Zheng et al., 2023] naturally
+integrate with our approach. In conclusion, we believe UVU provides a strong foundation for future
+developments in uncertainty-aware agents that are both capable and computationally feasible.
+10References
+G. An, S. Moon, J.-H. Kim, and H. O. Song. Uncertainty-based offline reinforcement learning with
+diversified q-ensemble. Advances in neural information processing systems , 34:7436–7447, 2021.
+J. L. Ba, J. R. Kiros, and G. E. Hinton. Layer normalization. arXiv preprint arXiv:1607.06450 , 2016.
+M. Bellemare, S. Srinivasan, G. Ostrovski, T. Schaul, D. Saxton, and R. Munos. Unifying count-based
+exploration and intrinsic motivation. Advances in neural information processing systems , 29, 2016.
+R. Bellman. A Markovian decision process. Journal of mathematics and mechanics , 6, 1957.
+J. Bradbury, R. Frostig, P. Hawkins, M. J. Johnson, C. Leary, D. Maclaurin, G. Necula, A. Paszke,
+J. VanderPlas, S. Wanderman-Milne, and Q. Zhang. JAX: composable transformations of
+Python+NumPy programs, 2018. URL http://github.com/jax-ml/jax .
+Y . Burda, H. Edwards, A. J. Storkey, and O. Klimov. Exploration by random network distillation. In
+International conference on learning representations, ICLR , 2019.
+Q. Cai, Z. Yang, J. D. Lee, and Z. Wang. Neural temporal-difference learning converges to global
+optima. Advances in Neural Information Processing Systems , 32, 2019.
+R. Y . Chen, S. Sidor, P. Abbeel, and J. Schulman. UCB exploration via Q-ensembles. arXiv preprint
+arXiv:1706.01502 , 2017.
+X. Chen, C. Wang, Z. Zhou, and K. Ross. Randomized ensembled double Q-learning: Learning fast
+without a model. arXiv preprint arXiv:2101.05982 , 2021.
+M. Chevalier-Boisvert, B. Dai, M. Towers, R. Perez-Vicente, L. Willems, S. Lahlou, S. Pal, P. S.
+Castro, and J. Terry. Minigrid & miniworld: Modular & customizable reinforcement learning
+environments for goal-oriented tasks. In Advances in Neural Information Processing Systems 36,
+New Orleans, LA, USA , December 2023.
+F. D’Angelo and V . Fortuin. Repulsive deep ensembles are bayesian. Advances in Neural Information
+Processing Systems , 34:3451–3465, 2021.
+R. Dearden, N. Friedman, S. Russell, et al. Bayesian Q-learning. Aaai/iaai , 1998:761–768, 1998.
+T. G. Dietterich. Ensemble methods in machine learning. In Multiple classifier systems: First
+international workshop, MCS . Springer, 2000.
+Y . Engel, S. Mannor, and R. Meir. Reinforcement learning with gaussian processes. In Proceedings
+of the 22nd international conference on Machine learning , pages 201–208, 2005.
+M. Fellows, K. Hartikainen, and S. Whiteson. Bayesian Bellman operators. Advances in neural
+information processing systems , 34, 2021.
+S. Fujimoto, W.-D. Chang, E. Smith, S. S. Gu, D. Precup, and D. Meger. For sale: State-action
+representation learning for deep reinforcement learning. Advances in neural information processing
+systems , 36:61573–61624, 2023.
+M. Gallici, M. Fellows, B. Ellis, B. Pou, I. Masmitja, J. N. Foerster, and M. Martin. Simplifying deep
+temporal difference learning. arXiv preprint arXiv:2407.04811 , 2024.
+S. Gerschgorin. Uber die abgrenzung der eigenwerte einer matrix. Izvestija Akademii Nauk SSSR,
+Serija Matematika , 7(3):749–754, 1931.
+M. Ghavamzadeh, S. Mannor, J. Pineau, and A. Tamar. Bayesian reinforcement learning: A survey.
+Foundations and trends in machine learning , 8, 2015.
+Z. Guo, S. Thakoor, M. Pîslar, B. Avila Pires, F. Altché, C. Tallec, A. Saade, D. Calandriello, J.-B.
+Grill, Y . Tang, et al. BYOL-Explore: Exploration by bootstrapped prediction. Advances in neural
+information processing systems , 35:31855–31870, 2022.
+H. Hasselt. Double Q-learning. Advances in neural information processing systems , 23, 2010.
+11B. He, B. Lakshminarayanan, and Y . W. Teh. Bayesian deep ensembles via the neural tangent kernel.
+Advances in neural information processing systems , 33, 2020.
+K. He, X. Zhang, S. Ren, and J. Sun. Delving deep into rectifiers: Surpassing human-level per-
+formance on Imagenet classification. In Proceedings of the IEEE international conference on
+computer vision , 2015.
+C.-J. Hoel, K. Wolff, and L. Laine. Ensemble quantile networks: Uncertainty-aware reinforcement
+learning with applications in autonomous driving. IEEE Transactions on intelligent transportation
+systems , 2023.
+A. Jacot, F. Gabriel, and C. Hongler. Neural tangent kernel: Convergence and generalization in neural
+networks. Advances in neural information processing systems , 31, 2018.
+D. Janz, J. Hron, P. Mazur, K. Hofmann, J. M. Hernández-Lobato, and S. Tschiatschek. Successor
+uncertainties: Exploration and uncertainty in temporal difference learning. Advances in neural
+information processing systems , 32, 2019.
+C. Jin, Z. Allen-Zhu, S. Bubeck, and M. I. Jordan. Is q-learning provably efficient? Advances in
+neural information processing systems , 31, 2018.
+C. Jin, Z. Yang, Z. Wang, and M. I. Jordan. Provably efficient reinforcement learning with linear
+function approximation. In Conference on learning theory , pages 2137–2143. PMLR, 2020.
+A. Kumar, A. Zhou, G. Tucker, and S. Levine. Conservative q-learning for offline reinforcement
+learning. Advances in neural information processing systems , 33:1179–1191, 2020.
+S. Lahlou, M. Jain, H. Nekoei, V . I. Butoi, P. Bertin, J. Rector-Brooks, M. Korablyov, and Y . Bengio.
+Deup: Direct epistemic uncertainty prediction. arXiv preprint arXiv:2102.08501 , 2021.
+B. Lakshminarayanan, A. Pritzel, and C. Blundell. Simple and scalable predictive uncertainty
+estimation using deep ensembles. Advances in neural information processing systems , 30, 2017.
+J. Lee, J. Sohl-dickstein, J. Pennington, R. Novak, S. Schoenholz, and Y . Bahri. Deep neural networks
+as gaussian processes. In International conference on learning representations , 2018.
+J. Lee, L. Xiao, S. S. Schoenholz, Y . Bahri, R. Novak, J. Sohl-Dickstein, and J. Pennington. Wide
+Neural Networks of Any Depth Evolve as Linear Models Under Gradient Descent. Journal of
+Statistical Mechanics: Theory and Experiment , 2020, Dec. 2020.
+K. Lee, M. Laskin, A. Srinivas, and P. Abbeel. Sunrise: A simple unified framework for ensemble
+learning in deep reinforcement learning. In International Conference on Machine Learning , pages
+6131–6141. PMLR, 2021.
+S. Lee, Y . Seo, K. Lee, P. Abbeel, and J. Shin. Offline-to-online reinforcement learning via balanced
+replay and pessimistic q-ensemble. In Conference on Robot Learning , pages 1702–1712. PMLR,
+2022.
+C. Liu, L. Zhu, and M. Belkin. On the linearity of large non-linear models: when and why the tangent
+kernel is constant. Advances in Neural Information Processing Systems , 33:15954–15964, 2020.
+C. E. Luis, A. G. Bottero, J. Vinogradska, F. Berkenkamp, and J. Peters. Model-based uncertainty
+in value functions. In International Conference on Artificial Intelligence and Statistics , pages
+8029–8052. PMLR, 2023.
+B. Lütjens, M. Everett, and J. P. How. Safe reinforcement learning with model uncertainty estimates.
+In2019 International Conference on Robotics and Automation (ICRA) , pages 8662–8668. IEEE,
+2019.
+C. Lyle, M. Rowland, W. Dabney, M. Kwiatkowska, and Y . Gal. Learning dynamics and generalization
+in reinforcement learning. arXiv preprint arXiv:2206.02126 , 2022.
+V . Mnih, K. Kavukcuoglu, D. Silver, A. A. Rusu, J. Veness, M. G. Bellemare, A. Graves, M. Ried-
+miller, A. K. Fidjeland, G. Ostrovski, et al. Human-level control through deep reinforcement
+learning. Nature , 518, 2015.
+12M. S. A. Nadeem, J.-D. Zucker, and B. Hanczar. Accuracy-rejection curves (arcs) for comparing
+classification methods with a reject option. In Machine Learning in Systems Biology , pages 65–81.
+PMLR, 2009.
+N. Nikolov, J. Kirschner, F. Berkenkamp, and A. Krause. Information-directed exploration for deep
+reinforcement learning. In International conference on learning representations, ICLR , 2019.
+I. Osband, C. Blundell, A. Pritzel, and B. Van Roy. Deep exploration via bootstrapped DQN.
+Advances in neural information processing systems , 29, 2016.
+I. Osband, B. Van Roy, D. J. Russo, Z. Wen, et al. Deep exploration via randomized value functions.
+Journal of machine learning research , 20, 2019.
+B. O’Donoghue, I. Osband, R. Munos, and V . Mnih. The uncertainty Bellman equation and explo-
+ration. In International conference on machine learning . PMLR, 2018.
+D. Pathak, P. Agrawal, A. A. Efros, and T. Darrell. Curiosity-driven exploration by self-supervised
+prediction. In International conference on machine learning . PMLR, 2017.
+T. Rashid, B. Peng, W. Böhmer, and S. Whiteson. Optimistic exploration even with a pessimistic
+initialisation. Proceedings of ICLR 2020 , 2020.
+T. Schaul, D. Horgan, K. Gregor, and D. Silver. Universal value function approximators. In
+International conference on machine learning , pages 1312–1320. PMLR, 2015.
+S. Schmitt, J. Shawe-Taylor, and H. van Hasselt. Exploration via epistemic value estimation. In
+Proceedings of the AAAI Conference on Artificial Intelligence , volume 37, 2023.
+M. Schwarzer, A. Anand, R. Goel, R. D. Hjelm, A. Courville, and P. Bachman. Data-efficient
+reinforcement learning with self-predictive representations. arXiv preprint arXiv:2007.05929 ,
+2020.
+D. Silver, A. Huang, C. J. Maddison, A. Guez, L. Sifre, G. Van Den Driessche, J. Schrittwieser,
+I. Antonoglou, V . Panneershelvam, M. Lanctot, et al. Mastering the game of go with deep neural
+networks and tree search. nature , 529(7587):484–489, 2016.
+A. L. Strehl, L. Li, E. Wiewiora, J. Langford, and M. L. Littman. Pac model-free reinforcement
+learning. In Proceedings of the 23rd international conference on Machine learning , pages 881–888,
+2006.
+A. Touati and Y . Ollivier. Learning one representation to optimize all rewards. Advances in Neural
+Information Processing Systems , 34:13–23, 2021.
+N. Tsilivis and J. Kempe. What can the neural tangent kernel tell us about adversarial robustness?
+Advances in Neural Information Processing Systems , 35:18116–18130, 2022.
+P. R. Van der Vaart, M. T. Spaan, and N. Yorke-Smith. Epistemic Bellman operators. In Proceedings
+of the AAAI Conference on Artificial Intelligence , 2025.
+O. Vinyals, I. Babuschkin, W. M. Czarnecki, M. Mathieu, A. Dudzik, J. Chung, D. H. Choi, R. Powell,
+T. Ewalds, P. Georgiev, et al. Grandmaster level in starcraft ii using multi-agent reinforcement
+learning. nature , 575(7782):350–354, 2019.
+H.-T. Wai, Z. Yang, Z. Wang, and M. Hong. Provably efficient neural gtd for off-policy learning.
+Advances in Neural Information Processing Systems , 33:10431–10442, 2020.
+C. Xiao, B. Dai, J. Mei, O. A. Ramirez, R. Gummadi, C. Harris, and D. Schuurmans. Understanding
+and leveraging overparameterization in recursive value estimation. In International Conference on
+Learning Representations , 2021.
+G. Yang. Scaling limits of wide neural networks with weight sharing: Gaussian process behavior,
+gradient independence, and neural tangent kernel derivation. arXiv preprint arXiv:1902.04760 ,
+2019.
+13Z. Yang, C. Jin, Z. Wang, M. Wang, and M. Jordan. Provably efficient reinforcement learning with
+kernel and neural function approximations. Advances in Neural Information Processing Systems ,
+33:13903–13916, 2020.
+Y . Yue, R. Lu, B. Kang, S. Song, and G. Huang. Understanding, predicting and better resolving
+q-value divergence in offline-rl. Advances in Neural Information Processing Systems , 36:60247–
+60277, 2023.
+M. A. Zanger, W. Böhmer, and M. T. Spaan. Diverse projection ensembles for distributional
+reinforcement learning. In International conference on learning representations , 2024.
+M. A. Zanger, P. R. Van der Vaart, W. Böhmer, and M. T. Spaan. Contextual similarity distillation:
+Ensemble uncertainties with a single model. arXiv preprint arXiv:2503.11339 , 2025.
+C. Zheng, R. Salakhutdinov, and B. Eysenbach. Contrastive difference predictive coding. arXiv
+preprint arXiv:2310.20141 , 2023.
+Q. Zhou, H. Li, and J. Wang. Deep model-based reinforcement learning via estimated uncertainty and
+conservative policy optimization. In Proceedings of the AAAI Conference on Artificial Intelligence ,
+2020.
+14A Theoretical Results
+This section provides proofs and further theoretical results for universal value-function uncertainties
+(UVU).
+A.1 Learning Dynamics of UVU
+We begin by deriving learning dynamics for general functions with temporal difference (TD) losses
+and gradient descent, before analyzing the post training distribution of deep ensembles and prediction
+errors of UVU.
+A.1.1 Linearized Learning Dynamics with Temporal Difference Losses
+We analyze the learning dynamics of a function trained using semi-gradient temporal difference (TD)
+losses on a fixed dataset of transitions X,X′. Letf(x, θt)denote a NN of interest with depth Land
+widths n1, . . . , n L−1=n.
+Proposition 1. In the limit of infinite width n− → ∞ and infinite time t− → ∞ , the function f(x, θt)
+converges to
+f(x, θ∞) =f(x, θ0)−ΘxX(ΘXX−γΘX′X)−1(f(X, θ0)−(γf(X′, θ0) +r)), (13)
+where Θxx′is the neural tangent kernel of f.
+Proof. We begin by linearizing the function faround its initialization parameters θ0:
+flin(x, θt) =f(x, θ0) +∇θf(x, θ0)⊤(θt−θ0). (14)
+We assume gradient descent updates with infinitesimal step size and a learning rate αon the loss
+L(θt) =1
+2∥γflin(X′, θt)sg+r−flin(X, θt)∥2
+2, (15)
+yielding the parameter evolution
+d
+dtθt=−α∇θL(θt). (16)
+Setting wt=θt−θ0and find the learning dynamics:
+d
+dtwt=−α∇θf(X, θ0) (flin(X, θt)−(γflin(X′, θt) +r)). (17)
+Thus, the evolution of the linearized function is given by
+d
+dtflin(x, θt) =−α∇θf(x, θ0)⊤∇θf(X, θ0) (flin(X, θt)−(γflin(X′, θt) +r)). (18)
+Letting δTD(θt) =flin(X, θt)−(γflin(X′, θt) +r), we obtain the differential equation
+d
+dtδTD(θt) =−α 
+Θt0
+XX−γΘt0
+X′X
+δTD(θt), (19)
+where Θt0
+xx′=∇θf(x, θ0)⊤∇θf(x′, θ0)is the (empirical) tangent kernel of flin(x, θt). Since the
+linearization flin(x, θt)has constant gradients ∇θf(x, θ0), the above differential equation is linear
+and solvable so long as the matrix Θt0
+XX−γΘt0
+X′Xis positive definite. With an exponential ansatz,
+we obtain the solution
+δTD(θt) =e−αt(Θt0
+XX−γΘt0
+X′X)δTD(θ0), (20)
+where eXis a matrix exponential. Reintegrating yields the explicit evolution of predictions
+flin(x, θt) =f(x, θ0) +Zt
+0d
+dt′flin(x, θt′)dt′(21)
+=f(x, θ0)−Θt0
+xX 
+Θt0
+XX−γΘt0
+X′X−1
+e−αt(Θt0
+XX−γΘt0
+X′X)−I
+δTD(θ0). (22)
+Jacot et al. [2018] show that in the limit of infinite layer widths of the neural network, the NTK
+Θt0
+xx′becomes deterministic and constant Θt0
+xx′− →Θxx′. As a consequence, the linear approximation
+flin(x;θt)becomes exact w.r.t. the original function lim width− →∞flin(x;θt) =f(x, θt)[Lee et al.,
+2020].
+15Remark on the constancy of the NTK in TD learning. We note here, that our proof assumed the
+results by Jacot et al. [2018] to hold for the case of semi-gradient TD updates, namely that the NTK
+becomes deterministic and constant Θt0
+xx′− →Θxx′in the limit of infinite width under the here shown
+dynamics. First, the determinacy of the NTK at initialization follows from the law of large numbers
+and applies in our case equally as in the least squares case. The constancy of the NTK throughout
+training is established by Theorem 2 in Jacot et al. [2018], which we restate informally below.
+Theorem 2. [Jacot et al. [2018]] In the limit of infinite layer widths n→ ∞ andn1, . . . , n L=n,
+the kernel Θt0
+xx′converges uniformly on the interval t∈[0, T]to the constant neural tangent kernel
+Θt0
+xx′→Θxx′,
+provided that the integralRT
+0∥dt∥2dtstays bounded. Here, dt∈RNDis the training direction of
+the parameter evolution such thatd
+dtθt=−α∇θf(X, θ)dt
+In the here studied case of semi-gradient TD learning, the parameter evolution (as outlined above in
+Eq. (17)) is described by the gradient ∇θf(X, θ0)and the training direction dtaccording to
+d
+dtθt=−α∇θf(X, θ0) (flin(X, θt)−(γflin(X′, θt) +r))| {z }
+dt, (23)
+where the training direction is given by dt=flin(X, θt)−(γflin(X′, θt) +r) =δTD(θt). Provided
+that the matrix Θt0
+XX−γΘt0
+X′Xis positive definite, the norm of the training direction ∥dt∥2decays
+exponentially by Eq. 20. This implies
+∥dt∥2<∥d0∥2e−tλmin, (24)
+where λminis the smallest eigenvalue of Θt0
+XX−γΘt0
+X′X. Assuming Θt0
+XX−γΘt0
+X′Xis positive
+definite, λminis positive and as a consequence, we have
+Z∞
+0∥dt∥2dt <Z∞
+0∥d0∥2e−tλmindt <∞, (25)
+bounding the required integral of Theorem 2 for any Tand establishing Θt0
+xx′− →Θxx′uniformly on
+the interval [0,∞)(see Theorem 2 in Jacot et al. [2018] for detailed proof for the last statement).
+We note, however, that the condition for Θt0
+XX−γΘt0
+X′Xto be positive definite is, for any γ >0,
+stronger than in the classical results for supervised learning with least squares regression. While
+ΘXXcan be guaranteed to be positive definite for example by restricting Xto lie on a unit-sphere,
+xi∈ X to be unique, and by assuming non-polynomial nonlinearities in the neural network (so as to
+prevent rank decay in the network expressivity), the condition is harder to satisfy in the TD learning
+setting. Here, the eigenspectrum of Θt0
+XX−γΘt0
+X′Xtends to depend on the transitions X → X′
+themselves and thus is both dependent on the discount γas well as the interplay between gradient
+structures of the NTK and the MDP dynamics.
+We note here, that this is not primarily a limitation of applying NTK theory to TD learning, but is
+reflected in practical experience: TD learning can, especially in offline settings, indeed be instable
+and diverge. Instability of this form is thus inherent to the learning algorithm rather than an artifact
+of our theoretical treatment. Informally, one approach towards guaranteeing positive definiteness
+ofΘt0
+XX−γΘt0
+X′Xis by enforcing diagonal dominance, appealing to the Gershgorin circle theorem
+[Gerschgorin, 1931]. For a matrix A= [aij], every real eigenvalue λmust lie in
+aii−Ri≤λ≤aii+Ri, (26)
+where Ri=P
+i̸=j|aij|is the sum of off-diagonal elements of a row i. In other words, a lower bound
+on the smallest real eigenvalue can be increased by increasing diagonal entries aiiwhile decreasing
+off-diagonal elements aij. In the TD learning setting, this translates to gradient conditioning, e.g., by
+ensuring ∥∇θf(x, θ)∥2=∥∇θf(x′, θ)∥2=Cfor any pair x, x′, guaranteeing cross-similarities to
+be smaller than self-similarities. Indeed several recent works pursue similar strategies to stabilize
+offline TD learning [Yue et al., 2023, Gallici et al., 2024] and rely on architectural elements like layer
+normalization [Ba et al., 2016] to shape gradient norms.
+16A.1.2 Post Training Function Distribution with Temporal Difference Dynamics
+We now aim to establish the distribution of post-training functions f(x, t∞)when initial parameters
+θ0are drawn randomly i.i.d. For the remainder of this section, we will assume the infinite width limit,
+s.t.flin(x, θ∞) =f(x, θ∞)andΘt0
+xx′= Θ xx′. The post-training function f(x, θ∞)is given by
+f(x, θ∞) =f(x, θ0)−ΘxX 
+Θt0
+XX−γΘt0
+X′X−1(f(X, θ0)−(γf(X′, θ0) +r)), (27)
+and is thus a deterministic function of the initialization θ0.
+Theorem 1. Letf(x, θt)be a NN with Lhidden layers of width n1, . . . , n L=ntrained with
+gradient flow to reduce the TD loss L(θt) =1
+2∥γ[f(X′, θt)]sg+r−f(X, θt)∥2
+2. In the limit of
+infinite width n− → ∞ and time t− → ∞ , the distribution of predictions f(XT, θ∞)on a set of test
+points XTconverges to a Gaussian with mean and covariance given by
+Eθ0
+f(XT, θ∞)
+= ΘXTX∆−1
+Xr,
+Covθ0
+f(XT, θ∞)
+=κXTXT−(ΘXTX∆−1
+XΛXT+h.c.)+(Θ XTX∆−1
+X(ΛX−γΛX′)∆−1⊤
+XΘXXT),
+where Θxx′is the NTK, κxx′is the NNGP kernel, h.c.denotes the Hermitian conjugate, and
+∆˜X= ΘX˜X−γΘX′˜X,and Λ˜X=κX˜X−γκX′˜X.
+Proof. We begin by introducing a column vector of post-training function evaluations on a set of test
+points XT, and the training data XandX′. Moreover, we introduce the shorthand
+∆X= ΘXX−γΘX′X, (28)
+and similarly ∆X′= ΘXX′−γΘX′X′. The vector can then be compactly described in block matrix
+notation by
+ f(XT, θ∞)
+f(X, θ∞)
+f(X′, θ∞)!
+|{z }
+f∞=
+I−ΘXTX∆−1
+XγΘXTX∆−1
+X
+I−ΘXX∆−1
+X γΘXX∆−1
+X
+I−ΘX′X∆−1
+X γΘX′X∆−1
+X
+
+| {z }
+A f(XT, θ0)
+f(X, θ0)
+f(X′, θ0)!
+|{z}
+f0+
+ΘXTX∆−1
+Xr
+ΘXX∆−1
+Xr
+ΘX′X∆−1
+Xr
+
+|{z }
+b.(29)
+Lee et al. [2018] show that neural networks with random Gaussian initialization θ0(including
+NTK parametrization) are described by the neural network Gaussian process (NNGP) f(XT, θ0)∼
+N(0, κXTXT)withκXTXT=E[f(XT, θ0)f(XT, θ0)⊤]. By extension, the initializations f0are
+jointly Gaussian with zero mean and covariance matrix
+Cov
+f0
+= κXTXTκXTXκXTX′
+κXXTκXX κXX′
+κX′XTκX′XκX′X′!
+| {z }
+K. (30)
+As the post-training function evaluations f∞given in Eq. (29) are affine transformations of the
+multivariate Gaussian random variables f0∼ N(0, K), they themselves are multivariate Gaussian
+with distribution f∞∼ N(b, AKA⊤).
+We are content with obtaining an expression for the distribution of f(XT, θ∞)and thus in the
+following focus on the top-left entry of the block matrix (AKA⊤)11. For notational brevity, we
+introduce the following shorthand notations
+Λ˜X=κX˜X−γκX′˜X(31)
+After some rearranging, one obtains the following expression for the covariance Cov (f∞
+XT)
+Covθ0
+f(XT, θ∞)
+=κXTXT−(ΘXTX∆−1
+XΛXT+h.c.)+(Θ XTX∆−1
+X(ΛX−γΛX′)∆−1⊤
+XΘXXT).
+17A.1.3 Distribution of UVU Predictive Errors
+We now aim to find an analytical description of the predictive errors as generated by our approach.
+For this, let u(x, ϑt)denote the predictive (online) network and g(x;ψ0)the fixed target network.
+We furthermore denote ϵ(x, ϑt, ψ0) =u(x, ϑt)−g(x, ψ0)the prediction error between online and
+target network.
+Corollary 1. Under the conditions of Theorem 1, let u(x, ϑ∞)be a converged online predictor
+trained with synthetic rewards generated by the fixed target network g(x, ψ0)withrz
+g=g(X, ψ0)−
+γg(X′, ψ0). Furthermore denote the variance of converged universal Q-functions Vθ0[Q(x, θ∞)].
+Assume u,g, and Qare architecturally equal and parameters are drawn i.i.d. θ0, ϑ0, ψ0∼ N(0,1).
+The expected squared prediction error coincides with Q-function variance
+Eϑ0,ψ01
+2ϵ(x, ϑ∞, ψ0)2
+=Vθ0
+Q(x, θ∞)
+, (11)
+where the l.h.s. expectation and r.h.s. variance are taken over random initializations ϑ0, ψ0, θ0.
+Proof. Since our algorithm uses semi-gradient TD losses to train u(x, ϑt), the linearized dynamics
+of Theorem (1)apply. However, we consider a fixed target network g(x;ψ0)to produce synthetic
+rewards according to
+rg=g(x, ψ0)−γg(x′, ψ0). (32)
+With the post training function as described by Eq. 27, the post-training prediction error in a query
+point xfor this reward is given by
+u(x, ϑ∞)−g(x, ψ0) =
+u(x, ϑ0)−g(x, ψ0)−ΘxX∆−1
+X(u(X, ϑ0)−(γu(X′, ϑ0) +g(X, ψ0)−γg(X′, ψ0))).(33)
+We again use the shorthand ϵt= (ϵ(XT, ϑt, ψ0), ϵ(X, ϑt, ψ0), ϵ(X′, ϑt, ψ0))⊤and reusing the block
+matrix Afrom Eq. 29, we can write
+ϵ∞=Aϵ0. (34)
+By assumption, u(x, ϑ0)andg(x, ψ0)are architecturally equivalent and initialized i.i.d., and ϵ0is
+simply the sum of two independent Gaussian vectors with covariance Cov[ϵ0] = 2K. We conclude
+that prediction errors ϵ∞are Gaussian with distribution ϵ∞∼ N(0,2AKA⊤). Taking the diagonal
+of the covariance matrix AKA⊤
+11, we obtain
+Eϑ0,ψ01
+2ϵ(x, ϑ∞, ψ0)2
+=Vθ0
+Q(x, θ∞)
+, (35)
+where
+Vθ0
+Q(x, θ∞)
+=κxx−(ΘxX∆−1
+XΛx+h.c.)+(Θ xX∆−1
+X(ΛX−γΛX′)∆−1⊤
+XΘXx). (36)
+A.2 Multiheaded UVU
+We now show results concerning the equivalence of multiheaded UVU prediction errors and finite
+ensembles of Q-functions. We first outline proofs for two results by Lee et al. [2018] and Jacot et al.
+[2018], which rely on in our analysis.
+A.2.1 Neural Network Gaussian Process Propagation and Independence
+Consider a deep neural network fwithLlayers. Let zl
+i(x)denote the i-th output of layer l= 1, . . . , L ,
+defined recursively as:
+zl
+i(x) =σbbl
+i+σw√nl−1nl−1X
+j=1wl
+ijxl
+j(x), xl
+j(x) =ϕ(zl−1
+j(x)), (37)
+where nlis the width of layer lwithn0=ninandx0=x. Further, σwandσbare constant variance
+multipliers, weights wland biases blare initialized i.i.d. with N(0,1), andϕis a Lipschitz-continuous
+nonlinearity. The i-th function output fi(x)of the NN is then given by fi(x) =zL
+i(x).
+18Proposition 2 (Lee et al. [2018]) .At initialization and in the limit n1. . . , n L−1− → ∞ , thei-th
+output at layer l,zl
+i(x), converges to a Gaussian process with zero mean and covariance function κl
+ii
+given by
+κ1
+ii(x, x′) =σ2
+w
+n0x⊤x′+σ2
+b,and k1
+ij= 0, i̸=j. (38)
+κl
+ii(x, x′) =σ2
+b+σ2
+wEzl−1
+i∼GP (0,κl−1
+ii)[ϕ(zl−1
+i(x))ϕ(zl−1
+i(x′))]. (39)
+(40)
+and
+κl
+ij(x, x′) =E[zl
+i(x)zl
+j(x′)] =κl(x, x′) ifi=j,
+0 ifi̸=j.(41)
+Proof. The proof is done by induction. The induction assumption is that if outputs at layer l−1
+satisfy a GP structure
+zl−1
+i∼ GP (0, κl−1
+ii), (42)
+with the covariance function defined as
+κl−1
+ii(x, x′) =E[zl−1
+i(x)zl−1
+i(x′)] =kl−1
+jj(x, x′),∀i, j, (43)
+κl−1
+ij(x, x′) =E[zl−1
+i(x)zl−1
+j(x′)] = 0 ,fori̸=j, (44)
+then, outputs at layer lfollow
+zl
+i(x)∼ GP (0, κl
+ii), (45)
+where the kernel at layer lis given by:
+κl
+ii(x, x′) =E[zl
+i(x)zl
+i(x′)] =κl
+jj(x, x′),∀i, j, (46)
+κl
+ij(x, x′) =E[zl
+i(x)zl
+j(x′)] = 0 ,ifi̸=j. (47)
+with the recursive definition
+κl
+ii(x, x′) =σ2
+b+σ2
+wEzl−1
+i∼GP (0,kl−1
+ii)[ϕ(zl−1
+i(x))ϕ(zl−1
+i(x′))]. (48)
+Base case (l= 1) . At layer l= 1we have:
+z1
+i(x) =σw√n0n0X
+j=1w1
+ijxj+σbb1
+i. (49)
+This is an affine transform of Gaussian random variables; thus, z1
+i(x)is Gaussian distributed with
+z1
+i(x)∼ GP (0, κ1
+ii), (50)
+with kernel
+κ1
+ii(x, x′) =σ2
+w
+n0x⊤x′+σ2
+b,and κ1
+ij= 0, i̸=j. (51)
+Induction step l >1.For layers l >1we have
+zl
+i(x) =σbbl
+i+σw√nl−1nl−1X
+j=1wl
+ijxl
+j(x), xl
+j(x) =ϕ(zl−1
+j(x)). (52)
+By the induction assumption, zl−1
+j(x)are generated by independent Gaussian processes. Hence,
+xl
+i(x)andxl
+j(x)are independent for i̸=j. Consequently, zl
+i(x)is a sum of independent random
+variables. By the Central Limit Theorem (as n1, . . . , n L−1→ ∞ ) the tuple {zl
+i(x), zl
+i(x′)}tends to
+be jointly Gaussian, with covariance given by:
+E[zl
+i(x)zl
+i(x′)] =σ2
+b+σ2
+wEzl−1
+i∼GP (0,κl−1
+ii)[ϕ(zl−1
+i(x))ϕ(zl−1
+i(x′))]. (53)
+Moreover, as zl
+iandzl
+jfori̸=jare defined through independent rows of the parameters wl, bland
+independent pre-activations xl(x), we have
+κl
+ij=E[zl
+i(x)zl
+j(x′)] = 0 , i̸=j, (54)
+completing the proof.
+19A.2.2 Neural Tangent Kernel Propagation and Independence
+We change notation slightly from the previous section to make the parametrization of fi(x, θL)and
+zl
+i(x;θl)explicit with
+zl
+i(x, θl) =σbbl
+i+σw√nl−1nl−1X
+j=1wl
+ijxl
+j(x), xl
+j(x) =ϕ(zl−1
+j(x;θl−1)), (55)
+where θldenotes the parameters {w1, b1, . . . , wl, bl}up to layer landfi(x, θL) =zL
+i(x;θL). Let
+furthermore ϕbe a Lipschitz-continuous nonlinearity with derivative ˙ϕ(x) =d
+dxϕ(x).
+Proposition 3 (Jacot et al. [2018]) .In the limit n1. . . , n L−1− → ∞ , the neural tangent kernel
+Θl
+ii(x, x′)of the i-th output zl
+i(x, θl)at layer l, defined as the gradient inner product
+Θl
+ii(x, x′) =∇θlzl
+i(x, θl)⊤∇θlzl
+i(x′, θl), (56)
+is given recursively by
+Θ1
+ii(x, x′) =κ1
+ii(x, x′) =σ2
+w
+n0x⊤x′+σ2
+b,and Θ1
+ij(x, x′) = 0 , i̸=j. (57)
+Θl
+ii(x, x′) = Θl−1
+ii(x, x′) ˙κl−1
+ii(x, x′) +κl
+ii(x, x′), (58)
+(59)
+where
+˙κl
+ii(x, x′) =σ2
+wEzl−1
+i∼GP (0,κl−1
+ii)[˙ϕ(zl−1
+i(x))˙ϕ(zl−1
+i(x′))] (60)
+and
+Θl
+ij(x, x′) =∇θlzl
+i(x, θl)⊤∇θlzl
+j(x′, θl) =Θl(x, x′) ifi=j,
+0 ifi̸=j.(61)
+Proof. We again proceed by induction. The induction assumption is that if gradients satisfy at layer
+l−1
+Θl−1
+ij(x, x′) =∇θl−1zl−1
+i(x, θl−1)⊤∇θl−1zl−1
+j(x′, θl−1) =Θl−1(x, x′) ifi=j,
+0 ifi̸=j,(62)
+then at layer lwe have
+Θl
+ii(x, x′) = Θl−1
+ii(x, x′) ˙κl
+ii(x, x′) +κl
+ii(x, x′) (63)
+and
+Θl
+ij(x, x′) =∇θlzl
+i(x, θl)⊤∇θlzl
+j(x′, θl) = 0 ifi̸=j. (64)
+Base Case ( l= 1).At layer l= 1, we have
+z1
+i(x) =σbb1
+i+σw√n0n0X
+jw1
+ijxj, (65)
+and the gradient inner product is given by:
+∇θ1z1
+i(x, θ1)⊤∇θ1z1
+i(x′, θ1) =σ2
+w
+n0x⊤x′+σ2
+b=κ1
+ii(x, x′). (66)
+Inductive Step ( l >1).For layers l >1, we split parameters θl=θl−1∪ {wl, bl}and split the inner
+product by
+Θl
+ii(x, x′) =∇θl−1zl
+i(x, θl)⊤∇θl−1zl
+i(x′, θl)| {z }
+l.h.s+∇{wl,bl}zl
+i(x, θl)⊤∇{wl,bl}zl
+i(x′, θl)| {z }
+r.h.s. (67)
+Note that the r.h.s involves gradients w.r.t. last-layer parameters, i.e. the post-activation outputs of
+the previous layer, and by the same arguments as in the NNGP derivation of Proposition 2, this is a
+sum of independent post activations s.t. in the limit nl−1− → ∞
+∇{wl,bl}zl
+i(x, θl)⊤∇{wl,bl}zl
+j(x′, θl) =kl
+ii(x, x′), i =j,
+0, i ̸=j.(68)
+20For the l.h.s. , we first apply chain rule to obtain
+∇θl−1zl
+i(x, θl) =σw√nl−1nl−1X
+jwl
+ij˙ϕ(zl−1
+j(x, θl−1))∇θl−1zl−1
+j(x, θl−1). (69)
+The gradient inner product of outputs iandjthus reduces to
+∇θl−1zl
+i(x, θl)⊤∇θl−1zl
+j(x′, θl) =
+σ2
+w
+nl−1nl−1X
+kwl
+ikwl
+jk˙ϕ(zl−1
+k(x, θl−1))˙ϕ(zl−1
+k(x′, θl−1))Θl−1
+kk(x, x′). (70)
+By the induction assumption Θl−1
+kk(x, x′) = Θl−1(x, x′)and again by the independence of the rows
+wl
+iandwl
+jfori̸=j, the above expression converges in the limit nl−1− → ∞ to an expectation with
+Θl
+ij(x, x′) =Θl−1(x, x′) ˙κl
+ii(x, x′) +κl
+ii(x, x′) i=j,
+0 i̸=j.(71)
+This completes the induction.
+A.2.3 Multiheaded UVU: Finite Sample Analysis
+We now define multiheaded predictor with Moutput heads ui(x, ϑt)fori= 1, . . . , M and a
+fixed multiheaded target network gi(xt;ψ0)of equivalent architecture as uwith the corresponding
+prediction error ϵi(x, ϑt, ψ0)accordingly. Let ui(x, ϑt)be trained such that each head runs the same
+algorithm as outlined in Section 3 independently.
+Corollary 2. Under the conditions of Theorem 1, consider online and target networks with M
+independent heads ui, gi,i= 1, . . . , M , each trained to convergence with errors ϵi(x, ϑ∞, ψ0). Let
+1
+2¯ϵ(x, ϑ∞, ψ0)2=1
+2MPM
+i=1ϵi(x, ϑ∞, ψ0)2be the sample mean squared prediction error over M
+heads. Moreover, consider M+ 1independent converged Q-functions Qi(x;θ∞)and denote their
+sample variance ¯σ2
+Q(x, θ∞) =1
+MPM+1
+i=1(Qi(x;θ∞)−¯Q(x;θ∞))2, where ¯Qis the sample mean.
+The two estimators are identically distributed according to a scaled Chi-squared distribution
+1
+2¯ϵ(x, ϑ∞, ψ0)2D= ¯σ2
+Q(x, θ∞),¯σ2
+Q(x, θ∞)∼σ2
+Q
+Mχ2(M), (12)
+withMdegrees of freedom and σ2
+Q(x, θ∞) =Vθ0[Q(x, θ∞)]is the analytical variance of converged
+Q-functions given by Theorem 1.
+Proof. By Collorary. 1, the prediction error of a single headed online and target network
+ϵ(x, ϑt, ψ0) =u(x, ϑt)−g(x, ψ0)converges in the limit n1. . . , n L−1− → ∞ andt− → ∞ to a
+Gaussian with zero mean and variance ϵ(x, ϑ∞, ψ0)∼ N(0,2σ2
+Q)where
+σ2
+Q=Vθ0
+Q(x, θ∞)
+=κxx−(ΘxX∆−1
+XΛx+h.c.)+(Θ xX∆−1
+X(ΛX−γΛX′)∆−1⊤
+XΘXx).(72)
+By Propositions 2 and 3, the NNGP and NTK associated with each online head ui(x, ϑ∞)in the
+infinite width and time limit are given by
+κij(x, x′) =E[ui(x, ϑ∞)uj(x′, ϑ∞)] =κ(x, x′) ifi=j,
+0 ifi̸=j,(73)
+Θij(x, x′) =∇ϑul
+i(x, ϑ∞)⊤∇ϑul
+j(x′, ϑ∞) =Θ(x, x′) ifi=j,
+0 ifi̸=j.(74)
+Due to the independence of the NNGP and NTK for different heads ui, prediction errors
+ϵi(xt;ϑ∞, ψ0)are i.i.d. draws from a zero mean Gaussian with variance equal as given in Eq. 72.
+Note that this is despite the final feature layer being shared between the output functions. The
+empirical mean squared prediction errors are thus Chi-squared distributed with Mdegrees of freedom
+1
+MMX
+i=11
+2ϵi(xt;ϑ∞, ψ0)2∼σ2
+Q
+Mχ2(M) (75)
+21Now, let {Qi(x;θt)}M+1
+i=1be a deep ensemble of M+ 1Q-functions from independent initializations.
+By Corollary 1, these Q-functions, too, are i.i.d. draws from a Gaussian, now with mean ΘxX∆−1
+Xr
+and variance as given in Eq. 72. The sample variance of this ensemble thus also follows a Chi-squared
+distribution with Mdegrees of freedom
+1
+MM+1X
+i=11
+2 
+Qi(x;θ∞)−¯Q(x;θ∞)2∼σ2
+Q
+Mχ2(M), (76)
+where ¯Q(x;θ∞) =1
+M+1PM+1
+iQi(x;θ∞)is the sample mean of M+ 1universal Q-functions,
+completing the proof.
+A.3 Limitations and Assumptions
+In this section, we detail central theoretical underpinnings and idealizations upon which our theoretical
+analysis is built.
+A central element of our theoretical analysis is the representation of neural network learning dynamics
+via the Neural Tangent Kernel (NTK), an object in the theoretical limit of infinite network width.
+The established NTK framework, where the kernel is deterministic despite random initialziation
+and and constant throughout training, typically applies to fully connected networks with NTK
+parameterization, optimized using a squared error loss [Jacot et al., 2018]. Our framework instead
+accommodates a semi-gradient TD loss, and thereby introduces an additional prerequisite for ensuring
+the convergence of these dynamics: the positive definiteness of the matrix expression ΘXX−γΘX′X.
+This particular constraint is more a characteristic inherent to the TD learning paradigm itself than a
+direct consequence of the infinite-width abstraction. Indeed, the design of neural network architectures
+that inherently satisfy such stability conditions for TD learning continues to be an active area of
+contemporary research [Yue et al., 2023, Gallici et al., 2024]. The modeling choice of semi-gradient
+TD losses moreover does not incorporate the use of target networks, where bootstrapped values do
+not only stop gradients but are generated by a separate network altogether that slowly moves towards
+the online learner. Our analysis moreover considers the setting of offline policy evaluation , that is, we
+do not assume that additional data is acquired during learning and that policies evaluated for value
+learning remain constant. The assumption of a fixed, static dataset diverges from the conditions of
+online reinforcement learning with control, where the distribution of training data (X,X′)typically
+evolves as the agent interacts with its environment, both due to its collection of novel transitions and
+due to adjustments to the policy, for example by use of a Bellman optimality operator. Lastly, our
+theoretical model assumes, primarily for simplicity, that learning occurs under gradient flow with
+infinitesimally small step sizes and with updates derived from full-batch gradients. Both finite-sized
+gradient step sizes and stochastic minibatching has been treated in the literature, albeit not in the TD
+learning setting [Jacot et al., 2018, Lee et al., 2020, Liu et al., 2020, Yang, 2019]. We believe our
+analysis could be extended to these settings without major modifications.
+B Experimental Details
+We provide details on our experimental setup, implementations and additional results. This includes
+architectural design choices, algorithmic design choices, hyperparameter settings, hyperparameter
+search procedures, and environment details.
+B.1 Implementation Details
+All algorithms are self-implemented and tuned in JAX [Bradbury et al., 2018]. A detailed exposition
+of our design choices and parameters follows below.
+Environment Setup. We use a variation of the GoToDoor environment of the minigrid suite
+[Chevalier-Boisvert et al., 2023]. As our focus is not on partially observable settings, we use fully
+observable 35-dimensional state descriptions with S=R35. Observation vectors comprise the
+factors:
+o= 
+o⊤
+agent-pos , o⊤
+agent-dir , o⊤
+door-config , o⊤
+door-pos⊤, (77)
+22where oagent-pos ∈R2is the agent position in x, y-coordinates, oagent-dir ∈Ris a scalar integer
+indicating the agent direction (takes on values between 1 and 4), odoor-config ∈R24is the door
+configuration, comprising 4one-hot encoded vectors indicating each door’s color, and odoor-pos ∈R8
+is a vector containing the x, y-positions of the four doors. The action space is discrete and four-
+dimensional with the following effects
+aeffect=
+
+turn left if a= 0,
+turn right if a= 1,
+go forward if a= 2,
+open door if a= 3.(78)
+Tasks are one-hot encodings of the target door color, that is z∈R6and in the online setting are
+generated such that they are achievable. The reward function is an indicator function of the correct
+door being opened, in which case a reward of 1is given to the agent and the agent position is reset
+to a random location in the grid. Episodes terminate only upon reaching the maximum number of
+timesteps ( 50in our experiments).
+In the task rejection setting described in our evaluation protocol, an agent in a start state s0is
+presented a list of tasks, which may or may not be attainable, and is allowed to reject a fixed number
+of tasks from this list. In our experiments, the agent is allowed to reject 4out of 6total tasks at the
+beginning of each episode.
+Data Collection. Our offline datasets are recorded replay buffers from a DQN-agent deployed to
+the GoToDoor environment with an ϵ-greedy exploration strategy and a particular policy: When the
+door indicated by the task encoding zprovided by the environment lies at the south or west wall, the
+regular policy by the online DQN agent is executed. If the target door lies at the north or east wall,
+however, actions are generated by a fixed random Q-network. This mixture policy emulates a policy
+that exhibits expert performance on certain combinations of tasks and states, but suboptimal behavior
+for other combinations. The replay buffer does, however, contain most combinations of states and
+tasks, albeit some with trajectories from suboptimal policies. Hyperparameter details of the online
+agent are provided in section B.2.
+Figure 5: Illustration of the used architecture. ⊙
+indicates elementwise multiplication.Algorithmic Details. All tested algorithms
+and experiments are based on DQN agents[Mnih
+et al., 2015] which we adapted for the task-
+conditioned universal value function [Schaul
+et al., 2015] setting. While our theoretical anal-
+ysis considers full-batch gradient descent, in
+practice we sample minibatches from offline
+datasets with Xmb={(si, ai, zi)}Nmb
+i=1,X′
+b=
+{(s′
+i, a′
+i, zi)}Nb
+i=1, where next-state actions are
+generated a′
+i=argmaxa∈AQ(s′
+i, a, z i, θt)and
+rewards are r={ri}Nmb
+i=1. Moreover, we devi-
+ate from our theoretical analysis and use target
+networks in place of the stop-gradient operation.
+Here, a separate set of parameters ˜θtis used to
+generate bootstrap targets in the TD loss which
+is in practice given by
+L(θt) =1
+2∥γQ(X′
+mb,˜θt) +r−Q(Xmb, θt)∥2
+2.
+(79)
+The parameters ˜θtare updated towards the on-
+line parameters θtat fixed intervals through
+polyak updating, as is common. We use this
+basic algorithmic pipeline for all tested algo-
+rithms, including the online agent used for data
+collection.
+23Architectural Details. We use a hypernet-
+work MLP architecture adapted to the DQN set-
+ting, as depicted in Fig. 5. Specifically, this
+means we pass states sand task encodings z
+through single-layer encoders, which are then joint by elementwise multiplication. The resulting
+vector is normalized by its l2norm, x′=x
+∥x∥2. This joint vector is passed thorugh a 3-layer MLP
+with network width 512, again normalized by its l2norm and finally passed through a fully-connected
+layer to obtain a vector of dimension R|A|. Although our experiments are conducted in the offline RL
+setting, preliminary experiments showed no benefits of using ensemble-based pessimism [An et al.,
+2021] or conservative Q-updates [Kumar et al., 2020]. Instead, our normalization pipeline appears to
+sufficiently address overestimation issues as is suggested by several recent works [Yue et al., 2023,
+Gallici et al., 2024].
+Independent Bootstrapping. For the ensemble-based BDQNP baseline and our UVU model, we
+perform independent bootstrapping in the TD loss computation. By this, we mean that both the
+bootstrapped value and actions are generated by individual Q-functions. In the case of BDQNP, this
+means we compute Loss 79 for each model Qk, indexed by k∈[1, . . . , K ]withXmb,k=Xmband
+bootstraps are generated as
+X′
+mb,k={(s′
+i, a′
+ik, zi)}Nmb
+i=1,and a′
+ik=argmaxa∈AQk(s′
+i, a, z i, θt). (80)
+Note, that this procedure is established [Osband et al., 2016] and serves the purpose of maintaining
+independence between the models in the ensemble. In order to conduct the same procedure in our
+UVU method, where we have access to only one Q-function, we generate Kdistinct Q-estimates by
+computing
+QUV U
+k(s, a, z, θ t) :=Q(s, a, z, θ t) +ϵk(s, a, z, ϑ t, ψ0), (81)
+that is, by adding the UVU error of the k-th output head. Bootstraps are then generated according to
+Eq. 80.
+Intrinsic reward priors. Intrinsic reward priors are a trick suggested by Zanger et al. [2024] to
+address a shortcoming of propagation methods used for intrinsic reward methods like RND[Burda
+et al., 2019, O’Donoghue et al., 2018]. The issue is that while learning a Q-function with intrinsic
+rewards can, with the right choice of intrinsic reward, provide optimistic estimates of the value
+function, but only for state-action regions covered in the data. A potential underestiation of the
+optimistic bound, however, counteracts its intention, a phenomenon also described by Rashid et al.
+[2020]. Intrinsic reward priors are a heuristic method to address this issue by adding local, myopic
+uncertainty estimates automatically to the forward pass of the intrinsic Q-function, leading to a “prior”
+mechanism that ensures a
+ˆQintr(s, a, z, θ t) =Qintr(s, a, z, θ t) +1
+2ϵrnd(s, a, z, θ rnd)2
+where ϵrnd(s, a, z, θ rnd)denotes a local RND error as an example. The altered function
+ˆQintr(s, a, z, θ t)is trained as usual with Loss 79 and intrinsic rewards1
+2ϵrnd(s, a, z, θ rnd)2.
+B.2 Hyperparameter Settings
+To ensure a consistent basis for comparison across our findings, all experimental work was carried out
+using a shared codebase. We adopted standardized modeling approaches, including uniform choices
+for elements like network architectures and optimization algorithms, where appropriate. Specifically,
+every experiment employed the same architecture as detailed in Appendix B.1. Key hyperparameters,
+encompassing both foundational and algorithm-specific settings, were tuned through a grid search on
+the10×10variation of the GoToDoor environment. The search grid and final hyperparamters are
+provided in Tables 2 and 3 respectively. DQN in Table 3 refers to the online data collection agent.
+B.3 Additional Experimental Results
+We report additional results of the illustrative experiment shown in Section 3. Fig. 6 shows different
+uncertainty estimates in the described chain environment. The first row depicts myopic uncertainty
+estimates or, equivalently, RND errors. The second and third row show propagated local uncertainties
+24                 RND 
+(s,a,z) - 1 m
+odel
+0
+5
+10
+15
+20s0.50.60.70.80.91.0z
+                 Q-RND u(s,a,z) - 2 m
+odels
+0
+5
+10
+15
+20s0.50.60.70.80.91.0z
+                   Q-RND w. intrinsic priors 
+                   u(s,a,z) - 2 m
+odels
+0
+5
+10
+15
+20s0.50.60.70.80.91.0z
+Figure 6: Top Row : RND errors. 2nd Row : Value uncertainty as measured by an intrinsic Q-function.
+3rd Row : Value uncertainty as measured by an intrinsic Q-function with intrinsic reward priors.
+with and without the intrinsic reward prior mechanism respectively. This result shows clearly the
+shortcoming of the standard training pipeline for intrinsic rewards: in a standard training pipeline,
+the novelty bonus of RND is given only for transitions (si, ai, zi, s′
+i)already present in the dataset
+and is never evaluated for OOD-actions. To generate reliable uncertainty estimates, RND requires,
+in addition to the RND network and the additional intrinsic Q-function, an algorithmic mechanism
+such as the intrinsic reward priors or even more sophisticated methods as described by Rashid et al.
+[2020].
+25Table 2: Hyperparameter search space
+Hyperparameter Values
+QLearning rate (all) [1·10−6,3·10−6,1·10−5,
+3·10−5,1·10−4,3·10−4,1·10−3]
+Prior function scale (BDQNP) [0.1,0.3,1.0,3.0,10.0]
+RND Learning rate (RND, RND-P) [1·10−6,3·10−6,1·10−5,
+3·10−5,1·10−4,3·10−4,1·10−3]
+UVU Learning rate (UVU) [1·10−6,3·10−6,1·10−5,
+3·10−5,1·10−4,3·10−4,1·10−3]
+Table 3: Hyperparameter settings for GoToDoor experiments.
+Hyperparameter DQN BDQNP DQN-RND DQN-RND+P UVU
+Adam Q-Learning rate 3·10−43·10−43·10−43·10−43·10−4
+Prior function scale n/a 1.0 n/a n/a n/a
+N-Heads 1 1 1 1 /512 1 /512 1 /512
+Ensemble size n/a 3/15 n/a n/a n/a
+MLP hidden layers 3
+MLP layer width 512
+Discount γ 0.9
+Batch size 512
+Adam epsilon 0.005/batch size
+Initialization He uniform [He et al., 2015]
+Double DQN Yes [Hasselt, 2010]
+Update frequency 1
+Target lambda 1.0
+Target frequency 256
+Table 4: GoToDoor Environment Settings
+Parameter Value
+State space dim 35
+Action space dim 3
+Task space dim 6
+N Task Rejections 4
+Max. Episode Length 50
+26

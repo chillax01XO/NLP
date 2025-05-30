@@ -1,0 +1,893 @@
+arXiv:2505.20423v1  [cs.RO]  26 May 2025Vision-Based Risk Aware Emergency Landing for UAVs
+in Complex Urban Environments
+Julio de la Torre-Vanegasa,∗, Miguel Soriano-Garc´ ıaa, Israel Becerrab, Diego
+Mercado-Ravellc,d
+aCenter for Research in Mathematics CIMAT AC, campus Zacatecas,Calle Lasec y
+Andador Galileo Galilei, Manzana 3, Lote 7 Quantum Ciudad del Conocimiento,
+Zacatecas, 98160, Zacatecas, Mexico
+bInvestigadores por M´ exico at Center for Research in Mathematics CIMAT AC, calle
+Jalisco s/n, Valenciana, Guanajuato, 36023, Guanajuato, Mexico
+cCenter for Research and Advanced Studies CINVESTAV-IPN, campus Guadalajara,Av.
+del Bosque 1145, El Baj´ ıo, Zapopan, 45017, Jalisco, Mexico
+dCorresponding author: diego.mercado@cimat.mx
+Abstract
+Landing safely in crowded urban environments remains an essential yet chal-
+lenging endeavor for Unmanned Aerial Vehicles (UAVs), especially in emer-
+gency situations. In this work, we propose a risk-aware approach that har-
+nesses semantic segmentation to continuously evaluate potential hazards in
+the drone’s field of view. By using a specialized deep neural network to as-
+sign pixel-level risk values and applying an algorithm based on risk maps, our
+method adaptively identifies a stable Safe Landing Zone (SLZ) despite mov-
+ing critical obstacles such as vehicles, people, etc., and other visual challenges
+like shifting illumination. A control system then guides the UAV toward this
+low-risk region, employing altitude-dependent safety thresholds and temporal
+landing point stabilization to ensure robust descent trajectories. Experimen-
+tal validation in diverse urban environments demonstrates the effectiveness
+of our approach, achieving over 90% landing success rates in very challenging
+real scenarios, showing significant improvements in various risk metrics. Our
+findings suggest that risk-oriented vision methods can effectively help reduce
+the risk of accidents in emergency landing situations, particularly in com-
+plex, unstructured, urban scenarios, densely populated with moving risky
+obstacles, while potentiating the true capabilities of UAVs in complex urban
+operations.
+Keywords: Autonomous Landing, Urban UAV Operations, Semantic
+1Segmentation, Risk Assessment, Safe Landing Zone
+1. Introduction
+Unmanned Aerial Vehicles (UAVs) play an increasingly significant role in
+civilian applications, facilitating tasks ranging from infrastructure inspection
+and package delivery to precision agriculture and search-and-rescue opera-
+tions [1, 2]. Nevertheless, one major challenge persists: ensuring a safe and
+reliable landing in unstructured urban environments [3]. When a system
+failure or sudden emergency arises, such as battery shortage, communica-
+tion loss, or mechanical or electronic damage, traditional return-to-home
+strategies or marker-based landing approaches [4, 5, 6] may not be sufficient,
+particularly if the intended final landing spot becomes unsafe, unreachable,
+or unavailable [7, 8].
+Regulatory frameworks, including the Specific Operations Risk Assess-
+ment (SORA) of the European Union Aviation Safety Agency (EASA) [9],
+reflect these concerns by mandating reliable safeguards for urban UAV op-
+erations. Thus, recent efforts have highlighted the importance of context
+awareness in the design of robust vision-based landing strategies, where se-
+mantic segmentation networks arise as an interesting approach [10, 11, 12].
+By using Deep Neural Networks (DNN) for classifying the environment into
+different semantic classes (such as roads, sidewalks, buildings, or vegetation),
+a UAV can infer real-time contextual cues regarding the potential risk in each
+region of the scene. For instance, landing on a crowded sidewalk or near fast-
+moving vehicles poses a higher threat to both people and the drone, whereas
+an open park or an empty segment of road might be more appropriate. More-
+over, the use of context-aware strategies allows for more sophisticated solu-
+tions in the decision-making process for autonomous landing, which may be
+crucial in emergency landing situations during operation in complex urban
+environments, where we refer to “complex” as unstructured urban scenarios,
+densely populated in presence of high-risk moving obstacles such as people or
+∗This work was supported by the Office of Naval Research Global ONRG, Award No.
+N62909-24-1-2001.
+Email addresses: julio.delatorre@cimat.mx (Julio de la Torre-Vanegas),
+miguel.garcia@cimat.mx (Miguel Soriano-Garc´ ıa), israelb@cimat.mx (Israel Becerra),
+diego.mercado@cinvestav.mx (Diego Mercado-Ravell)
+Preprint submitted to preprint May 28, 2025vehicles. In this context, risk-aware emergency landing poses great potential
+to enhance the applicability of UAVs in urban operations.
+In this work, we provide a complete, fully autonomous landing solution in
+complex urban scenarios, based only on visual information from a downward-
+facing monocular camera. First, a semantic segmentation network provides
+pixel-wise contextual information, which is in turn converted to a risk map.
+This risk map is directly stored to create a global risk map using the im-
+ages seen from the start of the landing mission, accumulating the highest
+perceived risk over time in a kind of persistent “memory” of the detected
+dangers. Then, image processing algorithms are applied to the local drone’s
+view of this global risk map to obtain a stable risk chart, from which a
+minimization problem is solved considering the lowest risk at the shortest
+distance. Subsequently, the UAV is directed toward the selected landing
+spot as long as it remains available; otherwise, the next best spot is selected.
+The proposed strategy was thoroughly evaluated in several challenging real
+urban scenarios employing the VIVA-SAFELAND validation freeware [13] (a
+tool that employs pre-recorded real-life videos to allow an Emulated Aerial
+Vehicle to navigate using visual cues), where specific quantitative metrics
+were obtained to assess the performance of the autonomous landing solution.
+The outline of the paper is as follows. Sec. 2 presents the literature review
+for autonomous landing in unstructured environments. Then, Secs. 3 and 4
+present the problem definition and the proposed method, respectively. Then,
+in Sec. 5, the algorithms are evaluated under different real urban scenarios,
+showcasing their good performance. Finally, conclusions and future work are
+discussed in Sec. 6.
+2. Related Work
+Ensuring safe autonomous landing for Unmanned Aerial Vehicles (UAVs)
+remains a critical challenge, particularly during system failures or in GPS-
+denied urban environments where accidents can have severe consequences
+[3]. Vision-based systems offer a promising avenue not only due to the rich
+contextual information cameras readily provide but also because cameras
+are nearly ubiquitous on UAV platforms, making vision an accessible sens-
+ing modality. Previous vision-based strategies for landing in unstructured
+environments often rely predominantly on geometric features. For instance,
+[14] leveraged monocular vision and Simultaneous Localization and Mapping
+(SLAM) to create 3D maps for identifying potentially clear areas. Similarly,
+3[15] proposed detecting planarity using Gabor transforms without prior clas-
+sification, aiming for adaptability. However, these geometric-centric meth-
+ods often face challenges in the highly dynamic conditions of complex urban
+environments. Crucially, they typically operate without a contextual un-
+derstanding of the scene, making it difficult to assess the true nature and
+inherent risks of an area beyond its immediate geometric properties; their
+performance can also be sensitive to abrupt UAV movements, poor textures,
+or varying illumination conditions. Systems relying solely on alternative sen-
+sors like LiDAR [16, 17] offer robustness to lighting variations and can pro-
+vide precise geometric data for assessing surface suitability and maintaining
+continuous verification. However, such systems lack an inherent risk under-
+standing derived from visual cues, which is crucial for interpreting the nature
+of the terrain and its associated risks (e.g., distinguishing a sidewalk from a
+road), and depend on sensors that are not universally available on all UAV
+platforms.
+The incorporation of semantic segmentation for Safe Landing Zone (SLZ)
+identification represents a significant advancement towards richer environ-
+mental understanding and smart decision making. While comprehensive re-
+views like [18] have surveyed various vision-based landing techniques, includ-
+ing supervised classifiers and feature extraction, the explicit and widespread
+integration of semantic segmentation for nuanced risk assessment in land-
+ing was, until recently, less common, despite its clear potential. However,
+ongoing advancements in processing capabilities and hardware are dimin-
+ishing these barriers, making its application increasingly feasible. Several
+recent works have indeed begun to incorporate deeper semantic understand-
+ing to identify suitable landing areas. For example, [19] employed enhanced
+semantic segmentation with height-dependent classification detail and zone
+tracking. Other efforts have offered comprehensive frameworks for SLZ se-
+lection; for instance, [20] addressed UAV motion distortions and dynamic
+obstacles using optical flow with an improved segmentation network. [21]
+combined semantic and stereoscopic information for SLZ identification post-
+exploration. However, significant challenges persist, especially in handling
+highly dynamic environments where high-risk obstacles like pedestrians and
+vehicles frequently and unpredictably alter the safety landscape. A common
+limitation in some systems is the simplification of risk assessment into bi-
+nary classifications (safe/unsafe), which can obscure crucial nuances needed
+for decision-making when no perfectly risk-free area is available and a suitable
+alternative option must be selected. Furthermore, the ability to “remember”
+4transient hazards—obstacles that move out of view but might reappear—is
+critical for conservative and truly safe landing decisions. This “risk memory”
+aspect, which prevents the system from being lured into areas that were re-
+cently dangerous, is often not explicitly addressed or robustly implemented.
+Moreover, a common trend in the literature is to focus primarily on the SLZ
+selection task, leaving the subsequent continuous guidance and control for
+the landing maneuver as a separate problem.
+Beyond general SLZ detection, research has also addressed specific cate-
+gories of hazards or employed alternative strategies. For instance, avoiding
+human gatherings using crowd density maps [22, 23] targets a particular risk
+factor. Others combine multiple sensor modalities, such as camera and Li-
+DAR, to leverage complementary information for enhanced perception [24],
+or use object detectors in conjunction with occupancy maps to identify free
+space [25]. While interesting in their respective domains, these approaches
+might not offer the same level of comprehensive, scene-wide semantic risk
+assessment as a dedicated segmentation-based system or may rely on sensor
+fusion complexities.
+Reinforcement learning (RL) has also been explored, often demonstrating
+success in navigating dynamic simulated environments for tasks like landing
+[26]. However, many RL frameworks assume a pre-defined landing target or
+specific mission context (e.g., return-to-home) [27], which differs fundamen-
+tally from emergency scenarios requiring on-the-fly SLZ identification and
+assessment in unknown, potentially vast urban territory.
+The inherent difficulty and risk associated with evaluating such autonomous
+systems in live, populated urban settings under difficult real conditions has
+become one of the main challenges in developing and comparing fully au-
+tonomous landing solutions. Direct field tests in populated areas are often
+restricted by safety regulations, while purely virtual simulators (e.g., Gazebo,
+AirSim, Unreal) may struggle to replicate the visual richness and lighting
+conditions of real urban footage. Accordingly, some noteworthy evaluation
+frameworks have appeared very recently. These frameworks are essential for
+ensuring reproducibility and enabling rigorous, comparative testing. Promi-
+nent examples include platforms like VIVA-SAFELAND [13], which our work
+leverages to conduct repeatable experiments using real urban aerial footage,
+and Robot-In-The-Loop (RITL) simulation pipelines [28] that merge virtual
+environments with real hardware control.
+To our knowledge, a discernible gap exists in the literature for a fully
+autonomous, vision-only emergency landing system that can robustly and
+5adaptively handle dynamic, complex urban environments without reliance on
+a priori known markers or pre-existing maps, by deeply integrating semantic
+risk assessment throughout the entire landing process. Our key contribution
+lies in a holistic, end-to-end solution that utilizes semantic segmentation to
+evaluate scene risk, select a suitable SLZ through a defined decision process,
+and execute the landing maneuver. This integrated methodology aims to
+significantly enhance UAV autonomy and safety during critical emergency
+landing situations in challenging real-world urban scenarios.
+3. Problem definition
+Consider a UAV equipped with a monocular camera C. Let the timeline
+be discretized in stages indexed as t= 0,1, . . . , k , where t= 0 refers to the
+time instant at which the emergency landing begins, and krefers to the cur-
+rent time instant. We denote Itas the image taken with the camera Cat
+time t. Assume that a planar region P⊂R2is a good enough approximation
+of the environment floor, which constitutes the set that contains the candi-
+date SLZs for the UAV. The camera Cis pointing downward, so its optical
+axis is normal to Pusing a stabilization device such as a gimbal or through
+software. Moreover, it is assumed that a computer vision module MSis
+available, such that it can retrieve semantic information from an image It
+relevant for landing. Lastly, it is considered that the center cof the image
+Itcorrectly models the center of the actual UAV landing region in the land-
+ing plane P. The objective is to design a fully autonomous landing solution
+that leverages semantic information from the currently available image set
+{It}k
+t=0, so that the solution includes SLZ identification until landing itself.
+4. Proposed Risk-Aware Method
+The risk-aware strategy presented in this article consists of several inter-
+connected components that collectively enable safe autonomous landing in
+complex urban environments. This section provides a detailed examination
+of each component in our framework.
+4.1. Risk Map Generation
+The proposed approach works online. The first step consists of applying
+a semantic segmentation to the current image Ikusing the computer vision
+module MS. The module MSassigns each pixel to a category relevant to
+6Figure 1: Left: Drone-view image Ikfrom the UAV. Right: Grayscale representation of
+the risk map Rk, where brighter pixels denote higher risk.
+urban environments, such as grass, pavement, cars, people, vegetation, etc.
+Later, a risk mapping MRis applied such that each category is assigned
+a numerical risk value, with low values indicating safer terrain (e.g., grass
+→0 or vegetation →1) and high values indicating hazards (e.g., vehicles,
+pedestrians →4) [10]. Transforming segmentation labels into numeric scores
+produces a risk map Rk=MR(MS(Ik)). The objective of utilizing a risk
+map representation is to retrieve relevant safety information for emergency
+landing; this results in fewer classes that ease the decision-making process.
+Fig. 1 shows how a raw drone-view image Ikis converted into a corresponding
+risk map Rk.
+4.2. Risk memory
+Real urban scenes exhibit considerable variability due to pedestrians, ve-
+hicles, and lighting conditions. Semantic segmentation in such dynamic en-
+vironments can often misclassify certain areas or yield inconsistent risk esti-
+mates between consecutive frames. To address this challenge, we implement a
+buffering mechanism that maintains a persistent “memory” of detected risks
+across frames. This memory is initialized at the beginning of the emergency
+landing procedure, that is, time t= 0, and persists throughout the landing
+process.
+Rather than relying solely on frame-by-frame analysis, our approach main-
+tains a global risk map that accumulates risk information up to time k. When
+a new frame Ikis processed, we combine it with the existing global risk map
+Rglobal
+k performing a pixel-wise maximum operation. This requires localizing
+the raw local risk map Rkwithin Rglobal
+k. To this end, an homography Hk
+can be obtained by means of the extrinsic parameters of the camera C, which
+7are assumed to be retrievable by means of the UAV’s on-board sensors. That
+is, the transformation between the coordinates that index the two risk maps
+is defined as 
+xg
+yg
+1
+=1
+λkHk
+x
+y
+1
+, (1)
+with ( x, y) and ( xg, yg) coordinates with respect to the reference frames that
+define RkandRglobal
+k, respectively, and λka scale factor that can be easily
+retrieved from the UAV altitude and the camera pose. Consequently, the
+global risk map Rglobal
+k computation is as follows.
+Rglobal
+k(xg, yg) = max
+Rglobal
+k−1(xg, yg),Rk(x, y)
+, (2)
+for all ( x, y) that index Rk, and with ( xg, yg) directly related to a point
+(x, y) through (1). Note that (2) implicitly incorporates the risk information
+retrieved from the entire set of available images {It}k
+t=0conservatively. This
+conservative approach offers two key advantages:
+1.Persistence of risk information: Areas that were once identified as
+high-risk (such as roads where vehicles were detected) remain marked
+as risky even after the dynamic object moves away. This prevents the
+system from selecting landing zones in areas where vehicles and/or peo-
+ple circulate, which serves as a conservative prediction of risky future
+events.
+2.Robustness to segmentation variations: Occasional false negatives in
+obstacle detection are mitigated, as a high-risk area correctly identi-
+fied in any previous frame will be preserved in the global risk map.
+This helps to handle cases where obstacles are temporarily occluded or
+misclassified due to viewpoint or illumination changes.
+The resulting global risk map Rglobal
+k provides a spatial record of hazards
+encountered throughout the flight, ensuring that transient dangers remain
+represented in the risk assessment even after they move or temporarily dis-
+appear from view. Fig. 2 illustrates this concept, showing how variations
+in consecutive risk maps are consolidated into a unified representation that
+preserves the highest risk detected at each location.
+4.3. Risk Expansion
+We define Rlocal
+k⊂ Rglobal
+k as the portion of the global risk map Rglobal
+k
+that falls within the drone’s current field of view. Although this local view
+8(a) (b) (c)
+Figure 2: Two consecutive image frames demonstrating the risk memory approach. Col-
+umn (a) shows aerial drone views Ik−1andIkwith moving vehicles. Column (b) displays
+the raw risk maps Rk−1andRkgenerated from semantic segmentation. Column (c) il-
+lustrates the corresponding local views of the accumulated global risk maps Rglobal
+k−1and
+Rglobal
+kas seen from the drone’s current perspective, showing how the pixel-wise maximum
+operation effectively preserves high-risk regions from previous frames within the drone’s
+field of view.
+already incorporates persistent hazard information from the risk memory
+mechanism, landing zones selected directly from Rlocal
+kmay still be danger-
+ously close to high-risk areas. To create safer margins, we implement an
+altitude-dependent risk expansion process that operates specifically on this
+local view, transforming it to better reflect safety requirements at different
+altitudes.
+At higher altitudes (above 30 m), we apply a large Gaussian filter directly
+to the local risk map Rlocal
+k. At these elevations, fine-grained detail is less
+critical, as there is no immediate risk of collision, allowing us to focus on
+finding suitable landing areas by smoothing local variations while preserving
+the general risk distribution patterns. The proposed risk expansion is applied
+as follows.
+Rf
+k=Gl∗ Rlocal
+k, (3)
+where Rf
+kdenotes the filtered risk map after processing, Glindicates a Gaus-
+sian filter with a large kernel appropriate for high-altitude risk assessment,
+and∗represents the convolution operation. The size of this kernel is selected
+to balance computational efficiency with the need to exploit the UAV’s high-
+9(a) (b) (c)
+Figure 3: Progressive visualization of the risk expansion process. Top row shows 2D
+representations and bottom row shows corresponding 3D intensity profiles of the following.
+(a) Local view of the risk map Rlocal
+k. (b) Map after morphological dilation Dkd(Rlocal
+k).
+(c) Final processed risk map after Gaussian filtering Rf
+k.
+altitude vantage point.
+At lower altitudes (below 30 m), detecting small obstacles, such as pedes-
+trians, is vital for safety. For effective risk expansion at these altitudes, we
+implement a process that begins with determining an appropriate dilation
+kernel size kddependent on the drone’s altitude; the value of kddecreases
+as the drone descends closer to the ground. The scaling of kdaddresses two
+opposing factors that emerge as the UAV descends. On the one hand, the
+detection of critical obstacles like people becomes more reliable at lower al-
+titudes due to their increased size in the field of view. On the other hand,
+semantic segmentation can actually become more imprecise when very close
+to the ground, with small noise artifacts being more prominent in the risk
+map. After determining an adequate kernel size kdbased on altitude, we ap-
+ply a morphological dilation operation, Dkd(.), followed by a moderate-sized
+Gaussian filter Gm. The resulting filtered risk map is computed as
+Rf
+k=Gm∗Dkd(Rlocal
+k). (4)
+Fig. 3 illustrates each stage of this process, showing the transformation
+from the local view of the global risk map through dilation to the final filtered
+risk map, which results in a smoother and more conservative map.
+104.4. Local-Minimum Detection
+Once the filtered risk map Rf
+kis obtained, we need to identify the optimal
+location for landing. The goal is to find a point that represents the “lowest”
+risk while also considering the practical constraints of the emergency landing
+scenario, for example, reaching the landing point quickly. The proposed
+approach minimizes a weighted combination of the risk map and a proximity
+measure modeled as a distance map centered on the optical center of the
+image Ik, which is defined as
+V(p) =α· Rf
+k(p) +β· L(p,c), (5)
+where L(p,c) represents the Euclidean distance on the image plane from
+point pto the image center c, while αandβare weighting coefficients that
+determine the relative importance of risk minimization versus distance mini-
+mization. The final landing point is then determined by finding the point p∗
+k
+that minimizes this local weighted map V, that is,
+p∗
+k= arg min
+p∈S(Rf
+k)V(p), (6)
+with S(Rf
+k) the set of coordinates that cover the filtered risk map Rf
+k. The
+resulting low-risk point p∗
+kis taken as a candidate SLZ in the current frame
+Ik. Fig. 4 illustrates how the approach highlights the final local minimum
+p∗
+k.
+4.5. Landing point stabilization
+For landing point stabilization, we employ a dual approach that addresses
+both spatial and temporal variability throughout the descent process. First,
+a queue of candidate landing points from the Nmost recent image frames
+is maintained. Then, an average is performed on these candidates, as shown
+below.
+p∗
+k=1
+NN−1X
+i=0p∗
+k−i, (7)
+where p∗
+kis the temporally averaged landing point at time kandp∗
+k−idenotes
+the landing point at time k−iselected through (6). This temporal averaging
+reduces the impact of random noise and abrupt segmentation errors that
+occur in individual frames.
+Once p∗
+kis obtained, for a descent to go on, the center of the actual landing
+region of the UAV in the landing plane Pmust remain for a given time
+11(a)
+ (b)
+(c)
+ (d)
+Figure 4: Visualization of the landing point selection process. (a) Filtered risk map Rf
+k
+with darker areas representing lower risk. (b) Distance map Lcentered at the image’s
+optical center. (c) Weighted combination map Vincorporating both risk and distance
+factors, with the white dot indicating the selected landing point p∗
+kthat minimizes this
+combined cost. (d) Original drone view Ikwith the landing point projected onto the actual
+scene, where a road was selected, which, being free of traffic at that moment, constituted
+a valid and safe landing point.
+period within a safety area S, ensuring that the selected SLZ has temporal
+consistency. Considering that the image center ccorrectly models the center
+of the actual UAV landing region, the safety area Sis projected onto the
+image plane as a circular region with radius τ(z) centered at c. Therefore,
+the SLZ centered at p∗
+kis said to be time consistent if in the image plane p∗
+k
+remains within a distance τ(z) from cfor at least Mtime steps. Note that
+the radius τ(z) is a function of the UAV altitude z, since the computations
+are made in the image plane and the size of the projected safety area S
+increases as the UAV approaches the landing plane P. In practice, τ(z) is
+implemented using the camera model to convert a predefined radius in meters
+to pixels at the current altitude.
+12(a)
+ (b)
+(c)
+ (d)
+Figure 5: Visualization of the landing point stabilization process at different altitudes.
+The blue dot represents the instantaneous proposed landing spot p∗
+k, the green dot shows
+the temporal averaging of landing points p∗
+k, the red dot marks the center cof image Ik,
+and the yellow circle is the the safety area S. (a) Initial approach at higher altitude. (b)
+Descent phase showing the UAV’s path toward the selected landing point. (c) and (d)
+lower altitude views.
+If at some time kthe UAV deviates from the safety zone S, that is
+∥p∗
+k−c∥ ≥τ(z), the SLZ centered at p∗
+kis no longer time consistent, the
+time accumulator is reset, and descent is paused until stability is regained.
+This approach ensures that landing proceeds only when consistently safe
+conditions are maintained. Fig. 5 demonstrates both mechanisms of our
+landing stabilization approach in action.
+4.6. Control and Navigation
+After obtaining a robust estimate of the SLZ p∗
+kthrough the stabiliza-
+tion mechanisms, we implement an image-based proportional-derivative (PD)
+control scheme to drive the UAV toward the target. This control approach
+translates the visual positional errors into appropriate flight commands.
+13For horizontal positioning, reference roll and pitch angles, ϕcandθc, re-
+spectively, are controlled independently with PD controllers that are defined
+as
+ϕc=Kp,xδx+Kd,x˙δx, (8)
+θc=Kp,yδy+Kd,y˙δy, (9)
+where δxandδyrepresent the horizontal errors of p∗
+kfrom the image center c,
+andKp,·andKd,·are proportional and derivative gains, respectively. These
+controllers generate roll and pitch commands that move the UAV horizontally
+to align with the selected landing zone.
+For altitude control, we leverage the same altitude-dependent safety cri-
+terion established in the stabilization phase. Therefore, using the concept
+of the safety area Sfrom the previous section, the desired altitude zdis
+decremented only when the UAV has maintained stable positioning above
+the selected SLZ for a sufficient period of time. That is, zdis computed as
+zd=(
+zd−∆zif∥p∗
+k−c∥< τ(z),∀t > k−M,
+zd otherwise ,(10)
+with ∆ zis the descent step. Another PD controller then controls the vertical
+motion as
+zc=Kp,z(zd−z)−Kd,z˙z, (11)
+where zcis the altitude control command, zis the current altitude, and zdis
+the desired altitude that decreases steadily during controlled descent.
+The control system guides the UAV to converge steadily above a consis-
+tently identified low-risk location before initiating and maintaining a con-
+trolled descent. The combination of vision-based risk assessment with re-
+sponsive PD control allows the landing maneuver to adapt to dynamic urban
+environments with moving obstacles, while maintaining safety parameters
+throughout the entire process. Algorithm 1 summarizes our complete risk-
+aware landing approach, integrating all steps described in this section.
+5. Experimental Validation
+To evaluate the effectiveness of our risk-aware landing approach, we con-
+ducted testing using diverse real urban aerial environments through the ViVa-
+SAFELAND framework [13], which leverages real aerial videos to simulate
+14Algorithm 1 Risk-Aware Autonomous Landing
+1:Input: Drone-view image Ik, current altitude z
+2:Output: Control commands ϕc,θc,zc
+3:Rk← M R(MS(Ik)); // Apply semantic segmentation
+4:for all (x, y)do
+5:Rglobal
+k(xg, yg)←max
+Rglobal
+k−1(xg, yg),Rk(x, y)
+; // Update global
+risk map using (1)
+6:end for
+7:Rlocal
+k ← RetrieveLocalView (Rglobal
+k); // Get risk map within
+drone’s field of view
+8:ifz >30mthen
+9:Rf
+k←Gl∗ Rlocal
+k; //Apply large Gaussian filter
+10:else
+11:Rf
+k←Gm∗Dkd(Rlocal
+k); // Apply dilation and moderate-size
+Gaussian filter
+12:end if
+13:for all p∈S(Rf
+k)do
+14:V(p)←α· Rf
+k(p) +β· L(p,c); // Compute weighted map
+15:end for
+16:p∗
+k←arg minp∈S(Rf
+k)V(p); // Find minimum in weighted map and add
+to queue
+17:p∗
+k←1
+NPN−1
+i=0p∗
+k−i; // Calculate temporal average of landing
+points
+18:if∥p∗
+k−c∥< τ(z),∀t > k−Mthen
+19: zd←zd−∆z; //Update desired altitude
+20:end if
+21:(δx, δy)←p∗
+k−c; //Horizontal errors
+22://Compute control commands
+23:ϕc←Kp,xδx+Kd,x˙δx;
+24:θc←Kp,yδy+Kd,y˙δy;
+25:zc←Kp,z(zd−z)−Kd,z˙z;
+26:return ϕc,θc,zc
+landing missions for an emulated aerial vehicle (EAV). This allows us to
+randomize several trials and capture different quantitative metrics. Also,
+this tool enables the reproducibility of test scenarios for a fair comparison
+15between different vision-based landing solutions. The test urban scenarios
+include environments with dynamic obstacles, such as moving vehicles and
+pedestrians, and different ground textures captured at multiple altitudes.
+This structured approach allows us to assess the method’s performance us-
+ing real urban footage without the safety risks of physical drone testing in
+populated areas, thereby providing meaningful insights into the algorithm’s
+potential for real-world applications. All tests were performed using an AMD
+Ryzen 7 5700X processor, 32 GB of RAM, and a NVIDIA GeForce RTX 3060
+graphics card. The landing proposal was implemented using Python. In par-
+ticular, the segmentation vision module MSwas implemented using U-Net.
+5.1. Metrics for Landing System Evaluation
+To comprehensively evaluate our vision-based landing system, we employ
+four complementary metrics that assess different aspects of the landing pro-
+cess. Since no absolute ground truth exists for landing zones in real urban
+footage, we establish a reference standard using a virtual “metric camera”
+CMpositioned at a fixed height of 30 mabove the scene. Importantly, the
+camera CMremains horizontally aligned with the EAV’s current position at
+all times, maintaining the same x−ycoordinates but at a constant alti-
+tude, regardless of the EAV’s actual height. In addition, the 30 maltitude
+represents a nice balance where semantic segmentation has been observed to
+function reliably, capturing sufficient details while maintaining a broad per-
+spective. As the EAV descends to lower altitudes where segmentation quality
+might degrade, the camera CMcontinues to provide a stable reference view.
+For our evaluation purposes, areas of low risk, such as grass or pavement,
+are considered valid landing zones that do not pose safety concerns. Using
+CMas our reference, we compute the following evaluation metrics.
+- Success Metric. This metric determines whether a landing spot is free
+of collision with risky obstacles by evaluating a circular safety area of 0 .5m
+radius around the target point. It calculates whether any pixels classified as
+“high-risk” exist within this circle; that is, if any pixel is over a risk threshold
+γr, as viewed from the metric camera. A landing is considered successful only
+if no high-risk pixels are present in the landing area. This is quantified as
+Msuc=(
+0 if∃p∈ C 0.5:RCM(p)> γr,
+1 otherwise ,(12)
+where C0.5represents the set of pixels within the circular area, and RCM(p)
+is the risk value of pixel pas captured by the metric camera CM. This strict
+16binary criterion ensures that only completely safe areas without any high-risk
+elements are considered successful landing zones.
+- Risk Metric. Using a larger 2 mdiameter circular area, this metric calcu-
+lates the proportion of high-risk pixels within this extended zone, which is
+computed as
+Mrisk=P
+p∈C21(RCM(p)> γr)
+|C2|, (13)
+where C2represents the set of pixels within the 2-meter diameter circle as
+viewed from CM,|C2|denotes the total number of pixels in this area, and 1(·)
+returns 1 if its argument is true, and 0 otherwise. A lower Risk Metric value
+indicates a safer landing area with fewer high-risk elements in the vicinity.
+- Proximity Metric (Nearest Obstacle). The Proximity Metric offers a
+continuous measure of safety by quantifying the distance between the landing
+point and the closest potential hazard. Using the CMcamera view, this
+metric calculates the minimum distance from the center of the landing area
+to any high-risk pixel, and is calculated as
+Mprox= min
+p∈H∥p−g∥2, (14)
+where His the set of high-risk pixels (with values > γ r) in the view of the
+metric camera CM,gis the center of the landing area, again in the CMview,
+and∥ · ∥ 2represents the Euclidean distance. Higher values indicate more
+favorable landing zones with greater clearance from obstacles, providing an
+important safety margin measurement.
+- Warning Metrics. To further characterize the safety margins around
+potential landing zones, we introduce two complementary warning metrics
+that build upon the Proximity Metric by categorizing obstacles according to
+their distance from the landing spot. Their computation is as follows.
+Wi=(
+1 if min p∈H∥p−g∥2< ω i,
+0 otherwise ,(15)
+where each Wi∈ {W1, W2}has its corresponding warning zone according to
+a safety radius ωithat triggers the warning. Warning W1identifies critical
+proximity violations where high-risk elements are detected within 1 mof the
+landing point, representing an immediate hazard. Warning W2identifies sec-
+ondary proximity violations where high-risk elements are between 1 mand
+172mfrom the landing spot, representing a potential concern but with a mod-
+est safety margin. As expected, it is not desirable for any warnings to be
+triggered during landing.
+- IoU Metric (Intersection over Union). The IoU metric evaluates the
+semantic segmentation network consistency between the risk perception at
+the EAV’s variable altitude and the reference view at 30 m. This spatial
+overlap measurement provides critical insight into segmentation reliability
+during descent operations. For each frame during the landing process, we
+calculate the pixel-wise agreement between high-risk areas identified from
+the current viewpoint and those from the metric camera’s fixed perspective
+using the standard intersection over union formula
+IoU =|P ∩ G|
+|P ∪ G|, (16)
+where Prepresents the set of pixels predicted as high-risk from the EAV’s
+current view Rk, andGrepresents the set of pixels labeled as high-risk in
+theCMviewRCM.
+This metric is tracked continuously once the EAV descends below 30 m,
+and the final reported value represents the average IoU across this entire
+descent phase. This metric, therefore, provides valuable insights into how
+reliably the system maintains accurate risk perception at different altitudes
+where landing decisions become increasingly critical.
+- Execution Time Metric. This metric quantifies the temporal efficiency
+of the landing process by measuring the total duration from when the landing
+zone search begins until the EAV completes its descent, that is,
+ttotal=tend−tinit, (17)
+where tinitmarks the moment when the emergency landing task starts, and
+tendrepresents the moment when the EAV completes its landing. It is impor-
+tant to highlight that the complete landing strategy is performed in real-time
+within the VIVA-SAFELAND framework. By comparing execution times,
+this metric helps evaluate the practical feasibility of the approach, particu-
+larly in time-sensitive scenarios where both safety and speed are important
+considerations, for instance, in the case of battery shortage.
+5.2. Test Environments and Scenarios
+To thoroughly evaluate our approach, we selected four distinct urban en-
+vironments that present various challenges for safe drone landing (see Table
+181). For each environment, we tested our algorithm, running 100 trials, ran-
+domizing the starting EAV position. Two landing approaches are tested, a
+baseline where the EAV randomly selects its landing position according to
+a uniform distribution, which is further referred to as uncontrolled , and our
+risk-aware landing proposal, which is referred to as controlled . The following
+four different configurations are tested for each environment:
+•SU: Static-Uncontrolled. Using the same static picture, but without
+active landing zone selection, serves as a baseline comparison using
+default random positioning.
+•SC: Static-Controlled. Using a single static picture, the landing algo-
+rithm actively selects a suitable SLZ in a static scene.
+•DU: Dynamic-Uncontrolled. Using the complete video sequence with-
+out active landing zone detection, we provided a reference baseline with
+random landing positions to evaluate the benefits of our active control
+approach.
+•DC: Dynamic-Controlled. Using the complete dynamic video, the
+landing algorithm continuously identifies suitable SLZ and attempts
+to land under real dynamic conditions.
+These configurations allow us to quantify the improvements provided by
+our active detection and landing system compared to naive positioning ap-
+proaches, both in static images and dynamic video sequences. Table 1 shows
+some statistics for the 100 trials corresponding to percentage ratios or mean
+values. As demonstrated in Table 1, the controlled trials (SC and DC) sig-
+nificantly outperformed their uncontrolled counterparts (SU and DU) across
+all safety-related metrics, with success rates reaching 90%-100% in controlled
+trials compared to only 45%-86% in the uncontrolled ones. Uncontrolled ap-
+proaches also exhibit higher risk percentages and closer proximities to obsta-
+cles, particularly in the dynamic uncontrolled (DU) configuration, which rep-
+resents the most challenging scenario. Our controlled approach achieves supe-
+rior safety results while still operating in real-time, with complete landing ma-
+neuvers consistently executed in a reasonable time, demonstrating its practi-
+cal viability for emergency landing scenarios in complex urban environments.
+A video showcasing the performance of the landing algorithm in different
+challenging urban scenarios is provided at https://youtu.be/uZEgroQpMSI .
+19Table 1: Performance Metrics for Different Urban Environments ( ↑the bigger the better,
+↓the smaller the better)
+Scene Succ Risk Prox W1 W2 IoU Time
+[%]↑[%]↓[m]↑[%]↓[%]↓ ↑ [s]↓
+SU 69.0 19.00 2.05 37.0 20.0 0.31 5.20
+SC 98.0 0.856 3.50 3.00 17.0 0.42 12.57
+DU 54.0 32.21 1.66 52.0 15.0 0.47 6.63
+DC 93.0 3.22 2.49 8.00 25.0 0.43 17.22
+SU 86.0 7.39 3.88 19.0 14.0 0.26 4.96
+SC 100 0.14 4.76 2.00 3.00 0.43 12.14
+DU 63.0 24.64 2.48 43.0 11.0 0.40 6.88
+DC 100 0.22 3.99 4.00 6.00 0.41 15.20
+SU 80.0 11.08 2.96 23.0 18.0 0.33 5.24
+SC 100 0.11 4.29 2.00 6.00 0.37 11.66
+DU 66.0 25.43 1.58 49.0 16.0 0.43 6.80
+DC 96.0 1.02 3.84 5.00 9.00 0.40 15.80
+SU 70.0 17.54 2.33 37.0 21.0 0.26 4.930
+SC 100 0.02 3.59 0.00 4.00 0.39 10.95
+DU 45.0 41.03 0.94 69.0 11.0 0.42 6.35
+DC 90.0 5.030 2.10 20.0 26.0 0.44 15.24
+5.3. Metric Camera Validation
+While the metric camera CMat 30 maltitude provides a useful reference
+for quick evaluation, it relies on the same semantic segmentation network as
+the EAV, potentially propagating similar biases or errors. To address this
+limitation and more rigorously validate our approach, we conducted an ad-
+ditional evaluation using manually annotated ground truth data where high-
+risk elements were carefully labeled frame by frame in a test video sequence.
+Table 2 compares our metric camera-based evaluation and the manually la-
+beled ground truth, running 100 randomized trials under the same video. As
+expected, the IoU metric, which evaluates the quality of the segmentation
+network, deteriorates when using the manually labeled validation video; nev-
+ertheless, we can observe that the main risk metrics are comparable in both
+validations, suggesting that the use of the CMcamera provides an acceptable
+means for rapid assessment in various real scenarios, without the need for
+labor-expensive manual labeling of the videos frame by frame. The results
+20Table 2: Comparison Between Metric Camera and Ground Truth Evaluation ( ↑the bigger
+the better, ↓the smaller the better)
+Metric Camera CMGround Truth
+Success Rate [%] ↑ 98.0 98.0
+Risk [%] ↓ 1.38 1.19
+Proximity [m] ↑ 4.22 6.07
+Warning 1 [%] ↓ 8.0 2.0
+Warning 2 [%] ↓ 10.0 3.0
+IoU↑ 0.67 0.53
+Execution Time [s] ↓ 28.89 23.72
+show that our metric-camera assessment consistently overestimates risk rela-
+tive to the manually labeled ground truth, a conservative bias that, far from
+being detrimental, means the evaluation errs on the side of caution and that
+the true safety margins are probably even larger than those reflected in our
+main evaluation metrics.
+6. Conclusion and Future Work
+This paper presented a vision-based risk-aware control approach for safe
+landing in complex urban environments. By leveraging semantic segmen-
+tation to create pixel-wise risk maps and applying conservative altitude-
+dependent risk propagation techniques, the system reliably avoids hazardous
+zones at various flight phases. The global risk map approach maintains a
+persistent “memory” of detected hazards, while temporal averaging of can-
+didate landing points stabilizes detection and reduces transient errors. Our
+local-minimum detection component nicely balances risk minimization with
+practical distance considerations, identifying suitable landing zones even in
+complex environments with varying risk distributions. A PD control system
+continuously guides the UAV towards the identified SLZ, while our safety-
+first descent strategy initiates the actual landing process only after sufficient
+criteria have been maintained.
+Our experimental results on real scenes demonstrate the effectiveness of
+the proposed method, with controlled strategies consistently achieving suc-
+cess rates of 90%-100% compared to only 45%-86% in uncontrolled trials.
+21Notably, in the most challenging urban environment with high pedestrian
+density and unpredictable movement patterns (Scene 4), our controlled ap-
+proach achieved an outstanding 90% success rate compared to just 45% in
+the uncontrolled case. The proposed strategy proved to be effective in re-
+ducing the risk of accidents during real-time emergency landing, achieving
+successful landings in less than 20 s. To our knowledge, this is the first time
+that a quantitative evaluation is performed in a purely visual-based land-
+ing approach in complex urban scenarios, hence providing a fair baseline for
+comparison with future works.
+For future work, we plan to implement this approach on real UAV plat-
+forms under controlled conditions, gradually transitioning from simplified
+environments to more complex urban settings as safety protocols permit.
+Additionally, we aim to integrate online object tracking for enhanced dy-
+namic obstacle avoidance, estimate obstacles, depth, explore end-to-end deep
+learning architectures for direct SLZ inference, and refine vertical descent
+strategies once the UAV is centered over the selected landing zone. These
+advancements will further strengthen the practical applicability of risk-aware
+landing systems in real-world emergency scenarios.
+References
+[1] H. Shakhatreh, A. H. Sawalmeh, A. Al-Fuqaha, Z. Dou, E. Almaita,
+I. Khalil, N. S. Othman, A. Khreishah, M. Guizani, Unmanned aerial
+vehicles (uavs): A survey on civil applications and key research chal-
+lenges, IEEE Access 7 (2019) 48572–48634. doi:10.1109/ACCESS.
+2019.2909530 .
+[2] A. V. R. Katkuri, H. Madan, N. Khatri, A. S. H. Abdul-Qawy, K. S.
+Patnaik, Autonomous UAV navigation using deep learning-based com-
+puter vision frameworks: A systematic literature review, Array 23 (2024)
+100361. doi:10.1016/j.array.2024.100361 .
+[3] M. Shah Alam, J. Oluoch, A survey of safe landing zone de-
+tection techniques for autonomous unmanned aerial vehicles
+(uavs), Expert Systems with Applications 179 (2021) 115091.
+doi:https://doi.org/10.1016/j.eswa.2021.115091 .
+URL https://www.sciencedirect.com/science/article/pii/
+S0957417421005327
+22[4] D. Pieczy´ nski, B. Ptak, M. Kraft, M. Piechocki, P. Aszkowski, A fast,
+lightweight deep learning vision pipeline for autonomous UAV land-
+ing support with added robustness, Engineering Applications of Arti-
+ficial Intelligence 131 (2024) 107864. doi:10.1016/j.engappai.2024.
+107864 .
+[5] M. Demirhan, C. Premachandra, Development of an automated camera-
+based drone landing system, IEEE Access 8 (2020) 202111–202121. doi:
+10.1109/ACCESS.2020.3034948 .
+[6] M. Lv, B. Fan, J. Fang, J. Wang, Autonomous landing of quadrotor
+unmanned aerial vehicles based on multi-level marker and linear active
+disturbance reject control, Sensors 24 (5) (2024) 1645.
+[7] A. E. Morando, M. F. Santos, P. Castillo, A. Correa-Victorino, Vision-
+Based Algorithm for Autonomous Aerial Landing, in: 2024 International
+Conference on Unmanned Aircraft Systems (ICUAS), IEEE, Chania -
+Crete, Greece, 2024, pp. 652–657. doi:10.1109/ICUAS60882.2024.
+10556880 .
+[8] H. Xu, L. Wang, W. Han, Y. Yang, J. Li, Y. Lu, J. Li, A sur-
+vey on uav applications in smart city management: Challenges, ad-
+vances, and opportunities, IEEE Journal of Selected Topics in Ap-
+plied Earth Observations and Remote Sensing 16 (2023) 8982–9010.
+doi:10.1109/JSTARS.2023.3317500 .
+[9] Jarus guidelines on specific operations risk assessment (sora) v2.0. joint
+authorities for rulemaking of unmanned systems (2024).
+[10] J. A. Loera-Ponce, D. A. Mercado-Ravell, I. Becerra, L. M. Valentin-
+Coronado, Risk assessment for uav autonomous landing in urban en-
+vironments using semantic segmentation, in: Advances in Artificial In-
+telligence – IBERAMIA 2024, Springer Nature Switzerland, 2025, pp.
+197–208.
+[11] S. Abdollahzadeh, P.-L. Proulx, M. S. Allili, J.-F. Lapointe, Safe land-
+ing zones detection for uavs using deep regression, in: 2022 19th
+Conference on Robots and Vision (CRV), 2022, pp. 213–218. doi:
+10.1109/CRV55824.2022.00035 .
+23[12] A. Benjwal, P. Uday, A. Vadduri, A. Pai, Safe landing zone detec-
+tion for uavs using image segmentation and super resolution, in: In-
+ternational Conference on Machine Vision Applications, 2023. doi:
+10.23919/MVA57639.2023.10215759 .
+[13] M. Soriano-Garc´ ıa, D. Mercado-Ravell, Viva-safeland: a new freeware
+for safe validation of vision-based navigation in aerial vehicles (2025).
+arXiv:2503.14719 .
+URL https://arxiv.org/abs/2503.14719
+[14] T. Yang, P. Li, H. Zhang, J. Li, Z. Li, Monocular vision slam-based
+uav autonomous landing in emergencies and unknown environments,
+Electronics 7 (5) (2018).
+URL https://www.mdpi.com/2079-9292/7/5/73
+[15] M. A. Kaljahi, P. Shivakumara, M. Y. I. Idris, M. H. Anisi, T. Lu,
+M. Blumenstein, N. M. Noor, An automatic zone detection system
+for safe landing of uavs, Expert Systems with Applications 122 (2019)
+319–333. doi:https://doi.org/10.1016/j.eswa.2019.01.024 .
+URL https://www.sciencedirect.com/science/article/pii/
+S0957417419300272
+[16] E. Saldiran, M. Hasanzade, A. Cetin, G. Inalhan, Autonomous emer-
+gency landing system to unknown terrain for uavs, in: 2024 AIAA
+DATC/IEEE 43rd Digital Avionics Systems Conference (DASC), 2024,
+pp. 1–7. doi:10.1109/DASC62030.2024.10749002 .
+[17] E. Saldiran, M. Hasanzade, A. Cetin, G. Inalhan, Ensuring operation
+time safety of vtol uav: Autonomous emergency landings in unknown
+terrain, IEEE Transactions on Aerospace and Electronic Systems (2025).
+doi:10.1109/TAES.2025.3559899 .
+[18] L. Xin, Z. Tang, W. Gai, H. Liu, Vision-based autonomous landing for
+the uav: A review, Aerospace 9 (11) (2022).
+URL https://www.mdpi.com/2226-4310/9/11/634
+[19] Q. Zhang, Q. Xia, L. Wei, B. Deng, A vision-based method for uav au-
+tonomous landing area detection, in: Z. Shi, M. Witbrock, Q. Tian
+(Eds.), Intelligence Science V, Springer Nature Switzerland, Cham,
+2025, pp. 204–213.
+24[20] J. Wu, Z. Zhang, W. Huang, Semantic map construction of uav au-
+tonomous landing in unknown environment, in: 2024 36th Chinese
+Control and Decision Conference (CCDC), 2024, pp. 5018–5025. doi:
+10.1109/CCDC62350.2024.10588362 .
+[21] M. Secchiero, N. Bobbili, Y. Zhou, G. Loianno, Visual environment as-
+sessment for safe autonomous quadrotor landing, in: 2024 International
+Conference on Unmanned Aircraft Systems (ICUAS), 2024, pp. 807–813.
+doi:10.1109/ICUAS60882.2024.10557078 .
+[22] M. Tzelepi, A. Tefas, Graph embedded convolutional neural networks
+in human crowd detection for drone flight safety, IEEE Transactions on
+Emerging Topics in Computational Intelligence 5 (2) (2021) 191–204.
+doi:10.1109/TETCI.2019.2897815 .
+[23] J. Gonz´ alez-Trejo, D. Mercado-Ravell, I. Becerra, R. Murrieta-Cid, On
+the visual-based safe landing of uavs in populated areas: A crucial aspect
+for urban deployment, IEEE Robotics and Automation Letters 6 (4)
+(2021) 7901–7908.
+[24] J. Lim, M. Kim, H. Yoo, J. Lee, Autonomous multirotor uav search and
+landing on safe spots based on combined semantic and depth informa-
+tion from an onboard camera and lidar, IEEE/ASME Transactions on
+Mechatronics 29 (5) (2024) 3960–3970.
+[25] T. Mitroudas, V. Balaska, A. Psomoulis, A. Gasteratos, Light-weight
+approach for safe landing in populated areas, IEEE International Con-
+ference on Robotics and Automation (2024) 10027–10032.
+[26] N. S. Vemulapalli, P. Paladugula, G. S. Prabhat, S. Don, Reinforce-
+ment Learning-Based Autonomous Landing of AirSim Simulated Quad-
+copter in Unreal Engine, in: 2024 15th International Conference on
+Computing Communication and Networking Technologies (ICCCNT),
+IEEE, Kamand, India, 2024, pp. 1–7. doi:10.1109/ICCCNT61001.
+2024.10725648 .
+[27] S. Liu, W. Li, H. Li, S. Li, Reinforcement learning based multi-
+perspective motion planning of manned electric vertical take-off and
+landing vehicle in urban environment with wind fields, Engineering
+25Applications of Artificial Intelligence 149 (2025) 110392. doi:https:
+//doi.org/10.1016/j.engappai.2025.110392 .
+[28] H. Tovanche-Picon, J. Gonz´ alez-Trejo, ´A. Flores-Abad, M. ´A. Garc´ ıa-
+Ter´ an, D. Mercado-Ravell, Real-time safe validation of autonomous
+landing in populated areas: From virtual environments to Robot-
+In-The-Loop, Virtual Reality 28 (1) (2024) 66. doi:10.1007/
+s10055-024-00965-6 .
+26

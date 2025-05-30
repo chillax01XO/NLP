@@ -1,0 +1,745 @@
+arXiv:2505.21189v1  [cs.CL]  27 May 2025Exploring the Latent Capacity of LLMs for One-Step Text Generation*
+Gleb Mezentsev
+AIRI
+Skoltech
+mezentsev@airi.netIvan Oseledets
+AIRI
+Skoltech
+oseledets@airi.net
+Abstract
+A recent study showed that large language
+models (LLMs) can reconstruct surprisingly
+long texts – up to thousands of tokens – via
+autoregressive generation from just one spe-
+cially trained input embedding. In this work,
+we explore whether such reconstruction is
+possible without autoregression.We show that
+frozen LLMs can generate hundreds of accurate
+tokens in just one forward pass, when provided
+with only two learned embeddings. This re-
+veals a surprising and underexplored capability
+of LLMs – multi-token generation without it-
+erative decoding. We investigate the behaviour
+of these embeddings and provide insight into
+the type of information they encode. We also
+empirically show that although these represen-
+tations are not unique for a given text, they
+form connected and local regions in embedding
+space – a property that suggests the potential
+of learning a dedicated encoder into that space.
+1 Introduction
+Large language models (LLMs) are typically
+trained to generate text in an autoregressive man-
+ner – they predict one token at a time based on the
+previously generated context.
+Recent work by Kuratov et al. (2025) demon-
+strated that LLMs can autoregressively generate
+an arbitrary text starting from a single, specially
+trained input embedding corresponding to that text.
+This raises an intriguing question: is autoregressive
+generation an essential part of such reconstruction?
+Or, in other words, can LLMs reconstruct accurate
+multi-token sequences from some compressed rep-
+resentation in a single forward pass, without any
+iterative generation, and if so, how?
+In this work, we show that this is possible, in-
+vestigate what those compressed representations
+encode and whether this finding reveals anything
+about LLMs’ parallel generation capabilities.
+*Under review
+Figure 1: Two "proto-tokens" (trainable embeddings)
+are fed into frozen, pre-trained LLM and optimized in
+such a way, that the LLM predicts an arbitrary target
+token-sequence in a single forward pass. One of the
+"proto-tokens" ( et) is trained for each text separately,
+while the other ( m) could be reused.
+Our contribution is as follows:
+1. We show that LLMs can reconstruct arbi-
+trary sequences from as few as two learned input
+embeddings, achieving perfect reconstruction of
+sequences of up to several hundred tokens.
+2. We identify key design aspects for such a
+setup, that enable this generation, including the
+critical importance of input token arrangement.
+3. We study how the reconstruction capability
+varies with the model size and the nature of the
+target sequence (e.g. natural vs synthetic text).
+4. We empirically characterize learned repre-
+sentations – analyze their information content and
+embedding-space geometry.
+2 Related Work
+The most direct influence for our work is a pa-
+per by Kuratov et al. (2025), which showed
+that frozen LLMs can reconstruct an arbitrary
+sequence of tokens T= [t1, . . . , t N]if given
+a set of special, so-called memory tokens
+[mem 1, . . . , mem K]. The embeddings for these
+tokens are trained by optimizing a causal lan-
+1guage modeling objective (next-token prediction
+cross-entropy loss) over a concatenated input
+sequence Z= [mem 1, . . . , mem K, t1, . . . , t N]
+passed through a frozen LLM. In the case of per-
+fect next-token prediction accuracy (which could
+be achieved for reasonable text length), this allows
+the model to autoregressively predict the whole text
+starting from the memory tokens. The number of
+memory tokens controls the maximum text length
+and can be as low as one.
+Although surprisingly long (up to 1568 tokens)
+texts could be compressed even into a single mem-
+ory token, the authors note that the embeddings
+trained from different random initializations for the
+same text often end up far apart. Moreover, linear
+interpolations between those embeddings produce
+very poor reconstruction accuracy, suggesting that
+the solution space lacks desirable smoothness and
+locality qualities, which are important for learning
+a practical encoder that could replace the direct
+optimization.
+Our work also relates to efforts in prompt-tuning
+and its variants (Lester et al., 2021; Liu et al., 2024;
+Li and Liang, 2021). Most similarly, Lester et al.
+(2021) train task-specific soft tokens to condition
+the frozen LLMs to improve their performance in
+new tasks. Finally, several speculative (Xia et al.,
+2023) and parallel (Santilli et al., 2023) decod-
+ing approaches utilize a similar mechanism for
+multiple token prediction using decoder architec-
+tures. More specifically, they add special [PAD] or
+[MASK] tokens at the end of the current context in
+order to make a prediction for several tokens into
+the future at once. Critically, in these works either
+special training or multiple generative iterations are
+required.
+Unlike prior work, we show that a frozen LLM
+can generate accurate multi-token sequences in one
+forward pass without additional LLM training or
+iterative decoding.
+3 Method
+To adopt the approach from Kuratov et al. (2025)
+to a non-autoregressive case, we replace all input
+tokens of the LLM with specially trained "proto-
+tokens" and predict the target token sequence in
+one forward pass. In practice, "proto-tokens" are
+just trainable vectors that are not tied to any real
+items in the vocabulary. The main difference be-
+tween regular tokens and these "proto-tokens" is
+that "proto-tokens" encode multiple tokens at onceand only produce human-readable text after pass-
+ing through the LLM. Our goal is to identify the
+smallest possible number of such "proto-tokens"
+needed for accurate reconstruction. Interestingly,
+we find that it is essential to have at least two – the
+performance drops dramatically when using only
+one (see Section 4).
+There are many ways to arrange two vectors as
+an input sequence of arbitrary length. We report
+results for different variants later in the paper, but
+here we describe the arrangement that is used in
+the majority of the experiments.
+Exact scheme We introduce two "proto-tokens"
+eandmwith trainable embeddings of dimension
+dmodel (model input embedding dimension) and
+construct the input sequence as follows:
+Z= [e, m, m, . . . , m ]– one copy of token eis
+followed by N−1copies of token m, where N
+is the target text length. We then train the vectors
+by optimizing cross-entropy loss between the tar-
+get sequence T= [t1, t2, . . . , t N]and the frozen
+LLM’s output for the input sequence. The pre-
+diction is obtained using standard causal attention
+masking, so that the predicted probabilities for the
+token tidepend on the first iinput "proto-tokens"
+(see Figure 1).
+Metrics Our main evaluation metric is the num-
+ber of correctly reconstructed tokens in a generated
+sequence, defined as:
+Ctokens =NX
+i=11(LM(Z[1:i]) =ti) (1)
+Additionally, we measure the amount of informa-
+tion contained in the reconstructed token sequence
+from the perspective of causal language modeling
+with a given LLM. Specifically, we compute the
+cross-entropy between the compressed sequence
+and LLM’s autoregressive probability distribution:
+HLM=NX
+i=1−logPLM(ti|t<i) (2)
+This quantity measures how uncertain a model
+is about the compressed text, that is, how much
+information it contains.
+Solution space connectivity To gain insights
+into the structure of the solution space of our prob-
+lem, we analyze whether different proto-token em-
+beddings obtained for the same text but from differ-
+ent random initializations are connected. We adopt
+2a technique from (Garipov et al., 2018) which is
+used to find paths connecting different minima of
+the loss function in computer vision tasks. We
+optimize the parameters of a degree-one Bezier
+curve, connecting two solutions, to maximize re-
+construction accuracy along the curve. The curve is
+parameterized by a control point πin the following
+way:
+ϕπ(t) = (1 −t)2p1+ 2t(1−t)π+t2p2(3)
+Here, p1andp2are the two original solutions that
+we aim to connect.
+The expectation of the cross-entropy loss func-
+tion under the uniform distribution over t∈[0,1]
+(4)is minimized by iteratively sampling ˜t∈[0,1]
+and making a gradient step, effectively obtaining
+unbiased estimate of the gradient of lπ:
+lπ=Z1
+0NX
+i=1−logPLM(ti|ϕπ(t))dt (4)
+This acts as a more tractable alternative to direct
+optimization under the uniform distribution along
+the curve itself.
+Token sequences similarity In Section 4, we
+aim to measure the similarity between two token
+sequences in order to control for this similarity. To
+measure token-level similarity we use the cosine
+distance between TF-IDF embeddings of two se-
+quences. To measure semantic similarity we use
+cosine-distance between semantic sequence embed-
+dings obtained from a MiniLM model fine-tuned1
+for the semantic sentence embedding.
+4 Experiments and results
+We test the ability of different LLMs of varying
+sizes to generate a predefined text from different
+sources in a non-autoregressive (parallel) mode.
+Moreover, we compare different ways to feed our
+trainable "proto-tokens" into LLM. We also try to
+understand the structure of the solution space by
+examining the relations of solutions for different
+problems.
+Models We use six models for all experiments:
+three Pythia (Biderman et al., 2023) models of
+sizes 160M, 410M, and 1.4B, and three Llama-
+3 (Grattafiori et al., 2024) models of sizes 1B, 3B,
+and 8B.
+1https://huggingface.co/sentence-transformers/
+all-MiniLM-L6-v2Data Four text sources are used in the experi-
+ments to explore the possible connection between
+reconstruction performance and the text nature.
+A set of random texts is generated by sampling
+from the top 100,000 words of the GloVe vocabu-
+lary (Pennington et al., 2014), to evaluate perfor-
+mance on unnatural texts.
+To assess generation performance on natural but
+unseen texts, we use a collection of fanfiction texts
+from AO3 library2, with a publication date cutoff
+of October 2024, which is later than the end of
+training for all models. For data processing details,
+see Kuratov et al. (2025).
+The performance on seen natural texts is evalu-
+ated using PG-19 dataset (Rae et al., 2019) – a part
+of a dataset used for training Pythia models.
+Finally, we include a set of model-specific gen-
+erated texts. Specifically, for each model and each
+context text from PG-19 dataset, a suffix of the
+same length is generated as autoregressive contin-
+uation. The generation is done via multinomial
+sampling with sampling temperature T= 1.
+Training details The embeddings of the proto-
+tokens are initialized randomly from a standard
+normal distribution and optimized using AdamW
+optimizer (Loshchilov and Hutter) with 0.01learn-
+ing rate, β1,β2set to 0.9and a weight decay of
+0.01. The embeddings are trained for 5000 itera-
+tions with early stopping if perfect reconstruction
+accuracy is achieved. This number of iterations
+is often insufficient for convergence, but due to
+limited computational resources, we are unable to
+increase it. Instead, we aggregate results across
+multiple sequences. All models are loaded and
+trained using PyTorch framework and the Hugging
+Face Transformers library. Each experimental run
+is done on a single A100 or H100 80GB GPU with
+gradient accumulation enabled where necessary.
+The code is available at this page3.
+Proto-token arrangement To select the best way
+to arrange two proto-tokens as input to an LLM
+for the main experiments, we conduct test runs
+on a single dataset-model pair for the variety of
+arrangements. For each arrangement, the same 50
+texts from the PG-19 are selected, and the Llama-
+3.2-1B model is trained on prefixes of these texts at
+lengths [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+to assess how token-level reconstruction accuracy
+2https://archiveofourown.org/
+3https://github.com/Glebzok/
+OneStepLLMGeneration
+3changes with respect to sequence length N. A
+representative selection of results is presented in
+Table 1.
+Arrangement N= 1 N= 2 N= 4 N= 256
+[e]×N 1.00±0.000.45±0.310.17±0.180.01±0.01
+[e]×(N/2)[m]×(N/2)1.00±0.001.00±0.000.12±0.130.01±0.01
+[e, m]×(N/2) 1.00±0.001.00±0.001.00±0.000.17±0.34
+[e][m]×N 1.00±0.001.00±0.001.00±0.000.97±0.15
+[e][m]×(N−1) 1.00±0.001.00±0.001.00±0.000.99±0.10
+Table 1: Reconstruction accuracies for different input
+token arrangements across varying sequence lengths.
+Subscripts indicate the number of copies for each proto-
+token. The last two schemes differ as follows: with
+the first one, the LLM is trained to predict the first text
+token t1for the proto-token e, while with the second
+one, the prediction for proto-token eis not guided and
+t1is a target prediction for the first copy of minstead.
+Interestingly, having two trainable tokens is es-
+sential for the performance – the scheme with one
+trainable token fails to reconstruct even 2-token
+text, while best two-token schemes can reconstruct
+256-token texts almost perfectly.
+Moreover, the way these two tokens are arranged
+is also important, with the best results obtained
+when the first token eis followed by N−1copies
+of the second token m. This asymmetrical arrange-
+ment and critical necessity for two tokens suggest
+possible variation in functions of eandm. It is
+possible, that while one of them mostly incorpo-
+rates language information, the role of the other
+one is mainly structural or mechanistic. This could
+be related to the phenomenon of "attention sinks" –
+Xiao et al. (2023) showed that LLMs strongly at-
+tend to the initial tokens in the sequence even when
+they are not relevant. Moreover, adding a place-
+holder token as an attention sink could largely im-
+prove the performance of window-attention based
+models, which do not see the initial tokens by de-
+sign. So, it is possible, that in order to successfully
+decode "information" proto-token, LLM needs a
+distinguishable "sink" proto-token, which can be
+used as attention sink.
+Token sharing In the previous section, we
+showed that the quality of reconstruction is very
+dependent on having two separate proto-tokens as
+an input. This observation, led us to hypothesize
+that, a second token plays some structural or mech-
+anistic purposes and does not contain information
+about the sequence itself. In that case, the secondtoken could be shared between texts, reducing the
+number of optimized parameters, and simplifying
+the training process of the potential encoder.
+To test this hypothesis, we run the same op-
+timization process, but splitting 256 texts from
+the PG-19 dataset into groups of different sizes
+Sg∈[1,4,16,64,256] and sharing either eor
+mwithin each group. We selected the maximum
+length of the text that can be losslessly compressed
+in a non-sharing mode - 256. The results are aver-
+aged over 10random seeds. The selection of the
+results is presented in Table 2.
+Shared Agg Sg= 1 Sg= 16 Sg= 256
+e max 1.00±0.000.99±0.010.99±0.02
+avg 0.98±0.080.90±0.170.86±0.20
+p max 1.00±0.001.00±0.001.00±0.01
+avg 0.98±0.070.86±0.190.83±0.18
+Table 2: Reconstruction accuracy for schemes where
+one of the trainable tokens is shared within a group
+across different group sizes. "max" aggregation indi-
+cates that for every text, maximum accuracy across ten
+random seeds is selected and then averaged across texts,
+while "avg" denotes averaging across both seeds and
+texts.
+Sharing either token yields comparable perfor-
+mance if provided with sufficiently large number
+of restarts (random seeds), but the required number
+of restarts increases significantly with group size.
+Depending on the proto-token being shared, we
+can build different intuitions behind the function of
+the shared tokens and the method itself. If e-token
+is shared, which is located in the very beginning
+of the input sequence, the analogy that comes to
+mind is prompt-tuning (Lester et al., 2021), where
+a set of prompt embeddings is trained in order to
+improve performance in some specific task. In our
+case, a shared token ecould be viewed as an "in-
+struction" saying what an LLM should do with the
+upcoming embeddings ( m-tokens) – decode differ-
+ent pieces of information for different positions. If
+mis shared, then training and prediction scheme
+resembles some of the speculative decoding ap-
+proaches (Xia et al., 2023), where a number of
+special "[mask]" tokens are appended at the end of
+the sequence and the prediction for all them is then
+done in parallel. For all other experiments, unless
+stated otherwise, we use scheme with sharing m
+token between texts and random seeds and etoken
+being unique for each text/seed pair.
+4Share pPythia Llama
+160M 410M 1.4B 3.2-1B 3.2-3B 3.1-8B
+RandomCtokensFalse 90 92 90 256 362 512
+True 45 22 45 181 256 256
+HLMFalse 507.5±105.9377.1±133.1470.7±103.11551.3±159.52193.4±190.22974.4±298.3
+True 247.9±32.091.1±30.8231.0±37.9947.7±155.01292.2±217.41309.4±234.6
+FanficsCtokensFalse 128 128 131 362 512 724
+True 45 45 45 181 288 362
+HLMFalse 358.9±73.3395.4±97.8261.0±56.41107.6±129.11408.4±179.51763.3±280.2
+True 145.0±26.282.3±28.1147.9±29.7576.4±90.4835.9±121.71112.8±168.6
+PG-19CtokensFalse 128 167 128 362 512 724
+True 45 32 64 181 256 362
+HLMFalse 388.4±66.4408.8±96.3298.4±77.4993.8±183.41346.0±218.41659.8±344.5
+True 156.0±33.988.1±30.3156.0±30.2456.5±56.5826.1±117.6832.3±171.0
+PG-19
+(gen)CtokensFalse 128 181 128 362 512 724
+True 45 32 64 181 362 362
+HLMFalse 354.1±72.0379.2±82.6277.6±71.3927.3±103.41266.6±125.91653.1±211.4
+True 153.0±17.8106.9±38.5197.1±39.3478.7±85.7788.6±130.8771.7±143.0
+Table 3: Maximum reconstruction capacities for different models on different datasets.
+Generation capacity We already see, that simi-
+lar to autoregressive mode (Kuratov et al., 2025),
+LLMs can generate fairly long sequences in just
+one forward pass. To characterize this capability,
+and understand how it scales with model size, we
+run the optimization process for text prefixes of the
+predefined lengths [4, 5, 8, 11, 16, 22, 32, 45, 64,
+90, 128, 181, 256, 362, 512, 724, 1024, 1448]. We
+report the maximum values of Ctokens , and Hmax
+which correspond to the longest prefix for which
+at least 0.99token-level accuracy is achieved – we
+treat such sequences as successfully predicted. In
+addition to a scheme with a shared ptoken, we also
+run a scheme with pnot shared, to eliminate the
+effect of the insufficient number of random initial-
+izations. While our results in Section 4, suggest
+thatp, can in principal, be shared without any qual-
+ity drop, we also note that the optimization process
+is highly sensitive to initialization, especially when
+the proto-tokens are shared. The results are pre-
+sented in Table 3.
+Larger models in Llama family show greater
+reconstruction capabilities than the smaller ones of
+their family, while the situation with Pythia model-
+family is less obvious, with all the models showing
+approximately the same performance. Llama 1Bmodel is also able to reconstruct almost three times
+larger sequence compared to Pythia model of the
+same size.
+The source of the natural language (unseen / seen
+/ generated) doesn’t seem to have any systematic in-
+fluence on the quality of reconstruction in terms of
+the number of tokens, while for unnatural random
+texts the generation capacity is significantly worse.
+This suggests that our "proto-tokens" do not "store"
+text tokens directly, but encode some more high-
+level representations, using language modeling ca-
+pabilities of LLM. However, we also can’t say that
+the compressibility of the text is determined by its
+likelihood under the sequential language model. In
+fact, we observe the opposite trend: lower total
+information content HLMis compressed for less-
+information dense texts, such as generated by the
+LLM itself.
+This difference is highlighted in Figure 2, where
+the amount of the language-information contained
+in trainable tokens is compared to autoregressive
+setup. The performance for unnatural texts is very
+similar and sometimes even identical, while for nat-
+ural texts, the difference in capacity can be up to
+five times lower. However, more often the perfor-
+mance is just two times lower in non-autoregressive
+5128 256 512 1024 2048 4096
+Autoregressive HLM326412825651210242048One-forward HLMOne trainable embedding
+256 512 1024 2048 4096 8192
+Autoregressive HLM64128256512102420484096One-forward HLMT wo trainable embeddings
+Model
+Pythia-160M
+Pythia-410M
+Pythia-1.4B
+Llama-3.2-1B
+Llama-3.2-3B
+Llama-3.1-8B
+Dataset
+Fanfics
+PG-19
+PG-19(gen)
+Random
+y=x
+y=1
+2x
+y=1
+5xFigure 2: Maximum language information ( HLMfor a maximum text prefix that is accurately reconstructed)
+compressed for different models and datasets. In the left plot, a single [mem] token is used in the autoregressive
+setting, and in the non-autoregressive one, pproto-token is shared between all texts within each model. In the right
+plot, two [mem] tokens are used and pproto-tokens are not shared. Each small point on the plots represents a single
+text, larger points indicate the average within each (model, dataset) pair.
+case, suggesting that autoregressive decoding ap-
+proximately doubles the "effective" information
+density for natural texts – the density of the infor-
+mation that could be effectively decoded.
+20 50 80 110 140
+Autoregressive reconstruction throughtput, 
+tokens per sec500010000150002000025000One-forward reconstruction throughput, 
+tokens per secModel
+Pythia-160M
+Pythia-410M
+Pythia-1.4B
+Llama-3.2-1B
+Llama-3.2-3B
+Llama-3.1-8BDataset
+Fanfics
+PG-19
+PG-19(gen)
+Random
+Figure 3: Reconstruction throughput comparison be-
+tween autoregressive and non-autoregressive setups. For
+each (model, dataset) pair, the throughput is calculated
+as a maximum losslessly compressible length divided
+by the reconstruction time. To measure reconstruction
+time, we use PyTorch profiling tools.
+Although less information-dense, our one-
+forward method achieves significantly higher de-
+coding throughput in the context of text reconstruc-
+tion – outperforming its autoregressive counterpart
+by a factor of 279 on average (Figure 3). This
+dramatic difference is primary due to the number
+of forward passes. While an obvious downstream
+task is still to be found, such speed could matter
+for fast context-compression and decompression,
+on-device inference, or a setting where decoding
+speed is particularly important.Proto-tokens interpretation We examine the in-
+formation encoded in proto-tokens and the impli-
+cations this has for potential practical applications.
+In worst case scenario, they directly encode target
+tokens (imagine a vector containing token_ids). If
+so, the entire "language generation" effort happens
+during encoding, making decoding irrelevant for
+accelerated inference – though the approach could
+still be useful as a context-compression tool. The al-
+ternative is that proto-tokens encode a compressed
+representation of a prefix which, when the model
+generates from it, produces the observed suffix. In
+that case, the hard work of text generation is done
+during decoding, which is more promising from
+the point of view of accelerated inference. All the
+intermediate options are also possible.
+0.70 0.75 0.80 0.85 0.90 0.95 1.00 1.05
+Cosine distance0.02.55.07.510.012.515.017.5DensitySame text
+Same context
+Different contexts
+Figure 4: Cosine embedding distances for different pair-
+ings of proto-tokens. We select 50 contexts from PG19
+and for each context, generate 10 continuation texts. We
+find one solution for each of the first 9 generations and
+10 different-seed solutions for the last generation.
+60.5 0.6 0.7 0.8 0.9 1.0
+T oken-level Distance between T exts0.8250.8500.8750.9000.9250.9500.9751.0001.025Distance between Proto-token Embeddings
+0.2 0.4 0.6 0.8 1.0
+Semantic Distance between T exts
+Same Context Different ContextsFigure 5: We compare proto-token embedding distances for same context text pairs and different-context text pairs.
+Token-level distance is measured as cosine distance between TF-IDF embeddings. Semantic distance is measured
+as cosine distance between semantic text embeddings (see Section 3 for details).
+We start by measuring the distances between
+three types proto-token embedding pairs: 1) cor-
+responding to the same generated sequence, but
+different random seeds, 2) corresponding to the dif-
+ferent texts but generated from the same context, 3)
+corresponding to the different texts generated from
+different contexts. As shown in Figure 4, the same-
+text solutions are almost always located closer to
+each other than different-texts solutions, which sug-
+gests locality in the learned representations. At the
+same time, same-context solutions are noticeably
+closer to each other than different-context ones.
+This may indicate that the encoded information at
+least partially reflects the potential context of the
+text. However, we should be careful to account for
+the texts generated from the same context being
+more similar in general.
+To do that, we measure pairwise distances be-
+tween generated texts, and examine whether the
+distance between learned proto-token embeddings
+differ for a fixed distance between the texts. We use
+token-level measure of text similarity and semantic-
+level measure (see Section 3). For both measures,
+(Figure 5) we observer that, given similar distances
+between texts, the proto-token embeddings are con-
+sistently closer when the texts originate from the
+same context. We conclude that learned proto-
+tokens contain information beyond the information
+about the target sequence itself – it somehow de-
+scribes the potential context of the sequence.Kuratov et al. (2025) raised the following con-
+cern about the structure of the solution space in
+autoregressive setup. Even though the same-text
+token embeddings are on average closer to each
+other than different-text token embeddings, they
+seem to be disconnected – a linear interpolation
+between two solutions does not yield a valid re-
+construction. This could mean that the potential
+encoding to this space could be problematic as the
+same object could be mapped to disconnected re-
+gions. We find that in our non-autoregressive case,
+the linear interpolation between same-text solutions
+also does not produce a solution (Figure 6).
+0.0 0.2 0.4 0.6 0.8 1.0
+t0.00.20.40.60.81.0AccuracyConnection
+Linear
+Bezier curveConnection
+Linear
+Bezier curve
+Figure 6: Pairwise interpolation accuracies between 10
+solutions for 5texts ( 5×10×9/2pairs in total).
+However, the solutions could be connected using
+quadratic Bezier curves (parabolic segments) lying
+inside "solution set". This means that even though
+same-text solutions do not form a convex set, they
+form a connected set. In fact, our experiments
+show that the maximum ratio between Bezier curve
+7length and the corresponding linear connection is
+only1.2, indicating that the paths are nearly linear.
+These results demonstrate that the solution space
+is fairly well behaved, providing reasonable hope
+that an encoder model could be built to map into
+that space.
+5 Discussion and Conclusions
+In this paper, we demonstrate that frozen LLMs
+have a surprising ability to generate hundreds of
+accurate tokens in a single forward pass – without
+any iterative decoding – when provided with just
+two specially trained "proto-tokens".
+We find that both the number and the arrange-
+ment of such tokens is crucial for enabling this
+generation capacity. Interestingly, with only one
+proto-token, LLMs are unable to generate more
+than a single token of text. In contrast, two properly
+arranged proto-tokens can enable the generation
+of sequences hundreds tokens long. This signifi-
+cant leap in the performance, along the observation
+that one of the vectors can (in principal) be shared
+across many texts, suggest that proto-tokens play
+different functional roles during generation. How-
+ever, the precise nature of the role differentiation
+remains unclear.
+We find that bigger model size does not univer-
+sally imply better generation capacity. While larger
+models in Llama-3 family demonstrate improved
+reconstruction capacity, Pythia models show no
+such trend – larger models do not outperform
+smaller one. Whether this difference is connected
+to the architectural variations is an open question.
+Additionally, we do not observe any consistent
+relationship between the source of the natural text
+and the reconstruction ability of LLMs. Surpris-
+ingly, even for the texts generated by the LLM
+itself, the number of successfully reconstructed
+tokens is the same as for any other natural text.
+However, for the texts composed of random tokens,
+performance drops noticeably. This suggests that
+our reconstruction process does not fully leverage
+the language modeling capabilities of LLMs, and
+may instead mostly rely on low-level token pat-
+terns.
+Although the reconstructed sequences in the non-
+autoregressive setting are, on average, about two
+times shorter than those in the autoregressive case,
+the computational efficiency of single-forward ap-
+proach allows to achieve up to 279 ×greater gener-
+ation throughput.We also observe that proto-tokens encode more
+than just the target sequence. Embeddings of the
+"proto-tokens" corresponding to the different texts
+generated from the same context are significantly
+closer to each other than those from unrelated se-
+quences. This indicates that the learned represen-
+tations capture some potential contextual informa-
+tion.
+Finally, we discover that the embedding space in
+which proto-tokens exist, has very desirable struc-
+tural properties – proto-tokens corresponding to
+the same text, form localized and connected re-
+gions, enabling smooth transitions via quadratic
+interpolation. These findings suggest that it may
+be feasible to build an encoder capable of mapping
+into this space, opening the door to future work
+on non-autoregressive inference and representation
+learning.
+6 Limitations
+Although our paper demonstrates the surprising
+capability of LLMs to generate long sequences in
+a single forward pass from just two learned em-
+beddings, several important limitations should be
+acknowledged:
+1. Lack of immediate practical application: Most
+importantly, this work highlights an interesting
+quirk of LLMs and does not suggest any imme-
+diate practical implications or real-life usages for
+the method.
+2. Architectural dependence: The method
+demonstrates different behavior across model fami-
+lies, suggesting some architectural dependence. As
+a results, our method may potentially not general-
+ize to other model architectures.
+3. Limited domain coverage: While we evaluate
+four different text sources , the results may not gen-
+eralize beyond those explored in our experiments.
+References
+Stella Biderman, Hailey Schoelkopf, Quentin Gregory
+Anthony, Herbie Bradley, Kyle O’Brien, Eric Hal-
+lahan, Mohammad Aflah Khan, Shivanshu Purohit,
+USVSN Sai Prashanth, Edward Raff, and 1 others.
+2023. Pythia: A suite for analyzing large language
+models across training and scaling. In International
+Conference on Machine Learning , pages 2397–2430.
+PMLR.
+Timur Garipov, Pavel Izmailov, Dmitrii Podoprikhin,
+Dmitry P Vetrov, and Andrew G Wilson. 2018. Loss
+surfaces, mode connectivity, and fast ensembling of
+8dnns. Advances in neural information processing
+systems , 31.
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten,
+Alex Vaughan, and 1 others. 2024. The llama 3 herd
+of models. arXiv preprint arXiv:2407.21783 .
+Yuri Kuratov, Mikhail Arkhipov, Aydar Bulatov, and
+Mikhail Burtsev. 2025. Cramming 1568 tokens into
+a single vector and back again: Exploring the lim-
+its of embedding space capacity. arXiv preprint
+arXiv:2502.13063 .
+Brian Lester, Rami Al-Rfou, and Noah Constant. 2021.
+The power of scale for parameter-efficient prompt
+tuning. In Proceedings of the 2021 Conference on
+Empirical Methods in Natural Language Processing ,
+pages 3045–3059, Online and Punta Cana, Domini-
+can Republic. Association for Computational Lin-
+guistics.
+Xiang Lisa Li and Percy Liang. 2021. Prefix-tuning:
+Optimizing continuous prompts for generation. In
+Proceedings of the 59th Annual Meeting of the Asso-
+ciation for Computational Linguistics and the 11th
+International Joint Conference on Natural Language
+Processing (Volume 1: Long Papers) , pages 4582–
+4597, Online. Association for Computational Lin-
+guistics.
+Xiao Liu, Yanan Zheng, Zhengxiao Du, Ming Ding,
+Yujie Qian, Zhilin Yang, and Jie Tang. 2024. Gpt
+understands, too. AI Open , 5:208–215.
+Ilya Loshchilov and Frank Hutter. Decoupled weight
+decay regularization. In International Conference on
+Learning Representations .
+Jeffrey Pennington, Richard Socher, and Christopher
+Manning. 2014. GloVe: Global vectors for word
+representation. In Proceedings of the 2014 Confer-
+ence on Empirical Methods in Natural Language Pro-
+cessing (EMNLP) , pages 1532–1543, Doha, Qatar.
+Association for Computational Linguistics.
+Jack W Rae, Anna Potapenko, Siddhant M Jayakumar,
+and Timothy P Lillicrap. 2019. Compressive trans-
+formers for long-range sequence modelling. arXiv
+preprint arXiv:1911.05507 .
+Andrea Santilli, Silvio Severino, Emilian Postolache,
+Valentino Maiorca, Michele Mancusi, Riccardo
+Marin, and Emanuele Rodola. 2023. Accelerating
+transformer inference for translation via parallel de-
+coding. In Proceedings of the 61st Annual Meeting of
+the Association for Computational Linguistics (Vol-
+ume 1: Long Papers) , pages 12336–12355, Toronto,
+Canada. Association for Computational Linguistics.
+Heming Xia, Tao Ge, Peiyi Wang, Si-Qing Chen, Furu
+Wei, and Zhifang Sui. 2023. Speculative decod-
+ing: Exploiting speculative execution for accelerat-
+ing seq2seq generation. In Findings of the Associa-
+tion for Computational Linguistics: EMNLP 2023 ,pages 3909–3925, Singapore. Association for Com-
+putational Linguistics.
+Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song
+Han, and Mike Lewis. 2023. Efficient streaming
+language models with attention sinks. arXiv preprint
+arXiv:2309.17453 .
+9

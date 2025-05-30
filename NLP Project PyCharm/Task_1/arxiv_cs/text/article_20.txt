@@ -1,0 +1,1014 @@
+arXiv:2505.21409v1  [cs.CL]  27 May 2025RelationalFactQA: A Benchmark for Evaluating
+Tabular Fact Retrieval from Large Language Models
+Dario Satriani, Enzo Veltri, Donatello Santoro
+University of Basilicata, Potenza, Italy
+name.surname@unibas.itPaolo Papotti
+EURECOM, Biot, France
+paolo.papotti@eurecom.fr
+Abstract
+Factuality in Large Language Models (LLMs) is a persistent challenge. Current
+benchmarks often assess short factual answers, overlooking the critical ability
+to generate structured, multi-record tabular outputs from parametric knowledge.
+We demonstrate that this relational fact retrieval is substantially more difficult
+than isolated point-wise queries, even when individual facts are known to the
+model, exposing distinct failure modes sensitive to output dimensionality (e.g.,
+number of attributes or records). To systematically evaluate this under-explored
+capability, we introduce RelationalFactQA, a new benchmark featuring diverse
+natural language questions (paired with SQL) and gold-standard tabular answers,
+specifically designed to assess knowledge retrieval in a structured format. Rela-
+tionalFactQA enables analysis across varying query complexities, output sizes,
+and data characteristics. Our experiments reveal that even state-of-the-art LLMs
+struggle significantly, not exceeding 25% factual accuracy in generating relational
+outputs, with performance notably degrading as output dimensionality increases.
+These findings underscore critical limitations in current LLMs’ ability to synthesize
+structured factual knowledge and establish RelationalFactQA as a crucial resource
+for measuring future progress in LLM factuality.
+1 Introduction
+Large Language Models (LLMs) have emerged as powerful tools capable of understanding and
+generating human-like text. Despite these advances, factuality – the ability of LLMs to provide
+responses that are truthful and faithful to the real-world knowledge encountered during pre-training –
+remains a persistent challenge [ 20,33]. Effectively, a lack of factuality manifests as ‘hallucination’
+— the generation of plausible yet incorrect information — a pervasive issue that is still observed in
+frontier models [ 10,1]. This issue is particularly critical when LLMs are used in settings demanding
+high factual precision, such as medical information synthesis [ 44], financial reporting [ 13], scientific
+data analysis [48], or educational content generation [23].
+To evaluate and improve factual performance, the research community has developed a variety of
+benchmarks. However, existing benchmarks predominantly focus on single-value factuality, where
+the expected output is a short text span or a single scalar value (e.g., a date or named entity, or a
+numerical value) [ 49]. These tasks often emphasize reasoning complexity (e.g., multi-hop QA or
+ambiguous phrasing) [ 27,50,52] but overlook a fundamental aspect of factual competence: the
+ability of LLMs to generate long, coherent outputs directly from their internal parametric knowledge
+(i.e., the facts stored implicitly within the model’s parameters), without retrieving external documents.
+In this work, we focus on structured, multi-record, tabular outputs to investigate the factuality of
+LLMs in synthesizing long sequences of facts. This task is motivated by two main arguments.
+Preprint.Output Size Matters. First, experiments highlight that retrieving tabular data from parametric
+memory presents a significantly greater challenge than recalling isolated cell values, even when the
+underlying facts are known to the model. For instance, prompting an LLM to return two attributes (e.g.,
+name and state) for US counties yields near-perfect results. However, requesting additional attributes
+for the same set of counties (e.g., including county area) introduces factual errors in the results.
+County State Area (sq mi)
+Los Angeles California 4 751
+Cook Illinois 1 635
+Maricopa Arizona 8 500 ✗
+Q: What is the area of Maricopa county?
+A: 9 224 sq mi ✓Crucially, if we then query the LLM for these specific
+incorrectly reported values in isolation (e.g., “What is
+the area of Maricopa county?”), the model returns the
+correct value, demonstrating that the error lies in the
+generation process, not in the absence of the underlying
+factual knowledge. Results show that the accuracy of re-
+trieving a specific attribute (e.g., state) degrades linearly
+(from 1.0 to 0.2) as the total number of concurrently requested attributes increases from one to
+fifty, regardless of the target attribute’s position in the schema. These findings underscore that the
+structured, multi-attribute retrieval of factual data is not merely an extension of single-fact recall but
+a distinct capability with unique failure modes. Moreover, while it is hard to quantify precisely and
+with fine granularity the quality of the output in unstructured generation tasks [ 15], structured data
+allows punctual comparison at the single fact (cell) level.
+Increasing Importance of Tabular Output. Second, we argue that the structured factual retrieval
+capability of LLMs is both under-explored and essential. Several tasks require not just isolated facts
+about common world knowledge, but the generation of relational data: lists of entities, comparisons,
+and collections of items satisfying specific conditions [ 36,29,43,41]. This requirement has been
+reported in sociology [ 45], business use cases [ 53], medical diagnosis [ 4], and financial use cases [ 3].
+Obtaining tabular data is also increasingly relevant for user-facing applications, such as generating
+comparative tables of e-commerce products or structuring personalized trip itineraries [14, 47]. Yet,
+current benchmarks fall short in measuring this dimension. Existing datasets that do contain tabular
+data focus on its role as contextual input to the LLM, in the role of a corpus for question answering
+or fact checking [9, 35, 54, 2].
+We define the Relational Fact Retrieval task as follows: given a query, the LLM must generate a
+structured table (rows and columns) containing factual information drawn purely from its parametric
+memory, prohibiting the use of external tools like web browsers during generation. To address the
+need for evaluating this capability, we introduce RelationalFactQA , a new benchmark designed to
+test LLMs’ ability to return factual knowledge in relational (i.e., tabular) form in a closed-books
+setting. RelationalFactQA probes this capability across several dimensions. The benchmark contains
+triples with the natural language (NL) question, the corresponding SQL script, and the expected
+answer in tabular format. For the creation, we combine manually crafted questions (for linguistic
+variety) with systematically generated ones where the corresponding query complexity (e.g., specific
+SQL constructs) is controlled. Expected output tables spans from small ones, with few tuples and
+attributes, to large ones. These dimensions enable analysis of LLMs’ performance across different
+logical operations (e.g., aggregates, filtering), data types (e.g., numerical, categorical), and retrieval
+methods (prompts with NL questions vs SQL queries).
+Through extensive experimentation, we find that although larger models show improvement, the
+ability to produce correct structured answers remains limited — especially as the number of tuples
+and attributes increases or the query involves less common facts and numerical conditions. Moreover,
+we observe that even state-of-the-art models rarely exceed 25% of factual accuracy on our benchmark.
+To summarize, this paper makes the following contributions:
+•Task formulation. We introduce Relational Fact Retrieval — the closed-book generation of
+multi-tuple, multi-attribute tables directly from an LLM’s parametric memory — and clarify how it
+differs from single-fact recall and context-based table QA.
+•RelationalFactQA benchmark. We release a 696-question dataset covering nine knowledge
+domains, each triple-annotated with a natural-language query, its equivalent SQL statement, and a
+fully verified gold table (avg. 27 rows ×5 attrs).
+•Hybrid construction pipeline. Our semi-automatic workflow unifies (i) manual curation from
+three existing corpora and (ii) YAGO-driven synthetic tables, yielding controlled variation in
+schema size, output size, and query complexity.
+2•Comprehensive empirical study. Nine LLMs (7B – 235B params) are benchmarked under three
+retrieval techniques (NL, SQL, Chain-of-Thought). Despite parameter scaling, no model exceeds
+0.25 in tuple accuracy; performance degrades linearly with requested attributes. Code, prompts,
+and data will be open-sourced to drive future progress.
+Our findings lay the groundwork for future research on factuality in LLMs, and position Relational-
+FactQA as a valuable resource for tracking progress on this critical capability.
+Table 1: Closed-book QA datasets characteristics1. Prior datasets have outputs with approximately
+one tuple and one attribute. In contrast, RelationalFactQA demands complex outputs, with an average
+of 27 tuples and 5.3 attributes per answer.
+Total # Avg # Avg # Avg #
+Dataset Questions Output Tuples Output Attributes Output Tokens
+WikiSQL [54] 56,355 1.08 1.00 3.22
+WikiTableQuestions [35] 14,149 1.08 1.00 2.80
+Open-WikiTable [24] 53,819 1.08 1.00 3.23
+TAT-QA [55] 13,215 1.19 n.a. 6.63
+TruthfulQA [28] 790 1.00 n.a. 10.49
+TriviaQA (unfiltered) [22] 87,622 1.00 n.a. 6.39
+NQ-Open [25, 26] 87,925 1.22 n.a. 4.30
+SimpleQA [49] 4,326 1.00 n.a. 4.20
+RFQA 696 26.942 5.32 357.09
+2 Related Work
+The evaluation of factual accuracy in LLMs has lead to the development of diverse benchmarks [ 8].
+However, existing work evaluates an LLM’s ability to return short-span answers, rather than complex,
+structured relational data. As motivated in Section 1, the ability to generate such larger, structured
+outputs presents distinct challenges beyond single-fact recall, involving sustained coherence and
+factual consistency across multiple data points [ 30,18]. Table 1 provides a comparative overview of
+output characteristics across several closed-book QA datasets and RelationalFactQA.
+Factuality Evaluation Benchmarks. A significant body of work focuses on evaluating the fac-
+tual correctness of LLM generations. Benchmarks such as TriviaQA, NQ-Open, and TruthfulQA
+assess LLMs’ ability to answer questions with short, often single-entity or single-value, factual
+statements [ 49]. While these are crucial for gauging general world knowledge, they do not probe the
+model’s capacity to synthesize answers as structured relations. As evident in Table 1, the expected
+outputs in these datasets typically consist of a single tuple and a single attribute. Other efforts like
+FactScore or HaluEval variants aim to quantify hallucination rates [ 20], but again, within the context
+of single-statement claims rather than structured relational outputs. Despite these varied evaluation
+efforts, the fundamental challenge of LLM hallucination persists as a critical concern [10, 1].
+Table Question Answering and Reasoning. Several benchmarks like WikiSQL [ 54], WikiTable-
+Questions [ 35], and TabFact [ 9] involve tabular data. However, these benchmarks provide the relevant
+table(s) as input to the LLM, tasking it with understanding, reasoning over, or extracting information
+from the provided context [ 51]. In contrast, RelationalFactQA operates in a closed-book setting,
+where the LLM retrieves the tabular answer from its parametric knowledge. This shifts the evaluation
+from context-based reasoning to parametric relational knowledge retrieval.
+Text-to-SQL. While RelationalFactQA uses SQL as one input modality to query the LLM’s
+knowledge, our focus is not on the correctness of SQL generation itself, which is the primary goal
+of Text-to-SQL benchmarks [ 52,27,31,19,42]. Instead, we evaluate the factual accuracy and
+completeness of the tabular data returned by the LLM in response to a query (be it in natural language
+or SQL). We manually filter examples from two Text2SQL datasets and adapt them to the Relational
+Fact Retrieval task in building our benchmark.
+1Obtained from the train set for: WikiSQL, WikiTableQuestions, Open-WikiTable, TAT-QA and NQ-Open.
+3Knowledge Probes for LLMs. Prior research has explored using “knowledge probes” (e.g.,
+LAMA [ 37]) to assess what factual information is stored in an LLM’s parameters, typically by
+prompting models to fill in missing tokens in cloze-style statements (e.g., “Paris is the capital of
+[MASK]”). These probes generally target single, atomic facts [ 38]. RelationalFactQA extends this
+concept from single-fact elicitation to probing for multi-tuple, multi-attribute relational structures.
+In summary, while existing benchmarks address various facets of LLM factuality, RelationalFactQA
+fills a critical gap by specifically evaluating LLMs’ ability to act as “parametric databases,” retrieving
+factual information - in contrast with plausible data [5] - in a tabular format.
+3 The Benchmark
+Task Definition and Problem Formulation. We define the task of Relational Fact Retrieval as the
+generation of structured, multi-record, multi-attribute tabular data by an LLM in response to a query,
+relying exclusively on the model’s internal parametric knowledge.
+Formally, the problem is formulated as follows:
+•Input: The input is a query q, which can be expressed either in natural language (NL) or as a
+Structured Query Language (SQL) statement. The query qspecifies the factual information to
+retrieve and the desired output relational structure.
+•Output: The desired output is a table ˆT. This table is characterized by a schema S=
+{A1, A2, . . . , A k}, representing kattributes (columns), and a set of ntuples (rows), where n≥0.
+Each tuple ti∈ˆTis an ordered list of kcell values (vi1, vi2, . . . , v ik), corresponding to the
+attributes in S.
+LLMs are instructed to enforce a closed-book evaluation setting and, where applicable, technically
+restricted, e.g., by disabling access to external tools, web browsing functionalities, or code execution
+environments via API parameters. The closed-book setting is intentional: in retrieval-augmented
+generation (RAG) or tool-assisted workflows, the factual quality of outputs depends not only on
+the model’s internal knowledge, but also on external factors—such as retrieval accuracy, context
+formatting, or prompt design. These confounding variables make it difficult to isolate the LLM’s
+intrinsic factual competence. While retrieval-based methods may improve factual coverage, we
+hypothesize the challenges in closed-book persist also in open-book scenarios
+Dataset Construction. To build the RelationalFactQA dataset, we combine manual curation and
+semi-automatic generation.
+In the manual pipeline, we consider 44 datasets from three existing corpora of examples (Spider [ 52],
+Bird [ 27], and Galois [ 41]) that contain natural language (NL) and SQL query pairs along with their
+underlying structured databases. We manually review each dataset in two steps. First, we identify the
+databases with schema and entities that are present on Wikipedia - this is important to ensure that the
+examples are within the knowledge scope of an LLM2. Second, for each database, we retain only the
+NL queries that reference factual, world-knowledge content that is temporally stable, deliberately
+excluding subjective or dynamic information such as user reviews or prices. The corresponding SQL
+queries and their tabular outputs are finally included in the benchmark.
+For the semi-automatic pipeline, we adopt a two-step process: first, we generate tables to serve as
+query targets; then, we construct corresponding NL question–SQL query pairs. To ensure that the
+table schemas and entities are likely to be known by LLMs, we extract data from the YAGO 4.5
+knowledge base [ 46]–a structured resource derived from Wikidata. YAGO is organized around RDF
+triplets; each has a subject connected to an object through a predicate, e.g., “Trump, president, USA”
+or “NYC, population, 8.2M”. To obtain tables, we follow the procedure of selecting seven Yago
+types (high level classes, such as City and Country) and reorganizing the triples to collect multiple
+attributes for those (such as size in squared Km) [7].
+Using an automatic generator tool, Qatch [ 34], we then create the corresponding NL-SQL pairs for
+these YAGO-derived tables. To ensure controlled complexity for this segment of the benchmark, the
+Qatch generation strategy deliberately focuses on SELECT queries. These queries are designed to
+2While entities have different popularity online, we experimentally verified that this dimension does not
+impact our experiments.
+4systematically vary in two main dimensions: the number of projected attributes (columns) and the
+complexity of selection, achieved by altering the number and nature of predicates in the WHERE clause.
+Therefore, the Qatch-generated queries predominantly feature projection and filtering operations,
+allowing for a targeted assessment of these core capabilities.
+While the full RelationalFactQA benchmark incorporates a wider range of SQL operators, including
+JOIN andAGGREGATE functions, these more complex operators are sourced from the manually
+curated datasets (Spider, Bird, Galois). These human-authored queries contribute crucial linguistic
+and structural diversity to the benchmark. The rationale for the focused Qatch generation approach,
+emphasizing projection and selection, is that the primary challenge lies in the LLM’s ability to
+accurately retrieve the fundamental base data; if this initial extraction is flawed, any subsequent, more
+complex operations (such as the joins or aggregations found in other parts of the benchmark) would
+inherently build upon incorrect information. As the tool occasionally produces syntactically correct
+but semantically trivial or invalid queries, we manually remove such non-meaningful examples.
+Finally, we perform targeted preprocessing steps to enhance consistency in the ground truth data. For
+all date attributes, we extract the year component to ensure that any condition involving dates can be
+treated as numerical comparisons, rather than requiring models to process full date-type values. Also,
+we manually removed noisy tuples, such as instances where organizations were listed as Nobel Prize
+laureates instead of individuals. These actions ensure comparable outputs across samples, focusing
+the evaluation on the fact retrieval capabilities.
+(a) Source Distribution
+11%10%
+71%8%BIRD
+GALOIS
+QATCH
+SPIDER(b) Query Complexity Distribution
+Type # Questions
+SELECT without WHERE 10
+WHERE numerical condition 148
+WHERE categorical condition 294
+WHERE mixed condition 294
+AGGREGATIVE 49
+JOIN 67
+DISTINCT 34
+GROUP BY 13
+LIMIT 11
+ORDER BY 17
+Figure 1: RFQA dataset. Source distribution and distribution of query complexity (SQL operators).
+Dataset Statistics. The RFQA benchmark comprises 696 question, query, answer triples. As reported
+in Figure 1(a), the majority of questions (71%) are from the Qatch pipeline, ensuring controlled
+complexity and coverage, while contributions from Bird (11%), Galois (10%), and Spider (8%)
+provide diverse, human-authored queries. This hybrid approach allows RFQA to cover a range of
+factual domains, including common entities typically found within an LLM’s pre-training corpus.
+A key characteristic of RFQA is the size of its target outputs, designed to test an LLM’s ability to
+generate structured relational data. As detailed in Table 1, ground truth answers in RFQA contain
+an average of 357 tokens , specifically 26.94 tuples (rows) and 5.32 attributes (columns), for an
+average of 135.50 cells per table. The output dimensions exhibit considerable variability: the number
+of tuples ranges from a minimum of 1 to a maximum of 904, while attributes span from 1 to 9. This
+contrasts sharply with prior QA benchmarks, which typically expect single-tuple, single-attribute
+answers. The attribute types within RFQA tables also vary; on average, each target table schema
+consists of approximately 1.06 numerical attributes, 3.16 categorical attributes, and 4.26 attributes
+containing mixed (numerical and string) data types.
+The complexity of the retrieval task is also defined by the SQL constructs associated with each
+question. Figure 1(b) presents the distribution of SQL operators within RFQA. The distribution
+reflects our focus on evaluating the retrieval of data under diverse projection and filtering requirements.
+4 Experimental Settings
+Retrieval Methods. We evaluate LLMs on RFQA using three iterative methods:
+•NL. The LLM is directly prompted with a natural language query q, requesting the model to return
+tabular results based on its internal knowledge.
+5•SQL . Similar to the NL approach, but the query qis expressed in SQL. The model is expected to
+interpret the SQL semantics and return the corresponding tabular data.
+•COT. Given an SQL query q, a Chain-of-Thought approach [ 41] decomposes the query execution
+into two steps: (1) the LLM is prompted to retrieve the relevant base data (i.e., a broader result set),
+and (2) relational algebra operations are applied in memory on the intermediate output to produce
+the final filtered result. This method aims to improve retrieval accuracy by breaking queries into
+simpler tasks.
+In all methods, the LLM is prompted with the query qand the corresponding output schema s,
+expressed in JSON Schema format.
+Output Processing. The prompt includes instructions for the model to return results in valid JSON.
+If no answer is found, the model is instructed to return an empty JSON object. Each strategy is
+applied iteratively. After the initial prompt, if the model returns a non-empty result, it is prompted
+again to return additional data until the model returns an empty JSON. Prompt templates used in the
+experiments are detailed in the Appendix.
+Since LLMs do not always produce outputs in valid JSON format, we apply heuristics to extract and
+recover structured responses. Our approach begins by identifying all text enclosed between “ {” and
+“}” or “[” and “]”. If this content forms a valid JSON object, we parse it directly and return it in a
+result. If the content is invalid, we re-prompt for correct formatting or attempt to repair common
+issues like syntax errors or truncation. If recovery fails, the response is treated as invalid. Further
+details on recovery strategies are in the Appendix.
+Models. We use open-source and proprietary LLMs. To enhance reproducibility and obtain determin-
+istic results, we set the temperature to 0.0. For open-source models, we adopt the following models
+hosted on Together.AI: Mistral-7B [ 21], Qwen2.5 and Qwen3 [ 39], LLama 3 (covering versions 3.1
+and 3.3) [ 32], Gemma 2 [ 16], DeepSeek-LLama3 (as a base for the reasoning model DeepSeek R1
+Distill LLama) [12]. As proprietary models, we use GPT-4.1 and GPT 4.1 mini [33].
+Metrics. To evaluate the factuality of each LLM we measure the quality of the produced responses.
+Each example in the RFQA dataset consists of a query q(either NL or SQL) and the corresponding
+expected set of tuples texp(the ground-truth). To evaluate an LLM, we execute the query qon it and
+collect the resulting set of tuples tact. To assess the quality of the result, we compare tuple sets texp
+andtact. We adopt two metrics commonly used to benchmark queries executed by LLMs [34]:
+•F1: We compute the F1 score over the set of cells in tactwith respect to those in texp. This metric
+evaluates performance at the cell level, disregarding tuple structure and focusing purely on the
+correctness of returned values.
+•TS(Tuple Similarity): We measure the fraction of tuples in texpthat also appear in tact, comparing
+tuples holistically. A Tuple Similarity score of 1.0 indicates that texpandtactshare the same
+schema, cardinality, and cell values. This metric is stricter than F1, as it requires correct grouping
+of values within tuples, not just correct individual values.
+To account for superficial differences in formatting (e.g., “1K” vs. “1000”), we normalize all cell
+values in both tactandtexpbefore evaluation. This step mitigates false negatives caused by represen-
+tational variations. The normalization process involves the following steps: (i) Replacing accented
+characters with their unaccented equivalents (e.g., “ ´e”→“e”); (ii) Converting all characters to lower-
+case; (iii) Converting shorthand numeric notations like “1K” or “1M” and into the corresponding
+numeric values (e.g., “1K” →1000); (iv) Standardizing numeric formats (e.g., converting “1.000,5”
+and “1,000.5” into a consistent representation).
+Moreover, since LLMs may produce answers that are close, but not identical, to the ground truth (e.g.,
+“Bill Clinton” vs. “Bill J. Clinton”), we incorporate approximate matching. Specifically, we use Edit
+Distance [ 40] with a threshold of 10% relative to the length of the expected string. For numerical
+values, we apply a tolerance of ±10% relative to the expected number.
+To compare two tuples taandte, we evaluate each pair of corresponding cells based on their
+shared attribute, using the same comparison strategy as defined previously for the cells. While our
+current implementation uses simple, efficient matching rules, more advanced approaches such as
+entity resolution [ 11,6] or tuple-level instance comparison [ 17] could be applied for more nuanced
+matching, but they require manual user configuration and thus cannot be easily used as a metric.
+65 Results
+We organize our evaluation around three main research questions.
+1.Factuality . To what extent can LLMs generate factual tables based on their internal knowledge?
+2.Extraction Techniques . Are LLMs more effective at generating tabular responses from SQL
+queries compared to NL questions? Does CoT help in getting better results?
+3.Query complexity . Do LLMs’ performance depend on the schema and the query complexity?
+Table 2: Benchmark Results. F1 and Tuple Similarity (TS) measured for all LLMs in our evaluation.
+A VG is the average between F1 and TS. LLMs ordered by increasing size in terms of parameters.
+Mistral
+7BQWEN
+2.5-7BLLama
+3.1-8BGPT
+4.1 miniGemma
+2-9BLLama
+3.3-70BDeepSeek
+70BGPT
+4.1QWEN
+3-235B
+NLF1 0.44 0.487 0.481 0.537 0.557 0.609 0.606 0.654 0.613
+TS 0.076 0.085 0.155 0.115 0.107 0.149 0.15 0.247 0.225
+A VG 0.258 0.286 0.318 0.326 0.332 0.379 0.378 0.45 0.419
+SQLF1 0.346 0.459 0.332 0.417 0.571 0.62 0.6 0.388 0.595
+TS 0.042 0.079 0.11 0.055 0.123 0.155 0.142 0.096 0.185
+A VG 0.194 0.269 0.221 0.236 0.347 0.387 0.371 0.302 0.39
+CoTF1 0.477 0.503 0.585 0.638 0.594 0.677 0.646 0.693 0.651
+TS 0.09 0.091 0.127 0.12 0.106 0.157 0.168 0.174 0.228
+A VG 0.284 0.297 0.356 0.379 0.35 0.417 0.407 0.433 0.439
+Exp-1. Overall Performance We evaluate all LLMs in our benchmark using the RFQA dataset and
+report their performance using the two quality metrics: F1andTS. To provide a single, comparable
+measure of factual accuracy across models, we also compute the average of F1 and TS.
+The results in Table 2 reveal that increasing the number of model parameters generally leads to
+improved quality performance (and thus factuality) across all retrieval methods ( NL,SQL , and COT).
+However, the task remains inherently difficult. While larger models, such as Qwen 3, achieve F1
+scores above 0.6, this improvement does not translate to accurate tuple-level results. The best TS
+score is only 0.247, obtained by GPT 4.1, highlighting that even frontier models often return wrong
+values in output tuples.
+This experiment also shows that querying using NLhas an edge over SQL in all models, while the
+COT approach leads to improved retrieval with all LLMs except GTP 4.1.
+Takeaways for questions (1) and (2) : LLMs still struggle to consistently retrieve structured factual
+knowledge as complete output tuples. NL outperfoms slightly SQL as a retrieval method, while CoT
+provides benefits in most settings.
+Exp-2. Performance by Attribute Type. To investigate the third research question, we exploit the
+metadata used to annotate each query qin RFQA. In this experiment, we analyze model performance
+based on the type of attributes in the query output. We divide the queries into two categories: those
+that return only numerical values and those that return only categorical values. We use the average of
+the F1 and TS scores as the metric.
+Results in Table 3 show that extracting categorical values is generally easier for small and medium
+LLMs than retrieving numerical ones. However, larger models perform better on numerical queries
+than on categorical ones when using SQL and CoT.
+Exp-3. Performance by Output Size. We focus on the top-3 performing LLMs and analyze how
+their performance varies with the size of the expected output. We group the results according to:
+a)the number of attributes requested in the query, and b)the overall output size, measured as the
+number of expected cells (#rows ×#attributes). We use the TSmetric, which accounts for both the
+structure and completeness of the returned data.
+Figure 2 summarizes our findings. On the left side, we show how quality decreases as the number
+of requested attributes increases, indicating that LLMs struggle more when asked to retrieve wider
+tables. On the right side, we plot the TSscore against the total number of expected cells. The trend
+7Table 3: Quality measured as the A VG between F1 and TS w.r.t. type of output attributes.
+Mistral
+7BQWEN
+2.5-7BLLama
+3.1-8BGPT
+4.1 miniGemma
+2-9BLLama
+3.3-70BDeepSeek
+70BGPT
+4.1QWEN
+3-235B
+NLNum 0.120 0.170 0.134 0.167 0.225 0.225 0.215 0.511 0.393
+Cat 0.211 0.236 0.301 0.339 0.301 0.391 0.370 0.515 0.397
+Diff % +76 % +39 % +125 % +103 % +34 % +74 % +72 % +1 % +1 %
+SQLNum 0.065 0.178 0.164 0.250 0.255 0.267 0.276 0.302 0.410
+Cat 0.107 0.212 0.249 0.182 0.297 0.416 0.397 0.262 0.345
+Diff % +65 % +19 % +52 % -27 % +16 % +56 % +44 % -15 % -16 %
+CoTNum 0.263 0.239 0.222 0.333 0.340 0.331 0.402 0.530 0.439
+Cat 0.254 0.262 0.307 0.395 0.293 0.432 0.398 0.464 0.383
+Diff % -3 % +10 % +38 % +19 % -14 % +31 % -1 % -14 % -13 %
+1 2 3 4 5 6 7 8 900.20.40.60.8
+# Attrs.NL-LLama 3.3 SQL-LLama 3.3 CoT-LLama 3.3
+NL-GPT-4.1 SQL-GPT-4.1 CoT-GPT-4.1
+NL-QWEN 3 SQL-QWEN 3 CoT-QWEN 3
+0 50 100 150 200 250 300 350 400 450 50000.20.4
+# CellsNL-LLama 3.3 SQL-LLama 3.3 CoT-LLama 3.3
+NL-GPT-4.1 SQL-GPT-4.1 Cot-GPT-4.1
+NL-QWEN 3 SQL-QWEN 3 CoT-QWEN 3
+Figure 2: TS results for LLama 3.3, GPT-4.1 and QWEN 3, with all retrieval techniques, w.r.t. the
+expected output measure as the number of attributes (left) and cells (right).
+remains consistent: as the number of rows and columns grows, the model’s ability to return accurate,
+complete tabular data declines.
+Table 4: Quality measured as the A VG between F1 and TS w.r.t. query complexity.
+LLama 3.3-70B GPT 4.1 QWEN 3-235B
+Type NL SQL CoT NL SQL CoT NL SQL CoT
+SELECT without WHERE 0.599 0.646 0.595 0.845 0.399 0.995 0.787 0.582 0.694
+WHERE numerical condition 0.365 0.36 0.387 0.39 0.197 0.382 0.42 0.384 0.444
+WHERE categorical condition 0.383 0.393 0.437 0.466 0.252 0.453 0.414 0.397 0.444
+WHERE mixed condition 0.376 0.384 0.414 0.444 0.24 0.424 0.414 0.387 0.435
+AGGREGATIVE 0.237 0.26 0.254 0.447 0.229 0.353 0.366 0.364 0.259
+JOIN 0.143 0.184 0.157 0.461 0.126 0.091 0.356 0.222 0.139
+DISTINCT 0.344 0.429 0.354 0.536 0.172 0.319 0.446 0.247 0.342
+GROUP BY 0.234 0.228 0.461 0.325 0.166 0.26 0.181 0.266 0.239
+LIMIT 0.108 0.189 0.517 0.417 0.399 0.355 0.146 0.162 0.206
+ORDER BY 0.174 0.206 0.424 0.441 0.349 0.437 0.222 0.179 0.376
+Exp-4. Query Complexity. Table 4 provides a breakdown of performance w.r.t. the query complexity.
+We observe that as query complexity increases, the quality of the generated responses tends to
+decrease. Simple queries such as SELECT without WHERE consistently achieve the highest scores,
+while complex constructs like JOIN ,AGGREGATE , or multi-condition WHERE clauses report
+substantially lower results across all models and retrieval methods. In particular, the JOIN operator
+represents a notable challenge. Scores are low for all models, especially in the COTsetting as it does
+not yet support joins over multiple tables. Despite its limitations, the COTstrategy demonstrates
+meaningful gains for several complex operations. This highlights the benefit of breaking down query
+execution into intermediate reasoning steps. Finally, certain operators such as LIMIT andORDER
+BYappear systematically difficult for all models and prompting strategies. These constructs require
+precise handling of position and ordering in the output tuples — capabilities that autoregressive
+models struggle to maintain as the result set grows.
+Takeaway for question (3) : LLM performance is significantly influenced by the structure of the
+target schema. Both attribute type and output size are key factors in determining LLM effectiveness
+for tabular factual retrieval. Query complexity has also a significant impact on LLM performance.
+8Results Discussion. The challenges observed in generating extensive and accurate tabular data from
+parametric memory resonate with known LLMs’ limitations in long-sequence generation. While
+issues such as maintaining thematic coherence [ 30], mitigating factual drift [ 20], and managing error
+propagation in autoregressive systems [ 18] are recognized in tasks involving lengthy free-form text,
+the generation of tabular outputs magnifies these problems. Specifically, the dual axes of table “size”
+- the number of rows (tuples) and the number of columns (attributes) - impose distinct pressures on
+the model’s generative capabilities.
+Our findings suggest that the demand for concurrent retrieval and precise alignment of numerous facts
+strains the model’s effective “working memory” or its ability to maintain sustained attention to all
+constraints of the query [ 30]. The fact that LLMs often correctly retrieve individual facts in point-wise
+queries (e.g., the area of a specific county that is reported incorrectly in a larger table) underscores
+that the bottleneck is frequently not an absence of the underlying factual knowledge. Instead, the
+difficulty lies in the process of composing the individual pieces of information into a larger relational
+structure. This distinction points towards limitations in the architectural or learned capabilities for
+synthesis from parameters, rather than simply gaps in memorized knowledge. The dense factual
+requirement of tabular data, where each cell represents a correct assertion, and the inflexible nature
+of its structural integrity, make it a valuable testbed for these aspects of LLM performance, revealing
+failure modes that are less explicitly quantifiable in unstructured generation tasks [15].
+6 Conclusions
+RelationalFactQA fills a gap in the factuality landscape by probing LLMs’ ability to act as parametric
+databases : given only a natural-language question or SQL query, a model must assemble multi-row,
+multi-attribute tables directly from its internal weights. Our experiments — with nine LLMs and
+three querying modalities — show three consistent trends:
+•Scale helps, but does not solve the problem. Even the strongest systems score below 0.25 in tuple
+accuracy, with quality falling sharply as the requested table widens or lengthens.
+•Structure amplifies failure modes. Errors that remain latent in point-wise QA become evident
+when multiple cells must be emitted coherently.
+•Prompting matters. Chain-of-Thought decomposition improves cell-level recall, yet fails to repair
+tuple mis-alignment and JOIN reasoning.
+These results underscore that current LLMs retain abundant factual fragments, but lack the mech-
+anisms to reliably compose them into relational form. We release the data, evaluation suite, and
+prompting templates to support research on (i) architecture changes that improve structured recall,
+(ii) inference-time strategies for tuple alignment, and (iii) multilingual, temporal, and bias-aware
+extensions of the task. We hope RelationalFactQA becomes a key resource for measuring progress
+toward LLMs that are not just eloquent, but also factual.
+Table 5: Key limitations of R ELATIONAL FACTQA.
+Aspect Current scope Implication
+Temporal cover-
+ageBenchmark built from static snapshots; fast-
+changing facts intentionally excluded.Cannot assess models’ ability to reason over time-
+dependent knowledge (e.g., “current GDP”, “lat-
+est mayor”).
+Linguistic &
+cultural breadthTables and questions sourced almost ex-
+clusively from English-language, Western-
+centric resources.Reported performance may not generalize to other
+languages or under-represented knowledge do-
+mains, introducing geographic-cultural bias.
+Evaluation gran-
+ularityCell-level scoring uses exact / approximate
+string and numeric matching with basic nor-
+malization.Semantically correct but lexically different an-
+swers (synonyms, alternative units, name variants)
+can be penalized, under-estimating true capability.
+Limitations. Table 5 summarizes the principal limitations of the current benchmark and outlines
+how each one affects our results.
+9References
+[1]All About AI. Ai hallucination report 2025, 2025. URL https://www.allaboutai.com/
+resources/ai-statistics/ai-hallucinations/ . (pp. 1 and 3)
+[2]R. Aly, Z. Guo, M. S. Schlichtkrull, J. Thorne, A. Vlachos, C. Christodoulopoulos, O. Cocarascu,
+and G. Li. FEVEROUS: Fact extraction and VERification over unstructured and structured
+information. In Thirty-fifth Conference on Neural Information Processing Systems Datasets
+and Benchmarks Track (Round 2) , 2021. (p. 2)
+[3]D. Balsiger, H.-R. Dimmler, S. Egger-Horstmann, and T. Hanne. Assessing large language
+models used for extracting table information from annual financial reports. Computers , 13(10),
+2024. ISSN 2073-431X. doi: 10.3390/computers13100257. URL https://www.mdpi.com/
+2073-431X/13/10/257 . (p. 2)
+[4]A. Bisercic, M. Nikolic, M. van der Schaar, B. Delibasic, P. Lio, and A. Petrovic. Interpretable
+medical diagnostics with structured data extraction by large language models, 2023. URL
+https://arxiv.org/abs/2306.05052 . (p. 2)
+[5]V . Borisov, K. Sessler, T. Leemann, M. Pawelczyk, and G. Kasneci. Language models are
+realistic tabular data generators. In The Eleventh International Conference on Learning Repre-
+sentations , 2023. URL https://openreview.net/forum?id=cEygmQNOeI . (p. 4)
+[6]M. Buoncristiano, G. Mecca, D. Santoro, and E. Veltri. Detective gadget: Generic iterative
+entity resolution over dirty data. Data , 2024. doi: 10.3390/data9120139. (p. 6)
+[7] R. Cappuzzo, G. Varoquaux, A. Coelho, and P. Papotti. Retrieve, merge, predict: Augmenting
+tables with data lakes. CoRR , abs/2402.06282, 2024. doi: 10.48550/ARXIV .2402.06282. URL
+https://doi.org/10.48550/arXiv.2402.06282 . (p. 4)
+[8]Y . Chang, X. Wang, J. Wang, Y . Wu, L. Yang, K. Zhu, H. Chen, X. Yi, C. Wang, Y . Wang,
+W. Ye, Y . Zhang, Y . Chang, P. S. Yu, Q. Yang, and X. Xie. A survey on evaluation of large
+language models. ACM Trans. Intell. Syst. Technol. , 15(3), mar 2024. ISSN 2157-6904. doi:
+10.1145/3641289. URL https://doi.org/10.1145/3641289 . (p. 3)
+[9]W. Chen, A. Lilley, J. Gu, Z. Qian, V . Zhong, K. Gimpel, and K. Toutanova. Tabfact: A
+large-scale dataset for table-based fact verification. In International Conference on Learning
+Representations (ICLR) , 2020. (pp. 2 and 3)
+[10] N. Chowdhury, D. Johnson, V . Huang, J. Steinhardt, and S. Schwettmann. In-
+vestigating truthfulness in a pre-release o3 model. https://transluce.org/
+investigating-o3-truthfulness , April 2025. (pp. 1 and 3)
+[11] V . Christophides, V . Efthymiou, T. Palpanas, G. Papadakis, and K. Stefanidis. An overview of
+end-to-end entity resolution for big data. ACM Comput. Surv. , 53(6):127:1–127:42, 2021. (p. 6)
+[12] DeepSeek AI. Deepseek llm: Scaling open-source language models with longtermism. arXiv
+preprint arXiv:2401.02954 , 2024. doi: 10.48550/ARXIV .2401.02954. URL https://doi.
+org/10.48550/arXiv.2401.02954 . (p. 6)
+[13] M. M. Dong, T. C. Stratopoulos, and V . X. Wang. A scoping review of chatgpt research in
+accounting and finance. International Journal of Accounting Information Systems , 55:100715,
+2024. ISSN 1467-0895. doi: https://doi.org/10.1016/j.accinf.2024.100715. URL https:
+//www.sciencedirect.com/science/article/pii/S1467089524000484 . (p. 1)
+[14] A. Elnashar, J. White, and D. C. Schmidt. Enhancing structured data generation with
+gpt-4o evaluating prompt efficiency across prompt styles. Frontiers in Artificial Intelli-
+gence , V olume 8 - 2025, 2025. ISSN 2624-8212. doi: 10.3389/frai.2025.1558938. URL
+https://www.frontiersin.org/journals/artificial-intelligence/articles/
+10.3389/frai.2025.1558938 . (p. 2)
+[15] M. Gao, X. Hu, X. Yin, J. Ruan, X. Pu, and X. Wan. Llm-based nlg evaluation: Current
+status and challenges. Computational Linguistics , pages 1–28, 04 2025. ISSN 0891-2017. doi:
+10.1162/coli a00561. URL https://doi.org/10.1162/coli_a_00561 . (pp. 2 and 9)
+[16] Gemma Team, Google. Gemma: Open models based on gemini research and technology.
+arXiv preprint arXiv:2403.08295 , 2024. doi: 10.48550/ARXIV .2403.08295. URL https:
+//doi.org/10.48550/arXiv.2403.08295 . (p. 6)
+10[17] B. Glavic, G. Mecca, R. J. Miller, P. Papotti, D. Santoro, and E. Veltri. Similarity measures for
+incomplete database instances. In L. Tanca, Q. Luo, G. Polese, L. Caruccio, X. Oriol, and D. Fir-
+mani, editors, Proceedings 27th International Conference on Extending Database Technology,
+EDBT 2024, Paestum, Italy, March 25 - March 28 , pages 461–473. OpenProceedings.org, 2024.
+doi: 10.48786/EDBT.2024.40. URL https://doi.org/10.48786/edbt.2024.40 . (p. 6)
+[18] A. Holtzman, J. Buys, L. Du, M. Forbes, and Y . Choi. The curious case of neural text
+degeneration. In International Conference on Learning Representations , 2020. URL https:
+//openreview.net/forum?id=rygGQyrFvH . (pp. 3 and 9)
+[19] Z. Hong, Z. Yuan, Q. Zhang, H. Chen, J. Dong, F. Huang, and X. Huang. Next-generation
+database interfaces: A survey of llm-based text-to-sql. arXiv preprint arXiv:2406.08426 , 2024.
+(p. 3)
+[20] Z. Ji, N. Lee, R. Frieske, T. Yu, D. Su, Y . Xu, E. Ishii, Y . J. Bang, A. Madotto, and P. Fung.
+Survey of hallucination in natural language generation. ACM Comput. Surv. , 55(12), Mar. 2023.
+ISSN 0360-0300. doi: 10.1145/3571730. URL https://doi.org/10.1145/3571730 . (pp.
+1, 3, and 9)
+[21] A. Q. Jiang, A. Sablayrolles, A. Mensch, C. Bamford, D. S. Chaplot, D. d. l. Casas, F. Bressand,
+G. Lengyel, G. Lample, L. Saulnier, et al. Mistral 7b. arXiv preprint arXiv:2310.06825 ,
+2023. doi: 10.48550/ARXIV .2310.06825. URL https://doi.org/10.48550/arXiv.2310.
+06825 . (p. 6)
+[22] M. Joshi, E. Choi, D. S. Weld, and L. Zettlemoyer. Triviaqa: A large scale distantly supervised
+challenge dataset for reading comprehension, 2017. URL https://arxiv.org/abs/1705.
+03551 . (p. 3)
+[23] E. Kasneci, K. Seßler, S. Kuchemann, M. Bannert, D. Dementieva, F. Fischer, U. Gasser,
+G. Groh, G. Hahnel, M. C. Hett, N.-E. Hett, N. K ¨arger, J. Liu, X. Liu, M. Nerdel, J. Nistor,
+C. Scheid, R. Stallasch, S. Stober, and G. Kasneci. ChatGPT for good? On opportunities and
+challenges of large language models for education. Learning and Individual Differences , 103:
+102274, 2023. This article discusses both the potential benefits and the significant challenges,
+including accuracy and reliability, of using LLMs like ChatGPT in education. (p. 1)
+[24] S. Kweon, Y . Kwon, S. Cho, Y . Jo, and E. Choi. Open-wikitable: Dataset for open domain
+question answering with complex reasoning over table, 2023. URL https://arxiv.org/
+abs/2305.07288 . (p. 3)
+[25] T. Kwiatkowski, J. Palomaki, O. Redfield, M. Collins, A. Parikh, C. Alberti, D. Epstein,
+I. Polosukhin, M. Kelcey, J. Devlin, K. Lee, K. N. Toutanova, L. Jones, M.-W. Chang, A. Dai,
+J. Uszkoreit, Q. Le, and S. Petrov. Natural questions: a benchmark for question answering
+research. Transactions of the Association of Computational Linguistics , 2019. (p. 3)
+[26] K. Lee, M.-W. Chang, and K. Toutanova. Latent retrieval for weakly supervised open domain
+question answering. In A. Korhonen, D. Traum, and L. M `arquez, editors, Proceedings of the 57th
+Annual Meeting of the Association for Computational Linguistics , pages 6086–6096, Florence,
+Italy, July 2019. Association for Computational Linguistics. doi: 10.18653/v1/P19-1612. URL
+https://aclanthology.org/P19-1612/ . (p. 3)
+[27] J. Li, B. Hui, G. Qu, J. Yang, B. Li, B. Li, B. Wang, B. Qin, R. Geng, N. Huo, et al. Can llm
+already serve as a database interface? a big bench for large-scale database grounded text-to-sqls.
+Advances in Neural Information Processing Systems , 36, 2024. (pp. 1, 3, and 4)
+[28] S. Lin, J. Hilton, and O. Evans. Truthfulqa: Measuring how models mimic human falsehoods,
+2022. URL https://arxiv.org/abs/2109.07958 . (p. 3)
+[29] C. Liu, M. Russo, M. Cafarella, L. Cao, P. B. Chen, Z. Chen, M. Franklin, T. Kraska, S. Madden,
+R. Shahout, and G. Vitagliano. Palimpzest: Optimizing ai-powered analytics with declarative
+query processing. In Proceedings of the Conference on Innovative Database Research (CIDR) ,
+2025. (p. 2)
+[30] N. F. Liu, K. Lin, J. Hewitt, A. Paranjape, M. Bevilacqua, F. Petroni, and P. Liang. Lost
+in the middle: How language models use long contexts. Transactions of the Association
+for Computational Linguistics , 12:157–173, 2024. doi: 10.1162/tacl a00638. URL https:
+//aclanthology.org/2024.tacl-1.9/ . (pp. 3 and 9)
+11[31] X. Liu, S. Shen, B. Li, P. Ma, R. Jiang, Y . Luo, Y . Zhang, J. Fan, G. Li, and N. Tang. A
+survey of NL2SQL with large language models: Where are we, and where are we going?
+CoRR , abs/2408.05109, 2024. doi: 10.48550/ARXIV .2408.05109. URL https://doi.org/
+10.48550/arXiv.2408.05109 . (p. 3)
+[32] Meta AI. The llama 3 herd of models, 2024. URL https://arxiv.org/abs/2407.21783 .
+(p. 6)
+[33] OpenAI. Gpt-4 technical report. arXiv preprint arXiv:2303.08774 , 2023. doi: 10.48550/ARXIV .
+2303.08774. URL https://doi.org/10.48550/arXiv.2303.08774 . (pp. 1 and 6)
+[34] S. Papicchio, P. Papotti, and L. Cagliero. Qatch: Benchmarking sql-centric tasks with table
+representation learning models on your data. Advances in Neural Information Processing
+Systems , 36:30898–30917, 2023. (pp. 4 and 6)
+[35] P. Pasupat and P. Liang. Compositional semantic parsing on semi-structured tables. In Pro-
+ceedings of the 53rd Annual Meeting of the Association for Computational Linguistics and the
+7th International Joint Conference on Natural Language Processing (Volume 1: Long Papers) ,
+pages 1470–1480, 2015. (pp. 2 and 3)
+[36] L. Patel, S. Jha, M. Pan, H. Gupta, P. Asawa, C. Guestrin, and M. Zaharia. Semantic operators:
+A declarative model for rich, ai-based data processing, 2025. URL https://arxiv.org/abs/
+2407.11418 . (p. 2)
+[37] F. Petroni, T. Rockt ¨aschel, A. H. Miller, P. Lewis, A. Bakhtin, Y . Wu, and S. Riedel. Language
+models as knowledge bases? In Proceedings of the 2019 Conference on Empirical Methods in
+Natural Language Processing (EMNLP) , 2019. (p. 4)
+[38] F. Petroni, P. Lewis, A. Piktus, T. Rockt ¨aschel, Y . Wu, A. H. Miller, and S. Riedel. How context
+affects language models’ factual predictions. In Automated Knowledge Base Construction ,
+2020. URL https://openreview.net/forum?id=025X0zPfn . (p. 4)
+[39] Qwen Team. Qwen2.5 technical report, 2025. URL https://arxiv.org/abs/2412.15115 .
+(p. 6)
+[40] E. S. Ristad and P. N. Yianilos. Learning string-edit distance. IEEE Transactions on Pattern
+Analysis and Machine Intelligence , 20(5):522–532, 1998. (p. 6)
+[41] M. Saeed, N. D. Cao, and P. Papotti. Querying large language models with SQL. In Proceedings
+27th International Conference on Extending Database Technology, EDBT 2024, Paestum, Italy,
+March 25 - March 28 , pages 365–372. OpenProceedings.org, 2024. doi: 10.48786/EDBT.2024.
+32. URL https://doi.org/10.48786/edbt.2024.32 . (pp. 2, 4, and 6)
+[42] I. Saparina and M. Lapata. Ambrosia: A benchmark for parsing ambiguous questions into
+database queries. Advances in Neural Information Processing Systems , 37:90600–90628, 2024.
+(p. 3)
+[43] S. Shankar, T. Chambers, T. Shah, A. G. Parameswaran, and E. Wu. Docetl: Agentic query
+rewriting and evaluation for complex document processing, 2025. URL https://arxiv.org/
+abs/2410.12189 . (p. 2)
+[44] K. Singhal, S. Azizi, T. Tu, S. S. Mahdavi, J. Wei, H. W. Chung, N. Scales, A. Tanwani, H. Cole-
+Lewis, S. Pfohl, P. Payne, M. Seneviratne, P. Gamble, C. Kelly, N. Sch ¨arli, A. Chowdhery,
+P. Mansfield, B. A. y Arcas, D. Webster, G. S. Corrado, Y . Matias, K. Chou, J. Gottweis,
+N. Tomasev, Y . Liu, A. Rajkomar, J. Barral, C. Semturs, A. Karthikesalingam, and V . Natarajan.
+Large language models encode clinical knowledge. Nature , 620(7972):172–180, 2023. This pa-
+per (often associated with Med-PaLM 2) evaluates LLMs on medical benchmarks, highlighting
+potential but also the need for accuracy and safety. (p. 1)
+[45] O. Stuhler, C. D. Ton, and E. Ollion. From codebooks to promptbooks: Extracting in-
+formation from text with generative large language models. Sociological Methods & Re-
+search , 0(0):00491241251336794, 0. doi: 10.1177/00491241251336794. URL https:
+//journals.sagepub.com/doi/abs/10.1177/00491241251336794 . (p. 2)
+[46] F. Suchanek, M. Alam, T. Bonald, L. Chen, P.-H. Paris, and J. Soria. Yago 4.5: A large and clean
+knowledge base with a rich taxonomy, 2024. URL https://arxiv.org/abs/2308.11884 .
+(p. 4)
+12[47] Y . Tang, Z. Wang, A. Qu, Y . Yan, Z. Wu, D. Zhuang, J. Kai, K. Hou, X. Guo, J. Zhao, Z. Zhao,
+and W. Ma. ItiNera: Integrating spatial optimization with large language models for open-
+domain urban itinerary planning. In F. Dernoncourt, D. Preo t ¸iuc-Pietro, and A. Shimorina,
+editors, Proceedings of the 2024 Conference on Empirical Methods in Natural Language
+Processing: Industry Track , pages 1413–1432, Miami, Florida, US, Nov. 2024. Association
+for Computational Linguistics. doi: 10.18653/v1/2024.emnlp-industry.104. URL https:
+//aclanthology.org/2024.emnlp-industry.104/ . (p. 2)
+[48] D. Truhn, J. S. Reis-Filho, and J. N. Kather. Large language models should be used as scientific
+reasoning engines, not knowledge databases. Nature medicine , 29(12):2983–2984, 2023. (p. 1)
+[49] J. Wei, N. Karina, H. W. Chung, Y . J. Jiao, S. Papay, A. Glaese, J. Schulman, and W. Fedus.
+Measuring short-form factuality in large language models. CoRR , abs/2411.04368, 2024. doi: 10.
+48550/ARXIV .2411.04368. URL https://doi.org/10.48550/arXiv.2411.04368 . (pp.
+1 and 3)
+[50] J. Wu, L. Yang, D. Li, Y . Ji, M. Okumura, and Y . Zhang. MMQA: Evaluating LLMs with multi-
+table multi-hop complex questions. In The Thirteenth International Conference on Learning
+Representations , 2025. URL https://openreview.net/forum?id=GGlpykXDCa . (p. 1)
+[51] X. Wu, J. Yang, L. Chai, G. Zhang, J. Liu, X. Du, D. Liang, D. Shu, X. Cheng, T. Sun, T. Li,
+Z. Li, and G. Niu. Tablebench: A comprehensive and complex benchmark for table question
+answering. In T. Walsh, J. Shah, and Z. Kolter, editors, AAAI-25, Sponsored by the Association
+for the Advancement of Artificial Intelligence, February 25 - March 4, 2025, Philadelphia,
+PA, USA , pages 25497–25506. AAAI Press, 2025. doi: 10.1609/AAAI.V39I24.34739. URL
+https://doi.org/10.1609/aaai.v39i24.34739 . (p. 3)
+[52] T. Yu, R. Zhang, K. Yang, M. Yasunaga, D. Wang, Z. Li, J. Ma, I. Li, Q. Yao, S. Roman, et al.
+Spider: A large-scale human-labeled dataset for complex and cross-domain semantic parsing
+and text-to-sql task. In 2018 Conference on Empirical Methods in Natural Language Processing,
+EMNLP 2018 , pages 3911–3921. Association for Computational Linguistics, 2018. (pp. 1, 3,
+and 4)
+[53] X. Zhang, S. Luo, B. Zhang, Z. Ma, J. Zhang, Y . Li, G. Li, Z. Yao, K. Xu, J. Zhou, D. Zhang-Li,
+J. Yu, S. Zhao, J. Li, and J. Tang. Tablellm: Enabling tabular data manipulation by llms in real
+office usage scenarios, 2025. URL https://arxiv.org/abs/2403.19318 . (p. 2)
+[54] V . Zhong, C. Xiong, and R. Socher. Seq2sql: Generating structured queries from natural
+language using reinforcement learning. arXiv preprint arXiv:1709.00103 , 2017. (pp. 2 and 3)
+[55] F. Zhu, W. Lei, Y . Huang, C. Wang, S. Zhang, J. Lv, F. Feng, and T.-S. Chua. TAT-QA:
+A question answering benchmark on a hybrid of tabular and textual content in finance. In
+Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and
+the 11th International Joint Conference on Natural Language Processing (Volume 1: Long
+Papers) , pages 3277–3287, Online, Aug. 2021. Association for Computational Linguistics. doi:
+10.18653/v1/2021.acl-long.254. URL https://aclanthology.org/2021.acl-long.254 .
+(p. 3)
+1310 20 30 40 5000.20.40.60.81
+# Number of requested attributesF1 Score (surname)LLama3.3-70B LLama3.1-8B GPT-4.1 GPT-4.1-mini
+(a) Experiment 1: Incremental Attribute Request.5 10 15 20 25 3000.20.40.60.81
+Position of the ’surname’ attributeF1 Score (surname)LLama3.3-70B LLama3.1-8B GPT-4.1 GPT-4.1-mini
+(b) Experiment 2: Attribute Position Sensitivity.
+Figure 3: F1 Quality of attribute surname in different queries
+A Motivation Example
+As discussed in the introduction, extracting structured information from an LLM’s internal knowledge
+in a tabular format poses unique and challenging problems, distinct from conventional, single-point
+natural language queries. To demonstrate and isolate these issues empirically, we designed a series of
+controlled experiments.
+Specifically, we manually curated a compact yet informative dataset that includes detailed statistics
+for the 23 players who represented the Italian national football team at UEFA Euro 2016. For each
+player, the dataset contains their surname, date of birth, and jersey number used in the tournament.
+Additionally, it includes six per-season attributes (club, appearances, goals, assists, yellow cards, red
+cards) across nine different seasons. The final dataset thus comprises 23 rows and 57 attributes. All
+this information is publicly available (e.g., on Wikipedia) and is assumed to be part of the internal
+knowledge of the tested LLMs.
+Unlike the broader evaluation presented in Section 5, the aim of these specific experiments is not to
+assess overall extraction accuracy, but rather to evaluate how performance degrades due to conditions
+inherent to tabular queries.
+Experiment 1: Incremental Attribute Request. In the first experiment, we progressively increased
+the number of requested attributes, from 1 to 57. In the first iteration, the model was asked to return
+only the surname of the 23 Italian Euro 2016 players. In the second, both surname and date of birth
+were requested, and so on, up to all 57 attributes. Crucially, after each query, the F1 score was
+computed solely on the surname column. The goal was to assess whether the accuracy of a fixed
+attribute degrades as the number of requested attributes increases. Ideally, the quality on surname
+should remain constant regardless of how many other attributes are queried.
+However, as shown in Figure 3.(a), performance on the surname column degrades substantially. For
+instance, using GPT-4.1, quality drops from 1.0 when a single attribute is requested to 0.516 when 53
+attributes are included. This experiment was conducted using the COTprompting strategy, which
+yielded the best results in our main benchmark. Similar trends were observed across other LLMs
+and prompting strategies. These findings support the hypothesis that tabular queries induce specific
+degradation patterns that are not typically observed in more natural, conversational settings.
+Experiment 2: Attribute Position Sensitivity. The second experiment evaluated whether the
+position of an attribute in the output affects its quality. A fixed query requesting 30 attributes was
+used as a base. We then generated 30 query variants, each placing the surname attribute at a different
+position (from 1st to 30th). Again, F1 scores were computed only on the surname column.
+As illustrated in Figure 3.(b), the position of the attribute has a significant impact. Unlike the previous
+experiment, the size of the output remains constant across all variants; the only variable is the position
+of the surname attribute. Maximum accuracy is achieved when the attribute appears first, with
+performance declining as the attribute shifts toward the middle positions.
+14We repeated the same experiments for the running example introduced in Section 1, the US Counties
+dataset, which has a small number of attributes. We first measured the F1 score using only the
+<County, State >attribute pair. However, when we added the Area attribute to the returned attributes
+in the query, we observed a significant drop in F1. Most of the previously correct <County, State >
+pairs were no longer returned. For example, only 51 out of 3246 expected tuples were retrieved, and
+3 of them included hallucinated <County, State >combinations. Further inspection revealed that 40
+of the 51 returned tuples also contained incorrect values for the Area attribute.
+These preliminary experiments highlight structural phenomena that are intrinsic to tabular-style
+querying. They underline how even high-performing LLMs can suffer from specific degradation
+modes when asked to return structured multi-attribute outputs, making this task significantly more
+challenging than conventional QA scenarios.
+B More Details on RelationalFactQA Dataset
+RFQA Detailed Statistics. Table 6 presents detailed statistics of the RFQA dataset. It reports the
+minimum, maximum, first quartile (Q1), third quartile (Q3), and average values for the expected
+number of output tuples, attributes, and cells. Additionally, the attribute dimension is further analyzed
+by type, providing the same set of statistics separately for numerical attributes, categorical attributes,
+and mixed attributes (containing both numerical and categorical values).
+The training set statistics of the RFQA dataset reveal a highly skewed and diverse structure. The
+average number of output tuples per instance is about 27, but the maximum value reaches 904,
+indicating that while most cases are relatively small, there are some significantly larger ones, pointing
+to a long-tailed distribution. Similarly, the number of output cells ranges from 1 to 4500, with an
+average of 135.5, suggesting considerable variation in instance complexity. On the attribute side, most
+examples contain a mix of categorical (avg. 3.16) and mixed attributes (avg. 4.26), with relatively
+few numerical attributes (avg. 1.06). This implies that RFQA poses both relational and interpretative
+challenges, as models must handle heterogeneous data types and cope with a wide range of input
+sizes.
+Table 6: Statistics of RFQA .
+Output Output Output Attribute Attribute Attribute
+Dimension Tuple Attributes Cells Numerical Categorical Mixed
+MIN 1 1 1 1 1 2
+Q1 1 2 3 1 2 5
+A VG 26.94 5.32 135.50 1.06 3.16 4.26
+Q3 8 9 45 3 6 9
+MAX 904 9 4500 4 6 9
+Figure 4 shows the distribution of topics covered by the queries in the dataset, spanning 27 distinct
+categories. The most frequent topics are related to automatically generated queries, including Nobel
+Prize winners, chemical elements from the periodic table, popular web search engines, video game
+publishers, and global airports. Additional topics are sourced from the Spider and Bird corpora.
+Metadata. RFQA also includes rich metadata that can be used to analyze queries in terms of
+their expected output size (rows, attributes, cells), the nature of the selected attributes (whether
+numerical, categorical, or mixed), and their complexity (e.g., presence of WHERE conditions
+involving numerical or categorical filters). Below, we describe the fields available in the RFQA
+dataset:
+•QID: Unique identifier for each query instance.
+•DATASET : Name of the source corpus. Possible values are: “bird”, “galois”, “spider1”, and “qatch”.
+The first three represent queries from existing corpora, while “qatch” refers to automatically
+generated queries.
+•DB ID: Identifier of the associated database (i.e., the topic) for each query.
+•SQL: SQL query in PostgreSQL syntax.
+15Figure 4: Topic distribution
+•QUESTION : Natural language (NL) version of the query.
+•TUPLES : Expected number of output tuples (rows).
+•ATTRS : Expected number of output attributes (columns).
+•ATTR NUMERICAL : Number of expected numerical attributes.
+•ATTR CATEGORICAL : Number of expected categorical attributes.
+•TABLES : Number of tables referenced in the FROM clause.
+•NUMERICAL CONDITIONS : Number of numerical conditions in the WHERE clause.
+•CATEGORICAL CONDITIONS : Number of categorical conditions in the WHERE clause.
+•AGGR : Set to 1 if the query includes an aggregation function, 0 otherwise.
+•JOIN : Number of joins in the query.
+•DISTINCT : Set to 1 if the query includes the DISTINCT operator, 0 otherwise.
+•GROUP BY : Set to 1 if the query includes the GROUP BY operator, 0 otherwise.
+•LIMIT : Set to 1 if the query includes the LIMIT operator, 0 otherwise.
+•ORDER BY : Set to 1 if the query includes the ORDER BY operator, 0 otherwise.
+•ATTR NUM &CAT: Sum of numerical and categorical attributes in the SELECT clause. Present
+only if both types are used.
+•CON NUM &CAT: Sum of numerical and categorical conditions in the WHERE clause. Present
+only if both types are used.
+•CELLS : Expected number of cells (i.e., total elements in the output table).
+•BACKLINKS : Number of backlinks retrieved using the Wikipedia API.
+The actual data for each NL-SQL query pair is stored in the data folder, following the structure
+<dataset>/<db id>. To retrieve the expected results for a given query q, one can execute the
+corresponding SQL query on its associated database that can be loaded with the associated data. In
+our experiment all the data are imported into PostgreSQL database.
+The backlinks for each query are calculated as follows: for each row of a table tresult of a query
+q, the key value of the table is used to search for a relative Wikipedia page referencing the entity
+described by the current row. If the search is successful, the backlinks are directly extracted from the
+page using the Wikipedia API. The total number of backlinks for a given query is then computed as
+the average number of backlinks of the single query results.
+16C Prompts and LLM Response Processing
+The prompting strategy used is iterative and consists of two main steps: a start prompt , which instructs
+the LLM on the type of data to extract, and an iterative prompt , which guides the model to retrieve
+additional data if more is available. Figure 5 shows the prompts used for the natural language (NL)
+strategy; Figure 6 presents the prompt for the SQL-based strategy; and Figure 7 illustrates the prompt
+used for the Chain-of-Thought (CoT) strategy.
+Start Prompt: NL Question . Respond with JSON only. Don’t add any comments. Use the
+following JSON schema: jsonSchema .
+NL Question: is the query in natural language
+jsonSchema: is the schema of the tabular response translated in JSON schema
+Iterative Prompt: List more values if there are more, otherwise return an empty JSON.
+Respond with JSON only.
+Figure 5: NL Prompt Syntax. Text in italic is injected from the given NL query and the expected
+JSON schema of the response.
+Start Prompt: List the results of the SQL query: SQL. Respond with JSON only. Don’t add any
+comments. Use the following JSON schema: jsonSchema .
+SQL: is the query in SQL syntax
+jsonSchema: is the schema of the tabular response translated in JSON schema
+Iterative Prompt: List more values if there are more, otherwise return an empty JSON.
+Respond with JSON only.
+Figure 6: SQL Prompt Syntax. Text in italic is injected from the given SQL query and the expected
+JSON schema of the response.
+First Prompt: Given the following query, populate the table with actual values. query: select
+attributes from table (where conditions ). Respond with JSON only. Don’t add any comments. Use
+the following JSON schema: jsonSchema .
+attributes: is the set of attribute names of the table table
+table: is the table name
+conditions: the condition(s) if passed
+jsonSchema: is the schema of the table translated in JSON schema
+Iterative Prompt: List more values if there are more, otherwise return an empty JSON.
+Respond with JSON only.
+Figure 7: CoT Prompt Syntax. Text in italic is injected from the given SQL query. Values between
+parenthesis are populated only if the condition(s) is given.
+Handling Output JSON Errors . All the strategies ask the LLM to return the data in a structured
+form respecting a JSON format prompted. We parse the response according to the required JSON.
+The most common issues in the JSON parsing and our corresponding handling methods are the
+following:
+•Malformed JSON syntax : This includes missing quotation marks or improperly formatted numbers.
+In such cases, we re-prompt the LLM, explicitly asking it to return the answer in valid JSON
+format.
+•Truncated or broken JSON : Often caused by the model hitting its maximum token limit. When this
+happens, we identify the last unmatched opening brace and extract the content up to that point. We
+17then attempt to complete the JSON structure by adding the necessary closing braces to recover a
+valid object.
+If none of the recovery strategies succeed, we terminate the iteration and treat the response as invalid.
+D Details on The Experiments
+D.1 Used Models
+Table 7 lists the models used in our evaluation. For each model, we provide its full name, along with
+the version or release date when available. All models are accessed via their respective APIs.
+Model Name Model Full Name Platform
+GPT 4.1 gpt-4.1-2025-04-14 OpenAI
+GPT 4.1 mini gpt-4.1-mini-2025-04-14 OpenAI
+Mistral 7B Mistral (7B) Instruct v0.3 Released May 22, 2024 Together AI
+QWEN 2.5-7B Qwen2.5 7B Instruct Turbo * Together AI
+LLama 3.1-8B Meta Llama 3.1 8B Instruct Turbo * Together AI
+LLama 3.3 70B Meta Llama 3.3 70B Instruct Turbo * Together AI
+Gemma 2-9B Gemma-2 Instruct (9B) Together AI
+DeepSeek 70B DeepSeek R1 Distill Llama 70B Released Jan 20, 2025 Together AI
+QWEN 3-235B Qwen3 235B A22B FP8 Throughput Released Apr 27, 2025 Together AI
+Table 7: Overview of used Models and the respective Platforms. * indicates that there is no release
+date
+D.2 Additional Results
+Table 8 reports the detailed results for Exp-1 (Overall Performance). It extends results reported
+in Table 2 by also adding the Precision and Recall computed at the cell level. In the following
+we concentrate on the Precision and Recall to also motivate the F1 computed in Exp-1 (Overall
+Performance).
+Table 8 reveal notable trends, particularly in Precision (P) and Recall (R) across different prompting
+strategies (NL, SQL, CoT) and LLMs of varying sizes. Overall, the Chain-of-Thought (CoT) strategy
+consistently outperforms the NL and SQL settings in both precision and recall, especially for larger
+models like GPT 4.1, QWEN 3-235B. These models demonstrate the strongest balance between
+precision and recall, with GPT 4.1 achieving the highest CoT precision (0.720) and a strong recall
+(0.691), reflecting its ability to generate accurate and comprehensive responses. Smaller models, such
+as Mistral 7B and LLama 3.1-8B, show more variability, with generally lower precision in SQL and
+NL strategies and modest gains under CoT prompting. Interestingly, certain mid-sized models like
+Gemma 2-9B, LLama 3.3-70B and DeepSeek 70B achieve competitive performance, indicating that
+parameter count alone is not the sole determinant of quality. In general, the CoT strategy enhances
+both recall and precision, suggesting that structured reasoning prompts help LLMs capture more
+relevant data points while maintaining correctness.
+Figures 8 and 9 contain all the tested LLM performances based on the number of the attributes
+requested in the query respectively on measures against the TS metric (the previous) and the F1
+metric (the latter).
+The results indicate that Tuple Similarity (TS) generally decreases as the number of attributes
+increases beyond three, across most models and prompting strategies. Natural Language (NL) shows
+peak TS performance at low attribute counts (around two to three), with a sharp decline afterward.
+Models such as QWEN 3 and GPT-4.1 perform well on TS with fewer attributes but degrade quickly
+with increased complexity. Conversely, F1 scores tend to be more stable or even improve with
+more attributes, especially for models like Llama 3.3 and Gemma 2, suggesting these models handle
+complex outputs better in terms of generation quality. SQL prompting exhibits lower TS overall
+compared to NL, with early peaks and rapid decline; however, models like Llama 3.3 and DeepSeek
+demonstrate relative robustness at moderate attribute counts. Chain-of-Thought (CoT) prompting
+18Table 8: Benchmark Complete Results. Precision (P), Recall (R), F1 and Tuple Similarity (TS)
+measured for all LLMs in our evaluation. A VG is the average between F1 and TS. LLMs ordered by
+increasing size in terms of parameters.
+Mistral
+7BQWEN
+2.5-7BLLama
+3.1-8BGPT
+4.1 miniGemma
+2-9BLLama
+3.3-70BDeepSeek
+70BGPT
+4.1QWEN
+3-235B
+NLP 0.459 0.546 0.473 0.593 0.596 0.608 0.649 0.682 0.635
+R 0.477 0.477 0.608 0.525 0.556 0.657 0.615 0.652 0.618
+F1 0.44 0.487 0.481 0.537 0.557 0.609 0.606 0.654 0.613
+TS 0.076 0.085 0.155 0.115 0.107 0.149 0.15 0.247 0.225
+A VG 0.258 0.286 0.318 0.326 0.332 0.379 0.378 0.45 0.419
+SQLP 0.354 0.537 0.327 0.457 0.62 0.626 0.664 0.401 0.642
+R 0.423 0.451 0.438 0.409 0.566 0.651 0.586 0.391 0.587
+F1 0.346 0.459 0.332 0.417 0.571 0.62 0.6 0.388 0.595
+TS 0.042 0.079 0.11 0.055 0.123 0.155 0.142 0.096 0.185
+A VG 0.194 0.269 0.221 0.236 0.347 0.387 0.371 0.242 0.39
+CoTP 0.544 0.6 0.593 0.693 0.645 0.686 0.696 0.72 0.692
+R 0.469 0.48 0.614 0.626 0.578 0.701 0.634 0.691 0.641
+F1 0.477 0.503 0.585 0.638 0.594 0.677 0.646 0.693 0.651
+TS 0.09 0.091 0.127 0.12 0.106 0.157 0.168 0.174 0.228
+A VG 0.284 0.297 0.356 0.379 0.35 0.417 0.407 0.433 0.439
+1 2 3 4 5 6 7 8 900.20.40.6
+# Attrs.Mistral Qwen 2.5 Llama 3.1
+GPT-4.1 mini Gemma 2 Llama 3.3
+DeepSeek GPT-4.1 Qwen 3
+(a) NL1 2 3 4 5 6 7 8 900.20.40.6
+# Attrs.Mistral Qwen 2.5 Llama 3.1
+GPT-4.1 mini Gemma 2 Llama 3.3
+DeepSeek GPT-4.1 Qwen 3
+(b) SQL1 2 3 4 5 6 7 8 900.20.40.6
+# Attrs.Mistral Qwen 2.5 Llama 3.1
+GPT-4.1 mini Gemma 2 Llama 3.3
+DeepSeek GPT-4.1 Qwen 3
+(c) CoT
+Figure 8: Impact of the Number of attributes w.r.t. Tuple Similarity (TS) with NL, SQL, CoT
+strategies
+shows improved TS retention for GPT-4.1 and Llama 3.3 as attribute numbers rise, highlighting
+the advantage of step-by-step reasoning for managing complexity. Additionally, CoT achieves the
+highest F1 scores overall, particularly with reasoning-focused models maintaining strong performance
+regardless of attribute count. Across all experiments, Llama 3.3 consistently outperforms other models
+in both TS and F1 metrics, especially as task complexity grows, while Gemma 2 and GPT-4.1 remain
+competitive in F1 but are more sensitive in TS. QWEN 3 exhibits inconsistent TS results despite
+some strength in F1. These observations underline the importance of both prompt strategy and model
+choice in handling increasing task complexity.
+1 2 3 4 5 6 7 8 900.20.40.60.81
+# Attrs.Mistral Qwen 2.5 Llama 3.1 GPT-4o mini
+Gemma 2 Llama 3.3 Reasoning QWEN 3
+(a) NL1 2 3 4 5 6 7 8 900.20.40.60.81
+# Attrs.Mistral Qwen 2.5 Llama 3.1 GPT-4o mini
+Gemma 2 Llama 3.3 Reasoning QWEN 3
+(b) SQL1 2 3 4 5 6 7 8 900.20.40.60.81
+# Attrs.Mistral Qwen 2.5 Llama 3.1 GPT-4o mini
+Gemma 2 Llama 3.3 Reasoning QWEN 3
+(c) CoT
+Figure 9: Impact of the Number of attributes w.r.t. F1 with NL, SQL, CoT strategies
+19E Error Analysis
+To better understand the limitations of LLMs in factual table generation, we conducted an error
+analysis on GPT-4.1’s outputs. We randomly selected 100 examples in which all three querying
+strategies (NL, SQL, and CoT) produced non-perfect scores (less than 1.0) based on the average of F1
+andTS. Each model output was compared against the expected tupleset to identify common failure
+patterns. Figure 10 reports the error distribution. Each example could belong to multiple error types.
+CanonicalizationMisunderstandingMissing TuplesExtra TuplesEmpty Results
+Aggregation Error01020304050
+4341
+30
+13
+4
+1% of Errors
+Figure 10: Breakdown of common error types in GPT-4.1 outputs on factual table generation. Each
+bar represents the percentage of 100 analyzed examples where the error type was observed.
+We found that 43% of errors come from Canonicalization issues, where semantically equivalent
+values were not matched due to limitations in our string similarity metric based on edit distance.
+Examples include mismatches such as “USA” vs. “United States of America” or “s” vs. “s-block”.
+These string-based discrepancies led to false negatives but were rare in numerical values, where our
+proposed metric is more robust. A potential solution could involve incorporating LLMs as semantic
+judges to verify whether two strings refer to the same real-world entity. However, this must be
+done judiciously, as calling an LLM for each comparison can significantly increase evaluation time,
+especially for tupleset that involves a high number of cells.
+Another 41% of errors were categorized as Misunderstanding , where the LLM misunderstood
+the intended meaning of a field. A recurring case was in the domain of chemical elements: when
+asked for the “origin” of elements, models often returned the etymology of the name rather than the
+scientific classification. For instance, the expected answer for hydrogen’s origin was “primordial”,
+but the model returned “Greek: hydro (water) and genes (forming)”. Interestingly, such errors
+disappeared when the attribute was used as a filter in the query’s WHERE clause, for example,
+WHERE origin=“primordial”. This kind of error highlights the need to be clear in the values that we
+expect the LLM to return. For example, querying the LLM with prompts with few-shot examples
+could help to mitigate this kind of error.
+30% of errors were due to Missing Tuples , where the model returned only a partial set of expected
+rows. These omissions were closely tied (80% of the time) to queries with numerical conditions in the
+WHERE clause, particularly involving inequality operators such as >,>=,<, or<=. In contrast,
+equality conditions rarely led to missing results. This trend aligns with prior experimental results
+(Table 4) showing that numerical conditions are harder for LLMs to process than categorical ones.
+Another 13% of errors were attributed to Extra Tuples , where the LLM returned rows not present
+in the expected result. These typically occurred in queries with mixed WHERE conditions (both
+categorical and numerical). A notable pattern emerged: in cases where the numerical condition used
+the = operator, the LLM often hallucinated by forcing the condition’s value into all returned rows,
+regardless of factual correctness. For example, when asked for tuples satisfying nationality=American
+20AND birth year=1937, the model returned multiple tuples with the correct nationality but assigned
+1937 as the birth year across the board, even for entities with different birth years.
+Lastly, 4%of the cases were Empty Results , which can be seen as extreme cases of missing tuples,
+and1%were due to Aggregation Errors , where the model failed to retrieve correct base data,
+resulting in incorrect aggregate computations.
+Missing Tuples and Extra Tuples errors highlight a key challenge when querying an LLM: the handling
+of conditions in the WHERE clause. Our findings indicate that while LLMs can generally interpret
+categorical conditions correctly, numerical conditions often lead to hallucinations or incomplete
+results. A promising future research direction is to systematically investigate which types of conditions
+are reliably handled by LLMs during query execution and which are prone to errors or hallucinations.
+This analysis would help define a boundary between conditions that can be safely included in the
+LLM prompt and those that should instead be applied as post-processing filters, i.e., all tuples are
+retrieved with the LLM and the filtering is done as a separate step. Understanding this distinction
+could lead to more robust hybrid querying strategies that combine the generative capabilities of LLMs
+with traditional filtering techniques.
+21

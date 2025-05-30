@@ -1,0 +1,786 @@
+arXiv:2505.21410v1  [cs.AI]  27 May 2025Multi-Resolution Skill Discovery for HRL Agents
+Shashank Sharma
+Department of Computer Science
+University of Bath
+ss3966@bath.ac.ukJanina Hoffmann
+Department of Psychology
+University of Bath
+jah253@bath.ac.uk
+Vinay Namboodiri
+Department of Computer Science
+University of Bath
+vpn22@bath.ac.uk
+Abstract
+Hierarchical reinforcement learning (HRL) relies on abstract skills to solve long-
+horizon tasks efficiently. While existing skill discovery methods learns these skills
+automatically, they are limited to a single skill per task. In contrast, humans learn
+and use both fine-grained and coarse motor skills simultaneously. Inspired by
+human motor control, we propose Multi-Resolution Skill Discovery (MRSD), an
+HRL framework that learns multiple skill encoders at different temporal resolu-
+tions in parallel. A high-level manager dynamically selects among these skills,
+enabling adaptive control strategies over time. We evaluate MRSD on tasks from
+the DeepMind Control Suite and show that it outperforms prior state-of-the-art
+skill discovery and HRL methods, achieving faster convergence and higher final
+performance. Our findings highlight the benefits of integrating multi-resolution
+skills in HRL, paving the way for more versatile and efficient agents.
+1 Introduction
+Recent advances in HRL agents using abstract actions or skills have shown promising results
+in tackling long-horizon tasks [ 1,14,20,10]. Skill discovery methods aim to learn these skills
+automatically, without an external reward. Although skills enable long-horizon planning, existing
+methods often operate using the single best skill apt for a task [ 7,11,20]. In contrast, humans and
+animals naturally acquire fine and coarse motor skills that are adaptively combined, for instance,
+during running, moving the leg forward (coarse), and adjusting foot placement (fine) to navigate
+uneven terrain [ 24,6,17]. Even primates [ 4,5] and rodents [ 19] have been observed to have gross
+movement skills and fine-grained tool use. Current hierarchical and options-based methods lack this
+flexibility and can benefit from multi-resolution control.
+Inspired by this, we first explore subgoal predicting skills that partition the state space temporally,
+and then utilize them appropriately. Using a simulation with a 2D agent to illustrate the qualitative
+differences between temporally constrained subgoals. Note how closer subgoals enable precise but
+error-susceptible, finemovements, while farther subgoals enable smoother but imprecise, coarse
+movements. A general-purpose agent would require different skills in different contexts. Thus, we
+propose Multi-Resolution Skill Discovery (MRSD), an HRL framework that trains separate encoders
+to learn skills at distinct temporal scales. And simultaneously learns policies to use them, along with
+a meta-controller that dynamically interleaves from the learned skills appropriately.
+We evaluate our method on tasks from the DeepMind Control Suite [ 23], benchmarking against
+state-of-the-art (SOTA) hierarchical and skill discovery methods. Our experiments show that the
+Preprint. Under review.Figure 1: Simulation of a simple point agent (star) in a 2D grid that moves towards assigned goal
+positions (crosses). Goal updates every fixed number of steps Kand alternates between (x+li,1)
+and(x+li,−1), where xis the agent’s current x-position and li∈ {1,2,4,8}is the skill length.
+Goal positions impact agent behavior based on their distance from the agent state. Closer goals lead
+to more controlled and precise movements, but can be susceptible to incorrect goals. Meanwhile, far
+away goals cause less deviation, leading to smooth but imprecise movements.
+proposed architecture yields significant performance improvements, outperforming previous HRL
+SOTA methods and matching SOTA non-HRL methods. We also conduct ablation studies to measure
+the contribution of each module and show that skill interleaving yields the best results. These results
+suggest that multi-resolution skills can serve as a powerful building block for scalable and efficient
+hierarchical reinforcement learning. We highlight some of the method limitations in Sec. 7
+Our key contributions are:
+•An abstract skill-discovery framework that learns skills at multiple temporal resolutions in
+parallel (Sec. 3.2).
+•A multi-skill policy that learns expert policies for each skill independently, and a dynamic
+skill interleaving mechanism that uses the experts appropriately (Sec. 3.3).
+•Empirical validation and ablations showing improved convergence and final performance on
+DeepMind Control Suite tasks (Sec. 5.1,5.2).
+2 Background
+2.1 Director
+The Director [ 10] is a recent state-of-the-art HRL agent composed of a world-model, worker, manager,
+and a Goal Variational AutoEncoder (V AE) [ 12]. The world-model is implemented using the
+Recurrent State Space Module (RSSM) [ 8] that takes the environmental observations and constructs a
+state representation over time. The manager takes the state as input to yield a subgoal for the worker
+in the same state space (refreshed every Ksteps). The worker takes the current state and the subgoal
+state to output an environmental action. The authors mention that if the manager outputs subgoals for
+the worker directly in the state space, it results in a high-dimensional continuous control problem for
+the manager. Therefore, the Goal V AE learns a reduced categorical latent representation for the states,
+and the manager takes the current state as input to output a latent variable, which is expanded into
+a state using the Goal V AE decoder. The Goal V AE allows the manager to function in the reduced
+latent space by helping it recall states. We implement MSRD using Director as the base architecture.
+Motivation : It should be noted that the Goal V AE allows prediction of states irrespective of the
+current state, which means the manager can pick a goal sgunreachable by the worker. And by
+definition, the worker cannot reliably predict the right actions for unreachable goals. Therefore,
+given the current state, we propose constraining the search space to only nearby states, which can
+increase the search efficiency for appropriate goal states sg. Further, in our experiments with the
+Director, we noticed that the worker rarely reaches the prescribed goal state sgin an episode. The
+manager only learns to select the goals sgso that they induce the right actions from the worker
+that maximize the expected return. This behavior is apparent in the manager’s training objective,
+which only aims to increase the likelihood of actions that maximize the expected return. Rather than
+prescribing a goal state and waiting for the worker to reach it, we found that the manager assigns
+the worker goals as a moving target that the worker constantly chases. Thus, the final states st+l
+in CV AE training do not need to be strictly at temporal length K(the goal refresh rate). In fact, in
+2(a) Skill CV AE architecture
+ (b) Acting using Skill CV AE
+Figure 2: Illustrations of the abstract state transition-based control for the manager. Dashed arrows
+indicate sample propagation from the predicted distribution. (a) Skill CV AE, where the Encoder
+encodes initial and final states (st, st+l)to a latent skill space and the Decoder reconstructs the final
+state using the initial state stand a sampled skill variable. (b) The manager predicts the latent skills
+and then uses the Decoder to generate goals for the worker.
+our experiments with different temporal skill lengths we found l > K to work much better than
+l=Kfor Deepmind Control suite [ 23] tasks (Sec. 5.2). We simulated a simple 2D point agent to
+follow goals prescribed at different distances to illustrate the behavioral differences (Fig. 1). Also,
+the appropriate skill length can be highly task dependent. Thus, we propose a Multi-Resolution Skill
+Discovery (MRSD) mechanism that learns skills or abstract actions at multiple temporal resolutions.
+Unlike some previous skill discovery approaches like DIAYN [ 7] and ReST [ 11] that automatically
+partition the skill space, we use an explicit temporal distance-based skill partition. Note that we
+usetemporal to refer to the temporal distance of the assigned goal, not the duration for which it is
+executed.
+3 Our Method
+3.1 Skills as Abstract State Transitions
+Given that the agent is at the state st, we want to constraint the goal predictions to states that can be
+achieved in lsteps. To do this, we propose learning a Conditional V AE (CV AE) that learns to predict
+possible future states st+lconditioned on the current state st. The CV AE is learned online using
+the generated replay data. First, the replay trajectories are used to collect training examples as state
+pairs (st, st+l), where st+lhappens lsteps after st. Then, the CV AE parameterized by weights ϕis
+trained to optimize the ELBO objective (Eq. 1). It should be noted that it is the worker that predicts
+actions leading the agent to the goal state. CV AE is merely a skill recall mechanism that learns the
+abstract actions possible under the current worker policy and then allows the manager to modulate
+the worker’s behavior predictably. Fig. 2 illustrates the skill-based architecture as a CV AE that learns
+skills online using the collected data (Fig. 2a). Fig. 2b shows how the manager can use the Skill
+CV AE during inference to generate sub-goals for the worker. Next, we present our method by scaling
+the concept of skills to multiple resolutions.
+L(ϕ) =∥st+l−Decϕ(st, z)∥2+βKL[Encϕ(z|st, st+l)∥p(z)]where z∼Encϕ(z|st, st+l)
+(1)
+3.2 Multi-Resolution Skills
+Ideally, we want the manager to be able to predict any state that the worker can directly reach as
+a goal state. Instead of learning a single CV AE, we can learn multiple CV AEs, each specific to a
+temporal resolution. However, this can heavily increase the size of the model, thereby increasing
+the memory capacity and causing an unfair comparison. Thus, we keep all but the last layer of the
+encoder, and all but the first layer of the decoder, shared. The sharing causes a minimal increase
+in model size but increases the recall with the resolution-specific input and output layers. Fig. 3a
+illustrates the Multi-Resolution Skill CV AE architecture. For training, state-pairs (st, st+li)atN
+different temporal resolutions li∈ {l0, l1, ..., l N}are extracted from the replay data. Each training
+example is processed using the shared and the resolution-specific Encoder-Decoder layers. Then
+the total loss is calculated as the sum of the ELBO objectives of each CV AE and is optimized in
+a single step (Eq. 2) (the use of common layers is implied in the equations and is not mentioned
+3(a) Learning Multi-Resolution Skill CV AEs
+ (b) Acting using Multi-Resolution Skill CV AEs
+Figure 3: Architectures for learning and acting using Multi-Resolution Skills ( li∈ {l0, l1, ..., l N}).
+Dashed arrows indicate sample propagation from the predicted distribution. Dashed boundaries
+indicate shared layers. (a) Separate CV AEs are learnt for each temporal resolution li. The Encand
+Dec modules represent the common layers of the Encoders and the Decoders, respectively. Each
+Enciis the resolution-specific encoder output layer, and each Deciis the resolution-specific decoder
+input layer. (b) The manager’s policy has N+ 1 output heads. Nskill heads πMithat predict
+the resolution-specific skill latents and choice head πMCthat predicts an N-dimensional one-hot
+distribution. Samples from the skill latents are used to predict sug-goals using the respective Decoders,
+then the choice sample from πMCselects one of the sub-goals as sgby gating.
+to maintain simplicity). This results in the common layers being trained for all examples and the
+resolution-specific layers being trained only on the relevant examples. We use a mixture of 8,8-dim
+categoricals as the prior distribution p(z)for our CV AEs.
+L(ϕ) =NX
+i=0st+li−Deci
+ϕ(st, z)2+βKL[Enci
+ϕ(z|st, st+li)∥p(z)]where z∼Enci
+ϕ(z|st, st+li)
+(2)
+3.3 Multi-Skill Policy
+The manager policy has N+1output heads, Nheads corresponding to each Skill CV AE that predicts
+latent distributions over skills πMi(z|st), and an additional ’choice’ head that predicts a one-hot
+N-dim distribution πMC(c|st)(Fig. 3b). The latent skill samples are used to predict subgoals using
+the corresponding decoders (Eq. 3). And the one-hot choice sample selects from the subgoals by
+gating (Eq. 4). Fig. 3b illustrates the process of worker subgoal prediction using the Multi-Resolution
+Skill CV AEs. It should be noted that only the final layer of the policy is split into multiple heads,
+which minimally increases the model size. The MSRD policy is learned such that each skill head
+becomes an expert at using the corresponding resolution skills for all states st∈Sindependently.
+And the choice head simultaneously learns to pick the best skill head for all states st∈S.
+si,t
+g=Deci
+ϕ(zt,i, st)where zt,i∼πMi(zt,i|st) (3)
+st
+g=N−1X
+i=0ct,i.si,t
+gwhere ct∼πMC(ct|st) (4)
+3.4 Policy Optimization
+Like the Director [ 10], the MSRD manager and the worker policies are implemented as Soft-Actor-
+Critics (SAC) and optimized using imagined trajectories. Imagination using the RSSM module helps
+cheaply generate on-policy data for training. The agent imagines a batch of T-step trajectories used
+4to train both the manager and the worker. The returns are estimated using lambda returns, followed
+by policy update using policy gradients for the external and exploratory rewards. We briefly describe
+the standard training steps below, followed by the exploratory objective (Sec. 3.4.1) and the policy
+gradients for our approach (Sec. 3.4.2). See Sec. B for full training and architecture details.
+Manager: The manager is trained to maximize the external task and the exploratory rewards (Sec.
+3.4.1). Since the manager works on a coarser temporal scale, an abstract trajectory of length T/K
+is extracted corresponding to every K-th step and summing rewards within each non-overlapping
+subsequence of length K. Then, separate lambda returns are computed for each reward type, which
+are learned using individual critics. The manager’s policy is updated using the REINFORCE objective
+(policy gradients) (3.4.2), using the weighted sum of advantages from both objectives.
+Worker: The worker is trained to maximize the goal rewards, calculated as the cosine-max similarity
+between the agent state stand the goal state sg. The imagined trajectory is split into K-step sub-
+trajectories where the goal state sgremains consistent. The rewards and lambda returns are computed
+for the sub-trajectories to update the critic, followed by policy update using the REINFORCE
+objective.
+3.4.1 Exploratory Loss for Novel Skill Discovery
+To learn novel skills or abstract state transitions, we provide the manager with an additional ex-
+ploratory reward that encourages the manager to find novel state transitions. Since the Skills CV AE
+learns all possible abstract state transitions in the environment we use the reconstruction error from
+the CV AE as the reward signal. This encourages the agent to repeat state transitions that are not yet
+well-learned by the CV AE. The exploratory reward RExpl
+t(τ)for the imagined trajectory τof length
+Tis computed as the reconstruction error of the state stconditioned on the starting state s0(Eq. 5).
+Since we use multiple CV AEs, the min of the reconstruction errors across all CV AEs is used as the
+reward. Since the skill discovery objective is a reward, it can be used with the external task without
+needing a prior skill discovery phase.
+RExpl
+t= min
+ist−Deci
+ϕ(s0, zt,i)2where zt,i∼Enci
+ϕ(z|s0, st) (5)
+3.4.2 Policy Gradients
+We first decompose the action prediction process to derive the policy gradient to train the manager
+and worker policies. Let an MSRD agent be in state stat step t. Every K-th step, the manager
+refreshes the worker’s goal. For clarity, let the abstract step be indexed by k, then at each abstract
+step ( t=kK):
+1. Sample skill latents from the skill heads: zk,0, zk,1, ..., z k,N−1∼ΠN−1
+i=0πMi(zk,i|skK).
+2. Sample a choice variable: ck∼πMC(ck|skK).
+3. Compute the selected subgoal: sk
+g=PN−1
+i=0ck,i·Deci
+ϕ(skK, zk,i).
+4. Predicts the environmental actions using worker: πW(at|st, sk
+g)
+Thus, the trajectory probability that starts at s0can be written as:
+p(τ) =p(s0)⌊T/K⌋−1Y
+k=0πMC(ck|skK)N−1Y
+i=0πMi(zk,i|skK)ck,i
+| {z }
+ManagerT−1Y
+t=0πW(at|st, s⌊t/K⌋
+g )
+| {z }
+Worker·pT(st+1|at, st)|{z }
+State transition
+(6)
+The components of the equation can be read as: the manager predicts the skills (zk,0, zk,1, ..., z k,N)
+and choice ckfor every abstract step k, the worker that predicts the action atat each step tusing the
+subgoal s⌊t/K⌋
+g for the duration, and the environmental state transition pT. Here, the exponent ck,i
+collapses the skill probabilities πMi(zk,i|skK)of the unselected skills to 1as they do not affect the
+trajectory.
+5We follow the policy gradient derivation from [ 21]. The aim is to compute ∇θJ, where J=Eτ[R(τ)]
+is the expected reward and θare the policy parameters. Using the standard log-derivative trick ([ 21]),
+the objective can be written as maximizing the trajectory log-probability weighted by the expected
+reward:
+∇θJ=Eτ[R(τ)· ∇θlogp(τ)]
+The gradient of the trajectory log-probability w.r.t the manager parameters Mis:
+∇Mlogp(τ) =⌊T/K⌋−1X
+k=0[∇MlogπMC(ck|skK) +N−1X
+i=0ck,i∇MlogπMi(zk,i|skK)]
+Therefore, the policy-gradient objective can be written as:
+∇MJ=Eτ[R(τ)·⌊T/K⌋−1X
+k=0[∇MlogπMC(ck|skK) +N−1X
+i=0ck,i∇MlogπMi(zk,i|skK)]]
+Given these policy gradients, we construct the losses for each head as the sum of the policy gradient
+objective and an entropy maximization objective (Eq. 9,8), and sum them for the total loss (Eq. 10).
+Gλ
+k=Rk+γ((1−λ)vM(skK) +λGλ
+k+1) (7)
+L(πMc) =−Eτ⌊T/K⌋−1X
+k=0logπMc(ck|skK)(Gλ
+k−vM(skK)) +ηH[πMC(ck|skK)] (8)
+L(πMi) =−Eτ⌊T/K⌋−1X
+k=0ck,i·logπMi(zk,i|skK)(Gλ
+k−vM(skK)) +ηH[πMi(zk,i|skK)] (9)
+L(πM) =L(πMc) +N−1X
+i=0L(πMi) (10)
+L(vM) =Eτ⌊T/K⌋−1X
+k=0(vM(skK)−Gλ
+k)2(11)
+Where Gλ
+kis the lambda returns estimated using abstract trajectories (Eq. 7), vMis the critic utilized
+to reduce variance and generalization beyond the rollout horizons (Eq. 11). The policy maximizes
+the advantage Gλ
+k−vM(skK)instead of directly maximizing estimated rewards. Weighted entropic
+lossesH[·]encourage adequate exploration prior to convergence.
+4 Addressing a Critical Failure Mode
+Previous skill discovery methods have mentioned difficulties learning skill primitives while acting
+using the same skills [ 10,7]. This is because after the model learns a few reliable skills, it tends to
+repeat them, thus, getting stuck with unoptimal skills. The exploratory loss is sufficient to encourage
+the model to explore novel skills and perform as well as the results presented in this paper. However,
+the problem can be artificially induced by prematurely converging the CV AE before the policy
+converges; one way is to increase the training data for the CV AE disproportionately. This causes the
+policy to collapse to a degenerate solution as the CA VE predicts only initially learned goals. For
+completeness of the solution, we make an additional modification that prevents this problem. In
+addition to the Skill CV AEs, we add another V AE that learns states unconditionally, like the Director.
+The unconditional V AE (Enc∞
+ψ,Dec∞
+ψ)imitates learning ∞-length skills as the predicted state sgis
+6Figure 4: Episode scores from MSRD (ours) and the Director ( 3seeds per experiment). The plot shows
+the total rewards (mean and standard deviation) received in an episode against the environmental step.
+Both methods use the same common hyperparameters.
+completely independent of any previous state st. This helps the agent escape the collapse by allowing
+the manager to select goal states independent of the current state, and also removes any need for
+balancing policy and CV AE learning. Our results show that the agent initially uses the unconditional
+V AE but soon switches to Skill CV AEs (Fig. 7).
+5 Results
+We use skill lengths L= [64 ,32,16,8,∞]for all our experiments. Since we use multiple policy
+heads, the policy learning signal reduces by a factor of N; thus, we increase training to every 8-th
+step rather than 16. The agent is tested in locomotion-based environments and trained to optimize for
+external and exploratory rewards (advantages weighted as [1.0,0.1], respectively).
+5.1 Standard Benchmarks
+DeepMind Control Suite : We compare our method with SOTA methods on several tasks in the
+DeepMind Control Suite (DMC) [ 23]. Each episode runs for 1000 steps before terminating with
+dense rewards at each step. Fig. 4 shows the performance of our method compared to the Director
+(the same common hyperparameters). Due to resource constraints, we are not able to run SOTA
+non-hierarchical approaches, but we provide the results for DreamerV2 ([ 9]) in the appendix (Fig.
+9). The results show that our method outperforms Director at all tasks and matches DreamerV2’s
+performance at most. We also plot the evolution of the choice distribution during training (Fig. 5). A
+common trend was that the manager prefers unconditional V AE earlier and later shifts to skill CV AEs
+(Fig. 5). This trend is similar to human behavior when learning new skills, e.g., body movements for
+a new sport. Initially, one might make crooked motions through a few identified advantageous body
+configurations, but repetitions reduce conscious effort [18].
+Egocentric Ant : We also tested our method on the Egocentric ant maze task, where the agent
+receives sparse rewards for reaching a goal location. Each episode lasts 3000 steps before terminating
+with a 0reward. Therefore, training is mostly done using exploratory rewards. The agent takes the
+proprioceptive observations and an egocentric camera image as inputs. While DreamerV2 fails at
+the task, the Director and our agent solve it, with our agent receiving higher scores. This task takes
+extremely long to complete, so we take results from [10] for comparison (Fig. 6).
+5.2 Ablations
+How well do the individual skills perform, and is the dynamic skill interleaving useful?
+Our method trains individual expert policies for each skill CV AE, for all states st∈S, and the choice
+head for selecting the best skill for all states st∈S. In this context, we compare the following
+settings: the default choice mechanism, random choice, and using each skill module separately. The
+7Figure 5: Stream graphs showing the evolution of the choice distribution during training averaged
+across 3seeds. A trend can be noticed that the manager starts with the ∞skills but slowly switches
+to the temporally constrained skills.
+Figure 6: Episode rewards from the Egocentric Ant Maze task against the environmental step during
+training ( 3seeds). (Left) — MSRD ( Ours ), (Right) Results taken from [ 10] that compares: —
+Director, — Director with worker receiving external task reward, — DreamerV2.
+skill selection mechanism is modified in an already trained MSRD agent to enforce the above settings.
+Comparing skills from a trained MSRD model enforces the assumption that the skills are trained
+using the same data, possibly of a higher quality than each skill individually would have collected.
+Fig. 7 shows the results for some DMC tasks where each skill score is averaged across 100episodes.
+It can be seen that interleaving the skills using the proposed choice mechanism consistently yields
+the best results. It should also be seen that no individual skill performs well for all tasks; thus, using
+the choice policy πMCcan help automate skill selection.
+Figure 7: Final performance comparison between the settings: default choice mechanism, random
+selection, and the skills individually [64,32,16,8,∞]. The results are the mean and standard
+deviations of the episodic rewards across 100evaluation runs.
+8Figure 8: Performance comparison of agents fine-tuned for tasks after an exploration phase ( 3seeds
+per experiment). The graphs show total episodic rewards (mean and standard deviation) against the
+global steps. The plots compare: MRSD, MRSD using exploratory rewards from the unconditional
+V AE, ReST, and DIAYN. Our agent is trained every 8-th step using image inputs while DIAYN/ReST
+trains every step using the internal environmental proprioceptive state.
+Can the agent learn usable skills only using the exploratory objective?
+We test if our method can learn skills independently of the task and then learn a policy to use the
+skills to perform a task. For this, we first train an agent for 3M environmental steps using only the
+exploratory objective. The agent learns interesting behaviors like backflip, headstand, somersaults
+(forwards and backwards), etc. (Appendix C). Next, keeping all modules static, we fine-tune the
+manager policy and a fresh critic for the environmental task rewards for 1M environmental steps. We
+compare our method to two previous skills discovery methods: ReST and DIAYN. Both methods
+maximize an information-theoretic objective to learn a set of distinct skills. Then, the skill that gathers
+maximum rewards for the external task is fine-tuned further. The original results on the methods are
+at the Gymembodiments of the same agents, and we use their respective parameters, including reward
+scaling. We also compare our exploratory objective against the Director’s, which is computed as the
+reconstruction error using the unconditional V AE (Sec. 4). Fig. 8 shows the comparisons. It can be
+seen that our method performs reasonably well for all tasks, while other methods struggle to do so.
+Also, while these methods fine-tune a single skill, we can fine-tune using all skills because of the
+interleaving mechanism.
+6 Related Work
+Hierarchical reinforcement learning (HRL) refers to a set of techniques that temporally abstract
+actions [ 3,25,2,22,16,15]. While standard RL techniques like Q-Learning choose from primitive
+actions, HRL agents can choose temporally extended abstract actions that differ in behavioral policies
+and subgoals. The manager can learn preferences over the discovered action abstractions using a
+model-free algorithm like the Actor-Critic [ 10] or use a planning mechanism for goal-conditioned
+reinforcement learning [ 14]. The temporally abstract actions help the agent plan symbolically in
+terms of subroutines to achieve long-term goals like reaching a specific point while avoiding obstacles.
+The agent simultaneously learns the abstract actions and acts by selecting these abstract actions to
+maximize expected rewards.
+The abstract actions or skills are usually represented using a low-dimensional latent variable and
+learned by maximizing the mutual information between the trajectory (sequence of states) and a skill
+variable [ 1,13,14,20,11,7]. The mutual information objective maximizes the predictability of
+trajectories given skills, and skills given trajectories. The skills allow the agent policy to function
+in a latent space. OPAL [ 1] encodes the trajectory using a bidirectional GRU and is optimized as a
+Variational Autoencoder. Causal InfoGAN [ 13] use an InfoGAN to learn causal representations by
+maximizing mutual information between the skill and the initial and final state pairs. DADS [ 20]
+and DIAYN [ 7] apply the mutual information objective to learn a diverse forward-inverse kinematics
+model that is later used for planning. ReST [ 11] also uses the same objective but trains skills one
+after the other, recurrently.
+7 Discussion
+The key findings that emerge from our analysis are:
+9•Skill Interleaving Matters : Ablation studies show that skill interleaving agent performs
+the best, and no single skill works best across all tasks (Fig. 7).
+•Reward-Agnostic Learning : The agent successfully discovers usable skills without external
+rewards through latent space exploration (Figs. 6,8). We see a small limitation when our
+exploration rewards do not perform as well as the others at the cheetah_run task, indicating
+that no single reward scheme is sufficient for all tasks.
+The architecture is highly flexible, allowing mixing learned and deterministic skills, leading to hybrid
+structures. The skills can also be used as abstract actions for goal-directed motion planning. The
+multi-head policy gradient formulation can also be easily extended to other algorithms.
+References
+[1]Anurag Ajay, Aviral Kumar, Pulkit Agrawal, Sergey Levine, and Ofir Nachum. {OPAL}:
+Offline primitive discovery for accelerating offline reinforcement learning. In International
+Conference on Learning Representations , 2021. URL https://openreview.net/forum?
+id=V69LGwJ0lIN .
+[2]Andrew G Barto and Sridhar Mahadevan. Recent advances in hierarchical reinforcement
+learning. Discrete event dynamic systems , 13(1):41–77, 2003.
+[3]Matthew M Botvinick, Yael Niv, and Andew G Barto. Hierarchically organized behavior and its
+neural foundations: A reinforcement learning perspective. Cognition , 113(3):262–280, 2009.
+[4]Aisha C Bründl, Patrick J Tkaczynski, Grégoire Nohon Kohou, Christophe Boesch, Roman M
+Wittig, and Catherine Crockford. Systematic mapping of developmental milestones in wild
+chimpanzees. Developmental Science , 24(1):e12988, 2021.
+[5]Luz Carvajal and Caroline Schuppli. Learning and skill development in wild primates: toward
+a better understanding of cognitive evolution. Current Opinion in Behavioral Sciences , 46:
+101155, 2022.
+[6]Laura C Dapp, Venera Gashaj, and Claudia M Roebers. Physical activity and motor skills in
+children: A differentiated approach. Psychology of Sport and Exercise , 54:101916, 2021.
+[7]Benjamin Eysenbach, Abhishek Gupta, Julian Ibarz, and Sergey Levine. Diversity is all you
+need: Learning skills without a reward function. In International Conference on Learning
+Representations , 2019. URL https://openreview.net/forum?id=SJx63jRqFm .
+[8]Danijar Hafner, Timothy Lillicrap, Ian Fischer, Ruben Villegas, David Ha, Honglak Lee, and
+James Davidson. Learning latent dynamics for planning from pixels. In International conference
+on machine learning , pages 2555–2565. PMLR, 2019.
+[9]Danijar Hafner, Timothy Lillicrap, Mohammad Norouzi, and Jimmy Ba. Mastering atari with
+discrete world models. arXiv preprint arXiv:2010.02193 , 2020.
+[10] Danijar Hafner, Kuang-Huei Lee, Ian Fischer, and Pieter Abbeel. Deep hierarchical planning
+from pixels. In S. Koyejo, S. Mohamed, A. Agarwal, D. Belgrave, K. Cho, and A. Oh, editors,
+Advances in Neural Information Processing Systems , volume 35, pages 26091–26104. Curran
+Associates, Inc., 2022. URL https://proceedings.neurips.cc/paper_files/paper/
+2022/file/a766f56d2da42cae20b5652970ec04ef-Paper-Conference.pdf .
+[11] Zheyuan Jiang, Jingyue Gao, and Jianyu Chen. Unsupervised skill discovery via recurrent skill
+training. Advances in Neural Information Processing Systems , 35:39034–39046, 2022.
+[12] Diederik P Kingma, Max Welling, et al. An introduction to variational autoencoders. Founda-
+tions and Trends® in Machine Learning , 12(4):307–392, 2019.
+[13] Thanard Kurutach, Aviv Tamar, Ge Yang, Stuart J Russell, and Pieter Abbeel. Learning
+plannable representations with causal infogan. Advances in Neural Information Processing
+Systems , 31, 2018.
+10[14] Jinning Li, Chen Tang, Masayoshi Tomizuka, and Wei Zhan. Hierarchical planning through
+goal-conditioned offline reinforcement learning. IEEE Robotics and Automation Letters , 7(4):
+10216–10223, 2022. doi: 10.1109/LRA.2022.3190100.
+[15] Ofir Nachum, Shixiang Shane Gu, Honglak Lee, and Sergey Levine. Data-efficient hierarchical
+reinforcement learning. Advances in neural information processing systems , 31, 2018.
+[16] Shubham Pateria, Budhitama Subagdja, Ah-hwee Tan, and Chai Quek. Hierarchical reinforce-
+ment learning: A comprehensive survey. ACM Comput. Surv. , 54(5), jun 2021. ISSN 0360-0300.
+doi: 10.1145/3453160. URL https://doi.org/10.1145/3453160 .
+[17] Jan P Piek, Lisa Dawson, Leigh M Smith, and Natalie Gasson. The role of early fine and
+gross motor development on later motor and cognitive ability. Human movement science , 27(5):
+668–681, 2008.
+[18] Jerome N Sanes. Neocortical mechanisms in motor learning. Current opinion in neurobiology ,
+13(2):225–231, 2003.
+[19] Lisa-Maria Schönfeld, Dearbhaile Dooley, Ali Jahanshahi, Yasin Temel, and Sven Hendrix.
+Evaluating rodent motor functions: Which tests to choose? Neuroscience & Biobehavioral
+Reviews , 83:298–312, 2017.
+[20] Archit Sharma, Shixiang Gu, Sergey Levine, Vikash Kumar, and Karol Hausman. Dynamics-
+aware unsupervised discovery of skills. In International Conference on Learning Representa-
+tions , 2020. URL https://openreview.net/forum?id=HJgLZR4KvH .
+[21] Richard S Sutton and Andrew G Barto. Reinforcement learning: An introduction second edition.
+Adaptive computation and machine learning: The MIT Press, Cambridge, MA and London ,
+2018.
+[22] Richard S Sutton, Doina Precup, and Satinder Singh. Between mdps and semi-mdps: A
+framework for temporal abstraction in reinforcement learning. Artificial intelligence , 112(1-2):
+181–211, 1999.
+[23] Yuval Tassa, Yotam Doron, Alistair Muldal, Tom Erez, Yazhe Li, Diego de Las Casas, David
+Budden, Abbas Abdolmaleki, Josh Merel, Andrew Lefrancq, et al. Deepmind control suite.
+arXiv preprint arXiv:1801.00690 , 2018.
+[24] Sanne LC Veldman, Rute Santos, Rachel A Jones, Eduarda Sousa-Sá, and Anthony D Okely.
+Associations between gross motor skills and cognitive development in toddlers. Early human
+development , 132:39–44, 2019.
+[25] Marco A Wiering and Martijn Van Otterlo. Reinforcement learning. Adaptation, learning, and
+optimization , 12(3):729, 2012.
+11A Results from the Director
+(a) Results from the Director paper that compares Director, Director with worker task rewards, and the Dreamer.
+Figure 9: Episode score comparison with state-of-the-art non-hierarchical method DreamerV2. The
+results from the Director [ 10] show that our Hierarchical agent can match DreamerV2’s performance
+at almost all tasks.
+B Architecture & Training Details
+B.1 Worker
+The worker is trained using K-step imagined rollouts (κ∼πW). Given the imagined trajectory κ,
+the rewards for the worker RW
+tare computed as the cosine_max similarity measure between the
+trajectory states stand the prescribed worker goal swg. First, discounted returns Gλ
+tare computed as
+n-step lambda returns (Eq. 12). Then the Actor policy is trained using the REINFORCE objective
+(Eq. 13) and the Critic is trained to predict the discounted returns (Eq. 14). The entropy for the
+worker and the manager is weighted to maintain a target entropy.
+12Gλ
+t=RW
+t+1+γL((1−λ)v(st+1) +λGλ
+t+1) (12)
+L(πW) =−Eκ∼πWH−1X
+t=0
+(Gλ
+t−vW(st)) lnπW(z|st) +ηH[πW(z|st)]
+(13)
+L(vW) =Eκ∼πW"H−1X
+t=0(vW(st)−Gλ
+t)2#
+(14)
+B.2 Implementation Details
+We implement two functions: policy (Alg. 1) and train 2, using the hyperparameters shown in
+Table 1. The functions are implemented in Python/Tensorflow using XLA JIT compilation. The
+experiments on average take 2days to run 5M steps on an NVIDIA RTX 5000.
+Name Symbol Value
+Train batch size B 16
+Replay data length - 64
+Worker abstraction length K 8
+Explorer Imagination Horizon T 16
+Return Lambda λ 0.95
+Return Discount γ 0.99
+Skill resolutions L {64,32,16,8,∞}
+Target entropy η 0.5
+KL loss weight β 1.0
+RSSM deter size - 1024
+RSSM stoch size - 32×32
+Optimizer - Adam
+Learning rate (all) - 10−4
+Adam Epsilon - 10−6
+Weight decay (all) - 10−2
+Activations - LayerNorm + ELU
+MLP sizes - 4×512
+Train every - 8
+Prallel Envs - 4
+Table 1: Agent Hyperparameters
+Algorithm 1: Multi-Resolution Skill Policy ( πMSRD )
+Input: Observation ot, Agent state (t, st−1, at−1, sg)
+Output: Action at, New agent state (t+ 1, st, at, sg)
+st←wm(ot, st−1, at−1) // World model state update
+iftmod K= 0then
+// Manager updates goal every Ksteps
+(z0, z1, ..., z N−1, c)∼πM(st) // Sample skill latent zand choice c
+{si
+g}N−1
+i=0← {Deci
+ϕ(st, zi)}N−1
+i=0 // Generate candidate goals
+sg←PN−1
+i=0ci·si
+g // Select goal using choice vector c
+else
+sg←sg // Persist previous goal
+// Worker policy execution
+at←Worker π(st, sg) // Generate action for current goal
+Return at,(t+ 1, st, at, sg)
+13Algorithm 2: Multi-Resolution Skill Training
+Input: Collected trajectories D={τ1, ..., τ B}
+Output: Updated world model wm, skill modules (Encϕ,Decϕ), manager πM, worker πW
+// World Model Training
+wm.train(D) // See [8]
+// Multi-Resolution Skill Learning
+Lskills←[ ]
+forli∈ L do
+{(st, st+li)} ← ExtractStatePairs (D, li)
+Li←skill_loss (st, st+li) // CVAE loss (Eq. 1)
+Lskills.append (Li)
+update_skills (sum(Lskills))
+// Policy Optimization via Imagination
+Sinit← {s0|s0∈τ, τ∈ D} // Initial states
+ˆτ←wm.imagine (πMSRD,Sinit, T) // Rollout imagined trajectories (Alg. 1)
+// Reward Computation
+ˆτ.rextr←renv(ˆτ) // Environment reward
+ˆτ.rexpl←expl_rew (ˆτ) // Exploration reward (Eq. 5)
+ˆτ.rgoal←cosine_max (ˆτ.st,ˆτ.s⌊t/K⌋
+g ) // Goal achievement reward
+// Hierarchical Policy Update
+TW←split (ˆτ) // Worker-level transitions
+TM←abstract (ˆτ) // Manager-level abstractions
+L(πM),L(vM) =manager_loss (TM) // Eqs. 13,11
+update_manager (L(πM),L(vM))
+L(πW),L(vW) =worker_loss (TW) // Eqs. 13,14
+update_worker (L(πW),L(vW))
+C Behaviors Learned via Exploration
+We noticed some interesting behaviors that the MSRD agent regularly exhibited, such as front-flips,
+back-flips, jumps, etc., while training only using the exploratory loss. The intrinsic exploratory loss
+encourages the agent to perform novel state transitions (Sec. 3.4.1). Fig. 10 shows some of the
+learned movements.
+D Broader Impacts
+D.1 Positive Impacts
+Our method’s sample efficiency (train every 8-steps) could reduce compute costs for real-world robot
+training, lowering environmental footprints. The imagination-based policy optimization mitigates
+hazards that can occur during learning. The skill interleaving mechanism allows for transparent
+agents with interpretable subgoals. The learned skills can be interleaved with rigorously tested safe
+skills, and the selection can be appropriately constrained to mitigate failures.
+D.2 Negative Impacts and Mitigations
+•Inaccurate Training : Imagination can cause incorrect learning. Mitigation: Rigorous
+testing using manual verification of world-model reconstructions against ground truths.
+•Malicious Use : Hierarchical control could enable more autonomous adversarial agents.
+Mitigation: Advocate for gated release of policy checkpoints.
+14(a) Hopper learns to use a front flip to stand, and back flips.
+(b) Cheetah learns to leap forward and perform perfect back flips.
+(c) Quadruped learning side rolls and walking on two legs.
+(d) Walker trying to headstand repeatedly and fast-forward tumbling using head and legs.
+Figure 10: Samples of some movements learned and regularly performed by the agent optimized only
+for the exploratory loss.
+D.3 Limitations of Scope
+Our experiments focus on simulated tasks without human interaction. Real-world impacts require
+further study of reward alignment and failure modes.
+E Sample Goals using Skill CV AEs
+We generate some sample goals using each of the Skill CV AEs individually. The goals are generated
+using a uniform prior p(z)for the skills, and initial states stsampled from the replay database. We use
+skills with temporal resolutions [64,32,16,8,∞], but we omit the ∞length skills, as it corresponds
+to simply learning all states independently and is not our contribution.
+E.1 Default Objective
+The agent is trained using the default objective (weighted external and exploratory advantages). Since
+we use a strong bias towards external reward ([1.0,0.1]), the skills learned are biased towards the
+goal states more appropriate for the objective. We sample the goals for tasks: walker_run (Fig. 11),
+quadruped_run (Fig. 12), cheetah_run (13), and hopper_hop (14).
+15(a)64length.
+(b)32length.
+(c)16length.
+(d)8length.
+Figure 11: Sample goals from the walker_run task.
+16(a)64length.
+(b)32length.
+(c)16length.
+(d)8length.
+Figure 12: Sample goals from the quadruped_run task.
+17(a)64length.
+(b)32length.
+(c)16length.
+(d)8length.
+Figure 13: Sample goals from the cheetah_run task.
+18(a)64length.
+(b)32length.
+(c)16length.
+(d)8length.
+Figure 14: Sample goals from the hopper_hop task.
+19E.2 Exploration Only
+The agent is optimized only for the exploration objective that aims to maximize the coverage of the
+state transition space. We sample the goals per Skill CV AE for embodiments: walker (Fig. 15),
+quadruped (Fig. 16), cheetah (17), and hopper (18) in the DMC suite [23].
+20(a)64length.
+(b)32length.
+(c)16length.
+(d)8length.
+Figure 15: Sample goals from exploration as a walker .
+21(a)64length.
+(b)32length.
+(c)16length.
+(d)8length.
+Figure 16: Sample goals from exploration as a quadruped .
+22(a)64length.
+(b)32length.
+(c)16length.
+(d)8length.
+Figure 17: Sample goals from exploration as a cheetah .
+23(a)64length.
+(b)32length.
+(c)16length.
+(d)8length.
+Figure 18: Sample goals from exploration as a Hopper .
+24NeurIPS Paper Checklist
+1.Claims
+Question: Do the main claims made in the abstract and introduction accurately reflect the
+paper’s contributions and scope?
+Answer: [Yes]
+Justification: The abstract and introduction explicitly state three key claims that are rigor-
+ously validated:
+•"Learns skills at multiple temporal resolutions" (Sec. 3.2): Demonstrated through
+distinct skill visualizations (Fig. 1) and per-skill ablation results (Fig. 7) and samples
+of learned agents (Sec. E).
+•"Dynamic skill interleaving mechanism" (Sec. 3.3): Validated via comparative analysis
+of fixed vs. adaptive schedules (Fig. 7) and manager choice distributions (Fig. 5).
+•"Matches SOTA non-HRL methods" (Sec. 5.1): Quantified through per-task compar-
+isons with DreamerV2 and Director (Fig. 9), using identical evaluation protocols.
+Limitations noted in Sec. 7 as:(reduction in per skill head learning, exploration reward).
+While we reuse Director’s world model architecture [ 10], all policy components and skill
+learning mechanisms are novel contributions.
+2.Limitations
+Question: Does the paper discuss the limitations of the work performed by the authors?
+Answer: [Yes]
+Justification: We discuss three limitations of our approach in section 7.
+•The method cannot be scaled to an arbitrary number of skill heads as it reduces per
+skill learning signal.
+•While our V AE-based exploration succeeds in sparse-reward navigation tasks (6), it
+underperforms in dynamic locomotion for cheetah_run . This suggests that the loss is
+not sufficient for all tasks..
+• Quality of imagination places an upper limit on performance.
+3.Theory assumptions and proofs
+Question: For each theoretical result, does the paper provide the full set of assumptions and
+a complete (and correct) proof?
+Answer: [Yes]
+Justification: While Section 3.4.2 derives policy gradients from trajectory probabilities,
+three aspects require improvement:
+•Missing Assumptions : The derivation assumes (1) fully observable MDPs can be
+generated by the RSSM using partial observations and (2) differentiable policy parame-
+terization without explicitly stating these constraints.
+•Proof Completeness : The gradient derivation cites but does not formally prove the
+policy gradient theorem [21].
+•Formal Guarantees : While we present empirical convergence (Fig. 4), no theoretical
+analysis of convergence is provided.
+4.Experimental result reproducibility
+Question: Does the paper fully disclose all the information needed to reproduce the main ex-
+perimental results of the paper to the extent that it affects the main claims and/or conclusions
+of the paper (regardless of whether the code and data are provided or not)?
+Answer: [Yes]
+Justification: We include the remaining training details in section B, which includes all the
+important hyperparameters, architecture, optimization objectives, and function algorithms
+for reproducing the results. Although our implementation is based on Director [ 10], all novel
+components are self-contained in the algorithms provided (Algs. 1,2). Code release will
+include Dockerfile for environment replication and pre-trained checkpoints. We follow the
+same design patterns as the Director, so people familiar with it should be able to implement
+our approach in a few hours.
+255.Open access to data and code
+Question: Does the paper provide open access to the data and code, with sufficient instruc-
+tions to faithfully reproduce the main experimental results, as described in supplemental
+material?
+Answer: [Yes]
+Justification: While we commit to releasing code post-acceptance, the current submission
+lacks:
+• Anonymized code/scripts in supplemental materials
+• Environment setup instructions (Dockerfile)
+• Exact reproduction commands for key experiments
+Post-release will include:
+• Complete code with environment setup.
+• Pre-trained checkpoints for all tasks.
+• Jupyter notebooks for all results and visualizations.
+6.Experimental setting/details
+Question: Does the paper specify all the training and test details (e.g., data splits, hyper-
+parameters, how they were chosen, type of optimizer, etc.) necessary to understand the
+results?
+Answer: [Yes]
+Justification: We try to provide all the details specific to our approach in the main pa-
+per. We include the remaining details in the supplementary (Sec. B), which include the
+hyperparameters and the function algorithms implemented.
+7.Experiment statistical significance
+Question: Does the paper report error bars suitably and correctly defined or other appropriate
+information about the statistical significance of the experiments?
+Answer: [Yes]
+Justification: The statistical descriptions have been added to the paper. For all our plots, the
+results are mean and standard deviations (std) across 3seeds. The bar graphs are shown as
+mean and std over 100evaluation runs. However, we have a small sample size of 3seeds
+due to resource constraints. Error bars represent population standard deviation (not SEM)
+calculated via numpy.ndarray.std() . We plan 5-seed runs (including DreamerV2) for
+the camera-ready version.
+8.Experiments compute resources
+Question: For each experiment, does the paper provide sufficient information on the com-
+puter resources (type of compute workers, memory, time of execution) needed to reproduce
+the experiments?
+Answer: [Yes]
+Justification: We include the exact implementation and resource details used in the section
+B.
+9.Code of ethics
+Question: Does the research conducted in the paper conform, in every respect, with the
+NeurIPS Code of Ethics https://neurips.cc/public/EthicsGuidelines ?
+Answer: [Yes]
+Justification: We do not include any information that can violate anonymity. We try to cite
+all references to previous work and sources.
+10.Broader impacts
+Question: Does the paper discuss both potential positive societal impacts and negative
+societal impacts of the work performed?
+Answer: [Yes]
+26Justification: We discuss the possible impact of our work in section D. We emphasize that
+these are speculative, given our simulation-only experiments.
+11.Safeguards
+Question: Does the paper describe safeguards that have been put in place for responsible
+release of data or models that have a high risk for misuse (e.g., pretrained language models,
+image generators, or scraped datasets)?
+Answer: [NA]
+Justification: We do not introduce any data or models that can be deployed directly.
+12.Licenses for existing assets
+Question: Are the creators or original owners of assets (e.g., code, data, models), used in
+the paper, properly credited and are the license and terms of use explicitly mentioned and
+properly respected?
+Answer: [Yes]
+Justification: All reused assets are properly credited with licenses and terms explicitly stated:
+•Director Codebase : Built on the open-source implementation from [ 10], with modifi-
+cations documented in the paper (Mentioned in the paper).
+•DeepMind Control Suite : Used under Apache License (v2.0) for all environments
+[23], downloaded via https://github.com/deepmind/dm_control .
+No proprietary datasets or models were used.
+13.New assets
+Question: Are new assets introduced in the paper well documented and is the documentation
+provided alongside the assets?
+Answer: [NA]
+Justification: This paper does not introduce new datasets, models, or codebases. Our
+implementation modifies existing assets (Director codebase [ 10], DM Control Suite [ 23])
+without creating novel standalone assets. The proposed method and training procedures are
+fully described in Algorithms 1-2 and Appendix B.
+14.Crowdsourcing and research with human subjects
+Question: For crowdsourcing experiments and research with human subjects, does the paper
+include the full text of instructions given to participants and screenshots, if applicable, as
+well as details about compensation (if any)?
+Answer: [NA]
+Justification: Our work does not involve crowdsourcing nor research with human subjects.
+15.Institutional review board (IRB) approvals or equivalent for research with human
+subjects
+Question: Does the paper describe potential risks incurred by study participants, whether
+such risks were disclosed to the subjects, and whether Institutional Review Board (IRB)
+approvals (or an equivalent approval/review based on the requirements of your country or
+institution) were obtained?
+Answer: [NA]
+Justification: Our work does not involve crowdsourcing nor research with human subjects.
+16.Declaration of LLM usage
+Question: Does the paper describe the usage of LLMs if it is an important, original, or
+non-standard component of the core methods in this research? Note that if the LLM is used
+only for writing, editing, or formatting purposes and does not impact the core methodology,
+scientific rigorousness, or originality of the research, declaration is not required.
+Answer: [NA]
+Justification: We do not use an LLM to develop any part of the method.
+27

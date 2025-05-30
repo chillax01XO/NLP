@@ -1,0 +1,1575 @@
+arXiv:2505.21182v1  [cs.LG]  27 May 2025Learning What to Do and What Not To Do: Offline
+Imitation from Expert and Undesirable
+Demonstrations
+Huy Hoang
+Singapore Management University
+mh.hoang.2024@phdcs.smu.edu.sgTien Mai
+Singapore Management University
+atmai@smu.edu.sg
+Pradeep Varakantham
+Singapore Management University
+pradeepv@smu.edu.sgTanvi Verma
+Institute of High Performance Computing
+Agency for Science, Technology and Research, Singapore
+Tanvi_Verma@ihpc.a-star.edu.sg
+Abstract
+Offline imitation learning typically learns from expert and unlabeled demonstra-
+tions, yet often overlooks the valuable signal in explicitly undesirable behaviors. In
+this work, we study offline imitation learning from contrasting behaviors, where the
+dataset contains both expert and undesirable demonstrations. We propose a novel
+formulation that optimizes a difference of KL divergences over the state-action vis-
+itation distributions of expert and undesirable (or bad) data. Although the resulting
+objective is a DC (Difference-of-Convex) program, we prove that it becomes convex
+when expert demonstrations outweigh undesirable demonstrations, enabling a prac-
+tical and stable non-adversarial training objective. Our method avoids adversarial
+training and handles both positive and negative demonstrations in a unified frame-
+work. Extensive experiments on standard offline imitation learning benchmarks
+demonstrate that our approach consistently outperforms state-of-the-art baselines.
+1 Introduction
+Imitation learning [ 8,21,25,15,40] offers a compelling alternative to Reinforcement Learning
+(RL) [ 37,32,29] by enabling agents to learn directly from expert demonstrations without the need
+for explicit reward signals. This paradigm has been successfully applied in various domains, even
+with limited expert data, and is particularly effective in capturing complex human behaviors and
+preferences.
+Traditional imitation learning typically assumes access to high-quality expert demonstrations, which
+can be expensive and difficult to obtain [ 34,38,44]. In practice, datasets often contain a mixture of
+expert and sub-optimal demonstrations. Recent advances in imitation learning have begun to address
+this more realistic setting, aiming to develop algorithms that can leverage informative signals from
+both expert and non-expert data [4, 30, 15].
+While existing imitation learning approaches in the mixed-quality setting typically assume that mixed-
+quality demonstrations are not drastically different from expert behavior, they often frame learning
+as mimicking both expert and sub-optimal trajectories—albeit with different weights [ 21,20,40].
+However, in practice, mixed-quality data may contain poor or undesirable demonstrations that the
+agent should explicitly avoid. For example, in autonomous driving, undesirable demonstrations
+may include unsafe lane changes or traffic violations, which should not be imitated under any
+circumstances. Another example can be found in healthcare applications, where undesirable demon-
+Preprint. Under review.strations may correspond to incorrect diagnoses or unsafe treatment plans that could harm patients
+if imitated. Existing imitation learning approaches are limited in their ability to handle contrasting
+demonstrations. Most methods are either not explicitly designed to avoid undesirable behaviors, or
+are ill-equipped to deal with scenarios where both expert and undesirable demonstrations coexist
+within the dataset [ 39,42,15]. It is important to note that learning by mimicking expert or mildly
+sup-optimal demonstrations is often tractable, as the corresponding objective—typically framed
+as divergence minimization—is convex [ 21,20]. However, incorporating objectives that explicitly
+avoid bad (or undesirable) demonstrations can introduce non-convexities, making the optimization
+significantly more challenging. In this paper, we propose a unified framework that addresses these
+challenges, aiming to bridge this gap in the current imitation learning literature.
+Specifically, we focus on the setting of offline imitation learning , where interaction with the environ-
+ment is not available, and assume that the dataset contains both expert andundesirable demonstrations.
+We make the following contributions:
+•We formulate the learning problem with the goal of matching expert behavior while explicitly
+avoiding undesirable demonstrations. Although the resulting training objective is expressed
+as the difference between two KL divergences (and is therefore difference-convex), we
+prove that it becomes convex when the expert component outweighs the undesirable one.
+This convexity is critical, as it enables us to reformulate the learning problem over the
+state-action visitation distribution as an more tractable unconstrained optimization via
+Lagrangian duality. Our objective stands in contrast to most existing distribution-matching
+imitation learning approaches, which typically rely solely on divergence minimization and
+naturally yield convex objectives. By introducing a divergence maximization term to account
+for undesirable behavior, we demonstrate that the overall objective remains convex and
+manageable.
+•We further enhance the learning objective by proposing a surrogate objective that lower-
+bounds the original one, offering the advantage of a non-adversarial and convex optimization
+problem in the Q-function space. In addition, we introduce a novel Q-weighted behavior
+cloning (BC) approach, supported by theoretical guarantees, for efficient policy extraction.
+•Extensive experiments on standard imitation learning benchmarks show that our method
+consistently outperforms existing approaches, both in conventional settings where datasets
+contain expert and unlabeled demonstrations, and in more realistic scenarios where explicitly
+undesirable demonstrations are included.
+2 Related Works
+Imitation Learning. Imitation learning trains agents to mimic expert behavior from demonstrations,
+with Behavioral Cloning (BC) serving as a foundational method by maximizing the likelihood of
+expert actions. However, BC often suffers from distributional shift [ 34]. Recent work addresses
+this issue by leveraging the strong generalization capabilities of generative models [ 43,5]. Inspired
+by GANs [ 11], methods like GAIL [ 14] and AIRL [ 7] use a discriminator to align the learner’s
+policy with the expert’s, while SQIL [ 33] simplifies reward assignment by distinguishing expert
+and non-expert behaviors. Although effective, these approaches typically require online interaction,
+which may be impractical in many real-world scenarios.
+To address this, offline methods such as AlgaeDICE [ 31] and ValueDICE [ 22] employ Stationary
+Distribution Correction Estimation (DICE), though they often encounter stability issues. Building
+on ValueDICE, O-NAIL [ 3] avoids adversarial training, enabling stable offline imitation. More
+recently, several approaches have extended the DICE framework with stronger theoretical foundations
+and improved empirical performance [ 24,28]. In parallel, IQ-Learn [ 8] has emerged as a unified
+framework for both online and offline imitation learning, inspiring a range of follow-up works [ 2,16].
+However, all these approaches rely on the presence of many expert demonstrations, which may not
+always be available.
+Offline imitation learning from suboptimal demonstrations: Several approaches have been
+developed to tackle the challenges of offline imitation learning from suboptimal data, which is
+common in real-world scenarios. A notable direction involves preference-based methods, where
+algorithms infer reward functions by leveraging ranked or pairwise-compared trajectories to guide
+learning [ 19,18,13]. Recent works, such as SPRINQL [ 15], take advantage of demonstrations
+2that exhibit varying levels of suboptimality, enabling the learner to better generalize beyond near-
+optimal behaviors. Another important line of research explores the use of unlabeled demonstrations
+in conjunction with a limited number of expert trajectories. Techniques like DemoDICE [ 21],
+SMODICE [ 27], and ReCOIL [ 35] apply Distribution Correction Estimation (DICE) [ 36,24,28] to re-
+weight trajectories and align the state or state-action distributions with those of the expert. In parallel,
+classifier-based methods, such as DWBC [ 40], ISW-BC [ 25], and ILID [ 41], use discriminators
+to distinguish expert-like behaviors within mixed-quality data and assign them greater importance.
+Collectively, these strategies aim to enhance policy robustness and performance in offline settings
+where high-quality expert data is scarce or expensive to obtain. However, all of these approaches are
+primarily focused on imitating and are unable to avoid undesirable or bad demonstrations, which is
+crucial in domains such as self driving where there are many unsafe behaviors that would need to be
+avoided.
+SafeDICE [ 17] was introduced to address this problem of avoiding undesirable or bad demonstrations.
+However, SafeDICE is not designed to handle scenarios where both expert and undesirable datasets
+are available. Moreover, their approach still relies on minimizing a divergence between the learning
+policy and a mixture of unlabeled and undesirable data—an approach that is vulnerable to the quality
+of the unlabeled dataset and may degrade when such data is of low quality.
+In this paper, we aim to optimize on the principle of "Imitate the Good and Avoid the Bad", which has
+recently gained attention in reference and safe reinforcement learning [ 1,15,10] and large language
+model training [ 26]. We extend this idea to the offline imitation setting by proposing a novel and
+efficient method that learns from expert demonstrations while avoiding undesirable ones. To our
+knowledge, this is the first offline imitation learning approach to efficiently learn policies by jointly
+utilizing both expert and undesirable demonstrations.
+3 Preliminaries
+Markov Decision Process (MDP). We consider a MDP defined by the following tuple M=
+⟨S, A, r, P, γ, s 0⟩, where Sdenotes the set of states, s0represents the initial state set, Ais the set of
+actions, r:S×A→Rdefines the reward function for each state-action pair, and P:S×A→Sis
+the transition function, i.e., P(s′|s, a)is the probability of reaching state s′∈Swhen action a∈A
+is made at state s∈S, andγis the discount factor. In reinforcement learning (RL), the aim is to find
+a policy that maximizes the expected long-term accumulated reward: max π
+E(s,a)∼dπ[r(s, a)]	
+,
+where dπis the occupancy measure (or state-action visitation distribution) of policy π:dπ(s, a) =
+(1−γ)π(a|s)P∞
+t=1γtP(st=s|π).
+Offline Imitation Leaning. Recent imitation learning (IL) approaches have adopted a distribution-
+matching formulation, where the objective is to minimize the divergence between the occupancy
+measures (i.e., state-action visitation distributions) of the learning policy and the expert pol-
+icy:mindπ
+Df 
+dπ∥dE	
+,where Dfdenotes an f-divergence between the occupancy distri-
+butions dπ(induced by the learning policy π) and dE(induced by the expert policy). In par-
+ticular, when the Kullback–Leibler (KL) divergence is used, the learning objective becomes:
+mindπE(s,a)∼dπh
+log
+dπ(s,a)
+dE(s,a)i
+.In the space of state-action visitation distributions ( dπ), the
+training can be formulated as a convex constrained optimization problem. To enable efficient training,
+Lagrangian duality is typically employed to recast the problem into an unconstrained form [24, 21].
+Offline IL with unlabeled data. In offline imitation learning with unlabeled data, it is
+typically assumed that a limited set of expert demonstrations BEis available, along with
+a larger set of unlabeled demonstrations BMIX. Distribution-matching approaches have been
+widely adopted to handle this setting. Prior methods often formulate the objective as a
+weighted sum of divergences between the learning policy and both expert and unlabeled data:
+mindπ
+Df 
+dπ∥dE
++αDf(dπ∥dMIX)	
+,where α≥0.Other approaches construct mixtures of
+occupancy distributions, such as dπ,MIX=αdπ+ (1−α)dMIXanddE,MIX=αdE+ (1−α)dMIX,and
+minimize the divergence between dπ,MIXanddE,MIX[21,20,27,35]. In most existing approaches
+along this line of research, the convexity of the objective with respect to dπhas been heavily leveraged
+to derive tractable learning objectives. However, when a divergence maximization term is intro-
+3duced—as in our approach—this convexity may no longer hold, rendering many existing methods
+inapplicable.
+4 ContraDICE: Offline Imitation Learning from Contrasting Behaviors
+We begin by introducing a novel learning objective based on the difference between two KL di-
+vergences. Leveraging the convexity of this formulation, we derive a tractable and unconstrained
+optimization problem. Given that the resulting objective includes exponential terms that may lead to
+numerical instability, we enhance this by proposing a lower-bound approximation. This approxima-
+tion enables us to reformulate the learning process as a more tractable, non-adversarial Q-learning
+objective, which remains convex in the space of Q-functions.
+4.1 Dual KL-Based Formulation
+Assume that we have access to three sets of demonstrations: good dataset BGcontains good orexpert
+demonstrations, bad dataset BBcontains badorundesirable demonstrations that the agent should
+avoid, and the unlabeled dataset BMIXis a large set of unlabeled demonstrations used to support offline
+training. We consider the realistic scenario where the identified datasets BGandBBare limited in
+size, while BMIXis significantly larger—an assumption that aligns with typical settings in offline
+imitation learning from unlabeled demonstrations.
+Letdπ(s, a),dG(s, a), and dB(s, a)denote the state-action visitation distributions induced by the
+learned policy π, the good policy, and the bad policy, respectively. Following the DICE framework [ 31,
+22], we propose to optimize the following training objective:
+min
+dπf(dπ) =DKL(dπ∥dG)−α D KL(dπ∥dB), (1)
+where α >0is a tunable hyperparameter. The goal of this objective is twofold: (1) to minimize the
+divergence between the learned policy and the good policy, and (2) to maximize the divergence from
+the bad policy, thereby avoiding undesirable behavior.
+This formulation differs from all existing DICE-based approaches in the literature, which primarily
+focus on minimizing KL divergence—even when dealing with undesirable or unsafe demonstrations.
+By contrast, our approach introduces a principled mechanism to explicitly repel the learned policy
+from undesirable behavior while still aligning it with good data.
+While the presence of a KL divergence maximization term in the objective may raise concerns
+about the convexity of the training problem, we observe that the objective in (1)takes the form of a
+difference between two convex functions. This is, in general, not convex and can be challenging to
+optimize. Fortunately, we show that under a mild condition, the overall objective remains convex.
+Specifically, if the weight on the bad policy divergence term is smaller than that on the good policy
+(i.e.,α <1), then the objective becomes convex in dπ.
+Proposition 4.1. Ifα≤1, then the objective function f(dπ) =DKL(dπ∥dG)−α D KL(dπ∥dB)is
+convex in dπ.
+Convexity is essential in most DICE-based frameworks, as it enables the use of Lagrangian duality to
+construct well-behaved and tractable training objectives. Our goal is to develop a Q-learning method
+that recovers a policy minimizing the objective in (1). To this end, we formulate the problem as the
+following constrained optimization:
+min
+d,πf(d, π) =DKL(d∥dG)−α D KL(d∥dB) (2)
+s.t.d(s, a) = (1 −γ)p0(s)π(a|s) +γπ(a|s)X
+s′,a′d(s′, a′)T(s|s′, a′),
+where d(s, a)is the state-action visitation distribution, and Tis the environment transition function.
+LetBU=BG∪ BMIXdenote the union dataset, and let dUbe the state-action visitation distribution
+derived from it. The following proposition gives an another formulation for the objective in (1):
+Proposition 4.2. The objective function in (2)can be written as: f(d, π) = (1 −α)DKL(d||dU)−
+E(s,a)∼d[Ψ(s, a)], where Ψ(s, a) = logdG(s,a)
+dU(s,a)−αlogdB(s,a)
+dU(s,a).
+4This formulation introduces a KL-based regularization centered on the reference distribution dU,
+withΨ(s, a)acting as a correction term that incorporates information from the labeled good and
+bad demonstrations. The reformulated objective in Proposition 4.2 further confirms that the function
+f(d, π)remains convex in dwhen α≤1. Here we note that, under the same condition α≤1,
+convexity may not hold for other f-divergences (a detailed discussion is provided in the appendix).
+Given the convexity of the objective in (1), we can equivalently move the constraints into the objective
+using Lagrangian duality, leading to the following Q-learning formulation (details of the derivation
+are given in the appendix):
+max
+πmin
+Qn
+(1−γ)E(s,a)∼p0,π[Q(s, a)]
++ (1−α)E(s,a)∼dU
+expΨ(s, a) +γE(s′,a′)∼T,π[Q(s′, a′)]−Q(s, a)
+1−αo
+To further enhance the efficiency of Q-learning, we adopt the well-known Maximum Entropy
+(MaxEnt) reinforcement learning framework by incorporating an entropy term into the training
+objective [8, 12]. This leads to the following objective:
+L(Q, π) = (1 −γ)E(s,a)∼p0,π
+Q(s, a)−βlogπ(a|s)
+µU(a|s)
++ (1−α)E(s,a)∼dU
+exp
+Ψ(s, a) +γE(s′,a′)∼T,πh
+Q(s′, a′)−βlogπ(a′|s′)
+µU(a′|s′)i
+−Q(s, a)
+1−α
+
+.
+where µU(a|s)is the behavior policy representing the union dataset BU. We now define the soft
+value function and the soft Bellman operator as follows:
+Vπ
+Q(s) =Ea∼π(·|s)
+Q(s, a)−βlogπ(a|s)
+µU(a|s)
+,Tπ[Q](s, a) =Q(s, a)−γEs′∼T(·|s,a)
+Vπ
+Q(s′)
+.
+Using these definitions, the training objective can be rewritten as:
+L(Q, π) = (1 −γ)Es∼p0
+Vπ
+Q(s)
++ (1−α)E(s,a)∼dU
+expΨ(s, a)− Tπ[Q](s, a)
+1−α
+.(3)
+This formulation shares structural similarities with IQ-Learn, where Tπ[Q](s, a)is referred to as
+theinverse Bellman operator and is often interpreted as a reward function expressed in terms of the
+Q-function itself.
+Remark. The objective in Equation (3)is valid only when α < 1. In the special case where
+α= 1, i.e., when the bad demonstrations are weighted equally to the expert demonstrations—the
+training objective simplifies significantly. According to Proposition 4.2, the training objective
+reduces to a standard offline RL problem with reward function Ψ(s, a):max dE(s,a)∼d[Ψ(s, a)] =
+maxE[P∞
+t=0γtΨ(st, at)].
+4.2 Tractable Lower Bounded Objective
+In this section, we propose an additional step to improve the stability and tractability of the learning
+objective introduced above. We first observe that the exponential term in Equation (3)may lead to
+instability during training. To address this issue, we propose to approximate the exponential using
+a linear lower bound, which not only improves stability but also preserves a similar optimization
+objective.
+Proposition 4.3. Let the surrogate objective be defined as:
+eL(Q, π) = (1 −γ)Es∼p0
+Vπ
+Q(s)
+−EdU[δ(s, a)Tπ[Q](s, a)] + (1 −α)EdU[δ(s, a)].(4)
+where δ(s, a) = exp
+Ψ(s,a)
+1−α
+.TheneL(Q, π)is a lower bound of L(Q, π), with equality when
+Tπ[Q](s, a) = 0 for all (s, a).
+5The lower-bound approximation eL(Q, π)offers several benefits. First, as a valid lower bound of
+L(Q, π), maximizing eL(Q, π)promotes the original objective. Second, its structure—linear in Q
+and concave in π—leads to a simplified, non-adversarial training procedure (see Proposition 4.4).
+Finally, its optimization goals remain aligned with those of L(Q, π), encouraging high expected soft
+value under the initial state distribution and consistency between the soft Bellman residual and the
+guidance signal Ψ(s, a).
+Remark. We note that the training objective in Equation (4)generalizes the IQ-Learn objective [ 8]
+as a special case. In particular, eL(Q, π)reduces exactly to the IQ-Learn objective when α= 0(i.e.,
+the undesirable dataset is ignored) and BG≡ BU(i.e., the good dataset coincides with the union
+dataset). To see this, observe that when α= 0 anddG=dU, the term Ψ(s, a)becomes zero for
+all(s, a). As a result, the surrogate objective simplifies to: eL(Q, π) = (1 −γ)Es∼p0
+Vπ
+Q(s)
+−
+E(s,a)∼dG[Tπ[Q](s, a)],which is exactly the training objective proposed in IQ-Learn. Thus, our
+formulation can be viewed as a principled extension of IQ-Learn that explicitly accounts for and
+contrasts between good and bad behaviors.
+We now present several key properties of the training objective eL(Q, π)that make it particularly
+convenient and tractable for use, as formalized in Proposition 4.4 below.
+Proposition 4.4. The following properties hold:
+(i)eL(Q, π)is linear in Qand concave in π. As a result, the max–min optimization can be equiv-
+alently reformulated as a min–max problem: max πminQeL(Q, π) = min Qmax πeL(Q, π).
+(ii)The min–max problem minQmax πeL(Q, π)reduces to the following non-adversarial prob-
+lem:
+min
+Q
+eL(Q) = (1 −γ)Es∼p0[VQ(s)]−E(s,a)∼dU
+expΨ(s, a)
+1−α
+T[Q](s, a)
+,
+where the soft value function VQ(s)is defined as: VQ(s) =
+βlog P
+aµU(a|s) exp( Q(s, a)/β)
+,and the soft Bellman residual operator is given by:
+T[Q](s, a) =Q(s, a)−γVQ(s).Moreover eL(Q)is convex in Q.
+5 Practical Algorithm
+Estimating Occupancy Ratios. The training objective involves several ratios between state-action
+visitation distributions, which are not directly observable. These quantities can be estimated by
+solving corresponding discriminator problems. Specifically, to estimate the ratiodG(s,a)
+dU(s,a), we train a
+binary classifier cG:S × A → [0,1]by solving the following standard logistic regression objective:
+max
+cG
+E(s,a)∼dG
+logcG(s, a)
++E(s,a)∼dU
+log(1−cG(s, a))	
+. (5)
+LetcG∗(s, a)be optimal solution to this problem, then the ratio can be computed as:dG(s,a)
+dU(s,a)=
+cG∗(s,a)
+1−cG∗(s,a).Similar discriminators can be trained to estimate other ratios such asdB(s,a)
+dU(s,a).
+Implicit V-Update and Regularizers. In the surrogate objective eL(Q), the value function VQis
+typically computed via a log-sum-exp over Q, which becomes intractable in large or continuous action
+spaces. To address this, we adopt Extreme Q-Learning (XQL) [ 9], which avoids the log-sum-exp by
+introducing an auxiliary optimization over V, jointly updated with Q. Specifically, Vis optimized
+using the Extreme-V objective: J(V|Q) =E(s,a)∼dU
+et(s,a)−t(s, a)−1
+,where t(s, a) =
+Q(s,a)−V(s)
+β.The main training objective with fixed Vis:
+eL(Q|V) = (1 −γ)Es∼p0[V(s)]−E(s,a)∼dU
+expΨ(s, a)
+1−α
+(Q(s, a)−γEs′[V(s′)])
+.(6)
+The overall optimization proceeds by alternating: (i) updating Qvia minimizing eL(Q|V), and (ii)
+updating Vvia minimizing J(V|Q). Both sub-problems are convex, enabling efficient and stable
+6training. To further enhance stability, we follow [ 8,9] and add a convex regularizer ϕ(T[Q](s, a))to
+prevent reward divergence. We use the χ2-divergence, ϕ(t) =t2/2, a common choice in Q-learning.
+Policy Extraction Once the QandVfunctions are obtained, a common approach for expert policy
+extraction is to apply advantage-weighted behavior cloning (AW-BC) [23, 9, 13, 35]:
+max
+πX
+(s,a)∼BUexp1
+β(Q(s, a)−V(s))
+logπ(a|s). (7)
+A key limitation of this formulation is that the value function V(s)is only an approximate estimate
+from the Extreme-V objective, potentially introducing noise and bias into advantage computation and
+degrading policy quality. To address this, we propose a Q-only alternative that avoids reliance on
+V(s). The following proposition shows that this Q-based objective can, in theory, recover the same
+optimal policy as the original advantage-weighted BC formulation.
+Proposition 5.1. The following Q-weighted behavior cloning (BC) objective yields the same optimal
+policy as the original advantage-weighted BC formulation in (7):
+max
+πX
+(s,a)∼BUexp1
+βQ(s, a)
+logπ(a|s). (8)
+Algorithm 1 ContraDICE
+Require: Datasets BG,BB,BMIX; training steps Nµ,N;
+models: cG
+wG,cB
+wB,πθ,Qwq,Vwv
+1:Assign BU=BG∪ BMIX
+2:#Train discriminator cG
+wGandcB
+wB
+3:fori= 1toNµdo
+4: Update (wG, wB)to minimize Objective 5.
+5:end for
+6:#Train QwqandVwv, and policy πθ
+7:fori= 1toNdo
+8: Update wqto minimize eF(Qwq|Vwv)
+9: Update wvto minimize J(Vwv|Qwq)
+10: Update θvia QW-BC:
+max πnP
+(s,a)∼BUeQ(s,a)/βlogπ(a|s)o
+11:end forWhile the Q-weighted BC objective is
+theoretically equivalent to the advantage-
+weighted BC objective in terms of the op-
+timal policy it recovers, it provides a sim-
+pler and more practical formulation. This
+simplification can lead to more stable and
+accurate optimization in practice. Our
+experimental results further demonstrate
+that the Q-weighted formulation consis-
+tently yields significantly better training
+outcomes compared to the advantage-
+weighted BC baseline. Bringing all com-
+ponents together, we present our CON-
+TRADICE algorithm in Algorithm 1.
+6 Experiments
+In this section, we conduct extensive experiments to evaluate our method, focusing on the following
+key questions: (Q1) Can ContraDICE effectively leverage both labeled good and bad data to outper-
+form existing baselines? (Q2) How does the size of the bad dataset BBaffect the performance of
+ContraDICE? (Q3) ContraDICE relies on an important parameter αto balance the objectives for
+good and bad data—how does this parameter affect overall performance? Moreover, we also provide
+some additional experiments in the Appendix.
+6.1 Experiment setting
+Environments and Dataset Generation. We evaluate our method in the context of learning from the
+good dataset BGand avoid the bad dataset BBwith a support from an additional unlabeled dataset
+BMIX. The use of such unlabeled data is common in offline imitation learning from mixed-quality
+demonstrations. Our experiments span four MuJoCo locomotion tasks: CHEETAH ,ANT,HOPPER ,
+WALKER , as well as four hand manipulation tasks from Adroit: PEN,HAMMER ,DOOR ,RELOCATE ,
+and one task from FrankaKitchen: KITCHEN —all sourced from the official D4RL benchmark [ 6]. For
+each MuJoCo task from D4RL, we have three types of datasets: RANDOM ,MEDIUM , and EXPERT .
+The good dataset BGis constructed using a single trajectory from the EXPERT dataset. The bad dataset
+BBconsists of 10 trajectories selected from either the RANDOM orMEDIUM dataset. To construct the
+unlabeled dataset BMIX, we combine the entire RANDOM orMEDIUM dataset (i.e., the same source
+asBB) with 30 additional trajectories from the EXPERT dataset. This setup mirrors the challenging
+7RANDOM +FEW-EXPERT and MEDIUM +FEW-EXPERT scenarios introduced in ReCOIL [ 35]. These
+three datasets— BG,BB, andBMIX—form the foundation of our training pipeline. We use the
+same dataset construction strategy for Adroit and FrankaKitchen tasks, yielding 18 distinct dataset
+combinations. Please refer to the Appendix for detailed descriptions of all dataset combinations.
+Baselines. We compare our method against several baselines. First, we evaluate two naive Behavioral
+Cloning approaches: one that learns directly from the large unlabeled dataset BMIX(BC-MIX), and one
+that learns solely from the good dataset BG(BC-G). Next, we include comparisons with state-of-the-
+art methods designed to leverage both expert (or good) data BGand unlabeled data BMIX, including
+SMODICE [ 27], ILID [ 41], and ReCOIL [ 35]. We exclude DWBC [ 40] from this experiment since
+both DWBC and ILID use discriminator-based objectives, and ILID has been shown to outperform
+DWBC. In addition, based on our proposed objective in (4), we include a variant of our method that
+only learns from BGandBMIX(i.e.,α= 0), called as ContraDICE-G. For methods that incorporate
+support from bad data BB, we evaluate our approach against SafeDICE [ 17]. Given the limited
+number of existing baselines that effectively utilize poor-quality data in offline imitation learning, we
+also propose a simple adaptation of DWBC, which is called as DWBC-GB to jointly learn from BG,
+BB, andBMIX. Detailed implementation of these baselines are provided in the Appendix.
+Evaluation Metrics. We evaluate all methods using five training seeds. For each seed, we collect the
+results from the last 10 evaluations (each evaluation consist 10 different environment seeds), then
+aggregate all evaluations across seeds to compute the mean and standard deviation, which reflect
+the converged performance of each method. Across all experiments, we report the normalized score
+commonly used in D4RL tasks
+Normalized Score =Score−Random Score
+Expert Score −Random Score
+. This normalization
+provides a consistent performance measure across different environments.
+Reproducibility. We provide detailed hyperparameters and network architectures for each task in
+the Appendix. To ensure reproducibility and comparison, the source code is publicly available at:
+https://github.com/hmhuy0/ContraDICE .
+6.2 Main Comparison
+Task unlabeled BMIX learning from BGandBMIXonly learning with BB
+BC-MIX BC-G SMODICE ILID ReCOIL ContraDICE-G SafeDICE DWBC-GB ContraDICE Expert
+CHEETAHRANDOM +EXPERT 2.3±0.0−0.6±0.7 4.6±2.7 21.1±7.6 2.0±0.6 84.4±5.3 −0.0±0.0 2.8±1.1 86.7±5.0 90.6
+MEDIUM +EXPERT 42.5±0.5−0.6±0.7 42.4±3.5 40.3±15.642.5±0.6 48.6±4.4 37.7±0.3 5.6±4.3 77.6±8.1 90.6
+ANTRANDOM +EXPERT 30.9±0.1−7.2±10.34.6±21.6 71.8±19.456.2±11.2 100.6±22.1 −2.6±0.0 6.5±7.5 112.7±12.9 117.5
+MEDIUM +EXPERT 91.2±1.9−7.2±10.388.5±9.3 39.6±25.7100.8±9.0 102.4±7.8 88.1±0.9−4.3±5.3 107.4±11.0 117.5
+HOPPERRANDOM +EXPERT 4.9±0.2 17.9±6.1 56.4±20.6 81.6±32.081.0±32.8 79.4±33.1 41.1±3.1 40.8±21.3 93.6±20.5 109.6
+MEDIUM +EXPERT 52.2±1.3 17.9±6.1 53.0±3.7 87.9±11.946.1±18.5 70.6±17.9 55.8±3.7 21.6±8.9 103.7±16.3 109.6
+WALKERRANDOM +EXPERT 1.5±0.1 3.8±3.3 106.6±1.5 100.1±9.829.8±33.4 97.5±24.0 23.0±1.8 17.4±16.7 107.4±3.7 107.7
+MEDIUM +EXPERT 70.8±0.7 3.8±3.3 6.0±5.0 89.7±23.772.1±12.1 99.8±15.5 60.2±2.9 25.6±16.6 108.2±0.9 107.7
+PENCLONED +EXPERT 56.0±1.1 8.8±3.1 10.9±14.6 1.9±4.7 79.2±21.4 66.3±21.5 19.9±4.6 9.5±8.8 96.4±19.4 107.0
+HUMAN +EXPERT 18.3±1.4 8.8±3.1 −2.5±0.5 5.1±4.8 99.9±18.9 95.5±19.7 21.8±5.7 6.5±5.3 101.5±18.7 107.0
+HAMMERCLONED +EXPERT 0.4±0.8 1.4±0.7 0.8±0.9 0.4±1.3 3.4±4.6 66.5±26.3 0.0±0.2 2.8±5.6 74.3±17.8 119.0
+HUMAN +EXPERT 12.8±7.3 1.4±0.7 1.9±4.6 1.2±3.1 113.2±12.4113.2±16.1 0.6±0.8 3.4±4.2 120.0±8.3 119.0
+DOORCLONED +EXPERT 0.4±0.7−0.1±0.1−0.1±0.1−0.1±0.2 19.3±16.7 92.6±11.3 −0.0±0.0−0.1±0.1 102.4±3.8 105.3
+HUMAN +EXPERT 4.0±2.6−0.1±0.1−0.1±0.7 0.2±1.6 100.3±6.4 104.7±1.5 0.9±0.9 1.1±1.1 105.0±1.2 105.3
+RELOCATECLONED +EXPERT −0.1±0.1−0.1±0.1 0.1±0.2 −0.1±0.1 1.4±2.4 34.5±13.9 −0.1±0.0−0.2±0.1 92.1±11.1 100.9
+HUMAN +EXPERT 0.0±0.1−0.1±0.1−0.2±0.1−0.2±0.2 72.3±12.6 99.1±6.9 0.0±0.1−0.1±0.0 102.6±5.3 100.9
+KITCHENPARTIAL +COMPLETE 45.5±1.9 2.5±5.0 5.5±8.2 27.3±5.4 48.8±8.9 45.8±14.8 2.8±1.1 19.4±4.6 53.1±13.1 75.0
+MIXED +COMPLETE 42.1±1.1 2.2±3.8 3.1±5.8 13.3±3.1 50.6±3.8 20.3±14.1 1.5±1.9 6.7±4.4 48.9±16.4 75.0
+Average 26.4 2.9 21.2 32.4 56.6 78.8 19.5 9.2 94.1
+Table 1: Comparison with other baselines in MuJoCo, Adroit, and FrankaKitchen. The results are
+normalized score in mean and standard deviation.
+To answer Question (Q1) , we present a comprehensive comparison between our method and existing
+baselines across 18 different datasets, as shown in Table 1. First, both BC-MIX and BC-G fail
+to achieve satisfactory performance across tasks. When learning from the good dataset BGand
+the unlabeled dataset BMIX, methods like SMODICE and ILID perform reasonably well on the
+four MuJoCo locomotion tasks ( CHEETAH ,ANT,HOPPER ,WALKER ) but completely fail on the
+five hand manipulation tasks. In contrast, ReCOIL and our method variant (ContraDICE-G) are
+able to successfully learn in both locomotion and manipulation tasks, demonstrating more robust
+generalization.
+8In the setting that incorporates additional low-quality data BB, SafeDICE shows similar performance
+to SMODICE and ILID—again failing on the manipulation tasks. Furthermore, DWBC-GB fails
+to learn entirely, highlighting that a naive adaptation for leveraging poor-quality data can harm the
+learning process. These results suggest that incorporating bad data BBintroduces new challenges,
+and that effectively utilizing such data requires a carefully designed algorithm grounded in strong
+theoretical principles. Overall, our method successfully leverages the bad dataset BBand consistently
+outperforms all other baselines across both locomotion and manipulation tasks.
+6.3 Effect of Number of Bad Demonstrations
+Score
+0 1 10 25 50 100
+# bad trajectories255075100
+CHEETAH
+(RANDOM + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+HOPPER
+(RANDOM + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+HAMMER
+(CLONED + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+RELOCATE
+(CLONED + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+KITCHEN
+(PARTIAL + COMPLETE)
+expert SafeDICE DWBC-GB ContraDICE
+Figure 1: Effect of the size of the bad dataset BBon learning performance: The results are averaged
+over five different training seeds and reported using normalized scores. As the number of bad trajec-
+tories increases, our method demonstrates a strong ability to leverage this data. In contrast, baseline
+methods such as SafeDICE and DWBC-GB struggle to make effective use of bad demonstrations.
+To answer question (Q2) , we investigate the impact of the size of the undesirable (bad) dataset on
+methods designed to learn from bad data. Specifically, we gradually increase the size of the bad
+dataset BBand evaluate how the performance of each algorithm is affected. The experimental results
+are presented in Figure 1. Overall, SafeDICE fails to effectively utilize the bad demonstrations, while
+DWBC-GB is only able to learn in the HOPPER task. In contrast, our method demonstrates strong
+scalability with respect to the size of the bad dataset, maintaining good performance even when
+provided with as few as a single bad trajectory.
+6.4 Sensitivity Analysis of α
+0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
+α80100ScoreHOPPER (RANDOM + EXPERT)
+0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
+α050100ScoreHAMMER (CLONED + EXPERT)
+0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
+α4060ScoreKITCHEN (PARTIAL + COMPLETE)
+Figure 2: Sensitivity analysis on the
+trade-off parameter α.From our objective function (1), we introduce a hyper-
+parameter 0≤α < 1, which controls the weighting of
+the bad data objective—this relates to question (Q3) . To
+evaluate the sensitivity of our method to α, we conduct
+experiments by varying its value and observing the ef-
+fect on final performance, as shown in Figure 2. While α
+does have a noticeable impact, our method remains robust
+across a broad range of values, with optimal performance
+observed within this range. The specific αvalues used for
+each task are provided in the Appendix.
+7 Conclusion
+We introduced a new offline imitation learning framework that leverages both expert and explicitly
+undesirable demonstrations. By formulating the learning objective as the difference of KL divergences
+over visitation distributions, we capture informative contrasts between good and bad behaviors. While
+the resulting DC program is generally non-convex, we establish conditions under which it becomes
+convex—specifically, when expert data dominates—leading to a practical, stable, and non-adversarial
+training procedure. Our unified approach to handling both expert and undesirable demonstrations
+yields superior performance across a range of offline imitation learning benchmarks, setting a new
+standard for learning from contrasting behaviors.
+9Limitations and Future Work. While our method shows strong empirical performance, it is
+currently limited to settings where α≤1. Relaxing this constraint would make the learning objective
+more challenging to optimize, but represents a promising direction for future research. Additionally,
+we assume access to well-labeled expert and undesirable demonstrations, which may not hold in
+practice. Developing robust methods that can learn effectively from noisy or weakly labeled data
+would be a valuable extension of this work.
+References
+[1]Abbas Abdolmaleki, Bilal Piot, Bobak Shahriari, Jost Tobias Springenberg, Tim Hertweck,
+Michael Bloesch, Rishabh Joshi, Thomas Lampe, Junhyuk Oh, Nicolas Heess, Jonas Buchli,
+and Martin Riedmiller. Learning from negative feedback, or positive feedback or both. In The
+Thirteenth International Conference on Learning Representations , 2025.
+[2]Firas Al-Hafez, Davide Tateo, Oleg Arenz, Guoping Zhao, and Jan Peters. Ls-iq: Implicit
+reward regularization for inverse reinforcement learning. In Eleventh International Conference
+on Learning Representations (ICLR) , 2023.
+[3]Oleg Arenz and Gerhard Neumann. Non-adversarial imitation learning and its connections to
+adversarial methods. arXiv preprint arXiv:2008.03525 , 2020.
+[4]Daniel Brown, Wonjoon Goo, Prabhat Nagarajan, and Scott Niekum. Extrapolating beyond sub-
+optimal demonstrations via inverse reinforcement learning from observations. In International
+conference on machine learning , pages 783–792. PMLR, 2019.
+[5]Cheng Chi, Zhenjia Xu, Siyuan Feng, Eric Cousineau, Yilun Du, Benjamin Burchfiel, Russ
+Tedrake, and Shuran Song. Diffusion policy: Visuomotor policy learning via action diffusion.
+The International Journal of Robotics Research , page 02783649241273668, 2023.
+[6]Justin Fu, Aviral Kumar, Ofir Nachum, George Tucker, and Sergey Levine. D4rl: Datasets for
+deep data-driven reinforcement learning, 2020.
+[7]Justin Fu, Katie Luo, and Sergey Levine. Learning robust rewards with adverserial inverse
+reinforcement learning. In International Conference on Learning Representations , 2018.
+[8]Divyansh Garg, Shuvam Chakraborty, Chris Cundy, Jiaming Song, and Stefano Ermon. Iq-learn:
+Inverse soft-q learning for imitation. Advances in Neural Information Processing Systems ,
+34:4028–4039, 2021.
+[9]Divyansh Garg, Joey Hejna, Matthieu Geist, and Stefano Ermon. Extreme q-learning: Maxent
+rl without entropy. In International Conference on Learning Representations (ICLR) , 2023.
+[10] Ze Gong, Akshat Kumar, and Pradeep Varakantham. Offline safe reinforcement learning using
+trajectory classification. In Proceedings of the AAAI Conference on Artificial Intelligence ,
+volume 39, pages 16880–16887, 2025.
+[11] Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil
+Ozair, Aaron Courville, and Yoshua Bengio. Generative adversarial nets. Advances in neural
+information processing systems , 27, 2014.
+[12] Tuomas Haarnoja, Aurick Zhou, Kristian Hartikainen, George Tucker, Sehoon Ha, Jie Tan,
+Vikash Kumar, Henry Zhu, Abhishek Gupta, Pieter Abbeel, et al. Soft actor-critic algorithms
+and applications. arXiv preprint arXiv:1812.05905 , 2018.
+[13] Joey Hejna and Dorsa Sadigh. Inverse preference learning: Preference-based rl without a reward
+function. Advances in Neural Information Processing Systems , 36, 2024.
+[14] Jonathan Ho and Stefano Ermon. Generative adversarial imitation learning. Advances in neural
+information processing systems , 29, 2016.
+[15] Huy Hoang, Tien Mai, and Pradeep Varakantham. Imitate the good and avoid the bad: An
+incremental approach to safe reinforcement learning. In Proceedings of the AAAI Conference
+on Artificial Intelligence , volume 38, pages 12439–12447, 2024.
+10[16] Huy Hoang, Tien Anh Mai, and Pradeep Varakantham. SPRINQL: Sub-optimal demonstrations
+driven offline imitation learning. In The Thirty-eighth Annual Conference on Neural Information
+Processing Systems , 2024.
+[17] Youngsoo Jang, Geon-Hyeong Kim, Jongmin Lee, Sungryull Sohn, Byoungjip Kim, Honglak
+Lee, and Moontae Lee. Safedice: offline safe imitation learning with non-preferred demonstra-
+tions. Advances in Neural Information Processing Systems , 36, 2024.
+[18] Yachen Kang, Diyuan Shi, Jinxin Liu, Li He, and Donglin Wang. Beyond reward: Offline
+preference-guided policy optimization. In International Conference on Machine Learning ,
+pages 15753–15768. PMLR, 2023.
+[19] Changyeon Kim, Jongjin Park, Jinwoo Shin, Honglak Lee, Pieter Abbeel, and Kimin Lee.
+Preference transformer: Modeling human preferences using transformers for rl. In The Eleventh
+International Conference on Learning Representations , 2023.
+[20] Geon-Hyeong Kim, Jongmin Lee, Youngsoo Jang, Hongseok Yang, and Kee-Eung Kim. Lobs-
+dice: Offline learning from observation via stationary distribution correction estimation. Ad-
+vances in Neural Information Processing Systems , 35:8252–8264, 2022.
+[21] Geon-Hyeong Kim, Seokin Seo, Jongmin Lee, Wonseok Jeon, HyeongJoo Hwang, Hongseok
+Yang, and Kee-Eung Kim. Demodice: Offline imitation learning with supplementary imperfect
+demonstrations. In International Conference on Learning Representations , 2021.
+[22] Ilya Kostrikov, Ofir Nachum, and Jonathan Tompson. Imitation learning via off-policy distribu-
+tion matching. In International Conference on Learning Representations , 2020.
+[23] Ilya Kostrikov, Ashvin Nair, and Sergey Levine. Offline reinforcement learning with implicit
+q-learning. arXiv preprint arXiv:2110.06169 , 2021.
+[24] Jongmin Lee, Wonseok Jeon, Byungjun Lee, Joelle Pineau, and Kee-Eung Kim. Optidice:
+Offline policy optimization via stationary distribution correction estimation. In International
+Conference on Machine Learning , pages 6120–6130. PMLR, 2021.
+[25] Ziniu Li, Tian Xu, Zeyu Qin, Yang Yu, and Zhi-Quan Luo. Imitation learning from imperfection:
+Theoretical justifications and algorithms. In Advances in Neural Information Processing Systems
+37, 2023.
+[26] Yuxiao Lu, Arunesh Sinha, and Pradeep Varakantham. Semantic loss guided data efficient
+supervised fine tuning for safe responses in LLMs. In The Thirteenth International Conference
+on Learning Representations , 2025.
+[27] Yecheng Ma, Andrew Shen, Dinesh Jayaraman, and Osbert Bastani. Versatile offline imitation
+from observations and examples via regularized state-occupancy matching. In International
+Conference on Machine Learning , pages 14639–14663. PMLR, 2022.
+[28] Liyuan Mao, Haoran Xu, Weinan Zhang, and Xianyuan Zhan. ODICE: Revealing the mystery of
+distribution correction estimation via orthogonal-gradient update. In The Twelfth International
+Conference on Learning Representations , 2024.
+[29] V olodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness, Marc G
+Bellemare, Alex Graves, Martin Riedmiller, Andreas K Fidjeland, Georg Ostrovski, et al.
+Human-level control through deep reinforcement learning. nature , 518(7540):529–533, 2015.
+[30] Vivek Myers, Erdem Biyik, Nima Anari, and Dorsa Sadigh. Learning multimodal rewards from
+rankings. In Conference on robot learning , pages 342–352. PMLR, 2022.
+[31] Ofir Nachum, Bo Dai, Ilya Kostrikov, Yinlam Chow, Lihong Li, and Dale Schuurmans. Al-
+gaedice: Policy gradient from arbitrary experience. arXiv preprint arXiv:1912.02074 , 2019.
+[32] Martin L Puterman. Markov decision processes: discrete stochastic dynamic programming .
+John Wiley & Sons, 2014.
+[33] Siddharth Reddy, Anca D Dragan, and Sergey Levine. Sqil: Imitation learning via reinforcement
+learning with sparse rewards. arXiv preprint arXiv:1905.11108 , 2019.
+11[34] Stéphane Ross, Geoffrey Gordon, and Drew Bagnell. A reduction of imitation learning and
+structured prediction to no-regret online learning. In Proceedings of the fourteenth interna-
+tional conference on artificial intelligence and statistics , pages 627–635. JMLR Workshop and
+Conference Proceedings, 2011.
+[35] Harshit Sikchi, Qinqing Zheng, Amy Zhang, and Scott Niekum. Dual rl: Unification and new
+methods for reinforcement and imitation learning. In Proceedings of the 12th International
+Conference on Learning Representations (ICLR) , 2024.
+[36] Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zambaldi,
+Max Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl Tuyls, et al. Value-
+decomposition networks for cooperative multi-agent learning. arXiv preprint arXiv:1706.05296 ,
+2017.
+[37] Richard S. Sutton and Andrew G. Barto. Reinforcement Learning: An Introduction . The MIT
+Press, second edition, 2018.
+[38] Faraz Torabi, Garrett Warnell, and Peter Stone. Behavioral cloning from observation. arXiv
+preprint arXiv:1805.01954 , 2018.
+[39] Yueh-Hua Wu, Nontawat Charoenphakdee, Han Bao, V oot Tangkaratt, and Masashi Sugiyama.
+Imitation learning from imperfect demonstration. In International Conference on Machine
+Learning , pages 6818–6827. PMLR, 2019.
+[40] Haoran Xu, Xianyuan Zhan, Honglei Yin, and Huiling Qin. Discriminator-weighted offline
+imitation learning from suboptimal demonstrations. In Proceedings of the 39th International
+Conference on Machine Learning , pages 24725–24742, 2022.
+[41] Sheng Yue, Jiani Liu, Xingyuan Hua, Ju Ren, Sen Lin, Junshan Zhang, and Yaoxue Zhang.
+How to leverage diverse demonstrations in offline imitation learning. In Forty-first International
+Conference on Machine Learning , 2024.
+[42] Songyuan Zhang, Zhangjie Cao, Dorsa Sadigh, and Yanan Sui. Confidence-aware imitation
+learning from demonstrations with varying optimality. Advances in Neural Information Pro-
+cessing Systems , 34:12340–12350, 2021.
+[43] Tony Zhao, Vikash Kumar, Sergey Levine, and Chelsea Finn. Learning fine-grained bimanual
+manipulation with low-cost hardware. Robotics: Science and Systems XIX , 2023.
+[44] Henry Zhu, Justin Yu, Abhishek Gupta, Dhruv Shah, Kristian Hartikainen, Avi Singh, Vikash
+Kumar, and Sergey Levine. The ingredients of real world robotic reinforcement learning. In
+International Conference on Learning Representations , 2020.
+12Appendix
+A Missing Proofs
+Proposition (4.1) :Ifα≤1, then the objective function f(dπ) =DKL(dπ∥dG)−α D KL(dπ∥dB)
+is convex in dπ.
+Proof. We write the objective function as:
+f(dπ) =X
+(s,a)∼dπlogdπ(s, a)
+dG(s, a)−αX
+(s,a)∼dπlogdπ(s, a)
+dB(s, a)
+=X
+s,a(1−α)dπ(s, a) logpπ(s, a) +dπ(s, a)(αdB(s, a)−dG(s, a)) (9)
+We can see that the first term is convex in dπsince α≤1anddπ(s, a) logdπ(s, a)is convex in dπ.
+Moreover, the second term is linear in dπ. This implies that f(dπ)is convex in πifα≤1, as desired.
+Proposition 4.2: The objective function in (2)can be written as: f(d, π) = (1 −α)DKL(d||dU)−
+E(s,a)∼d[Ψ(s, a)], where Ψ(s, a) = logdG(s,a)
+dU(s,a)−αlogdB(s,a)
+dU(s,a).
+Proof. We can expand the objective function as:
+f(d, π) =E(s,a)∼d
+logd(s, a)
+dG(s, a)
+−αE(s,a)∼d
+logd(s, a)
+dB(s, a)
+.
+We can rewrite the objective using dUas an intermediate distribution:
+f(d, π) =E(s,a)∼d
+logd(s, a)
+dG(s, a)
+−αE(s,a)∼d
+logd(s, a)
+dB(s, a)
+=E(s,a)∼d
+logd(s, a)
+dU(s, a)+ logdU(s, a)
+dG(s, a)
+−αE(s,a)∼d
+logd(s, a)
+dU(s, a)+ logdU(s, a)
+dB(s, a)
+= (1−α)E(s,a)∼d
+logd(s, a)
+dU(s, a)
+−E(s,a)∼d[Ψ(s, a)],
+= (1−α)DKL(d||dU)−E(s,a)∼d[Ψ(s, a)]
+where Ψ(s, a) = logdG(s,a)
+dU(s,a)−αlogdB(s,a)
+dU(s,a).
+Proposition 4.3: Let the surrogate objective be defined as:
+eL(Q, π) = (1 −γ)Es∼p0
+Vπ
+Q(s)
+−EdU[δ(s, a)Tπ[Q](s, a)] + (1 −α)EdU[δ(s, a)].(10)
+where δ(s, a) = exp
+Ψ(s,a)
+1−α
+.TheneL(Q, π)is a lower bound of L(Q, π), with equality when
+Tπ[Q](s, a) = 0 for all (s, a).
+Proof. We first write L(Q, π)as:
+L(Q, π) = (1 −γ)Es∼p0
+Vπ
+Q(s)
++ (1−α)E(s,a)∼dU
+expΨ(s, a)− Tπ[Q](s, a)
+1−α
+= (1−γ)Es∼p0
+Vπ
+Q(s)
++ (1−α)E(s,a)∼dU
+expΨ(s, a)
+1−α
+exp−Tπ[Q](s, a)
+1−α
+= (1−γ)Es∼p0
+Vπ
+Q(s)
++ (1−α)E(s,a)∼dU
+δ(s, a) exp−Tπ[Q](s, a)
+1−α
+,
+13where we define δ(s, a) := exp
+Ψ(s,a)
+1−α
+.
+Now, we use the inequality et≥t+ 1(which follows from the convexity of etand is tight at t= 0),
+to obtain:
+exp−Tπ[Q](s, a)
+1−α
+≥ −Tπ[Q](s, a)
+1−α+ 1.
+Substituting this into the expression for L(Q, π), we get:
+L(Q, π)≥(1−γ)Es∼p0
+Vπ
+Q(s)
++(1−α)E(s,a)∼dU
+δ(s, a)
+−Tπ[Q](s, a)
+1−α+ 1
+=:eL(Q, π).
+Equality holds in the inequality et≥t+ 1when t= 0, which corresponds to Tπ[Q](s, a) = 0 . That
+is, the equality L(Q, π) =eL(Q, π)holds when the rewards represented by the Q-function are zero
+everywhere. This completes the proof.
+Proposition 4.4: The following properties hold:
+(i)eL(Q, π)is linear in Qand concave in π. As a result, the max–min optimization can be equiv-
+alently reformulated as a min–max problem: max πminQeL(Q, π) = min Qmax πeL(Q, π).
+(ii)The min–max problem minQmax πeL(Q, π)reduces to the following non-adversarial prob-
+lem:
+min
+Q
+eL(Q) = (1 −γ)Es∼p0[VQ(s)]−E(s,a)∼dU
+expΨ(s, a)
+1−α
+T[Q](s, a)
+,
+where the soft value function VQ(s)is defined as: VQ(s) =
+βlog P
+aµU(a|s) exp( Q(s, a)/β)
+,and the soft Bellman residual operator is given by:
+T[Q](s, a) =Q(s, a)−γVQ(s).Moreover eL(Q)is convex in Q.
+Proof. We first write eL(Q, π)as:
+eL(Q, π) = (1 −γ)Es∼p0
+Vπ
+Q(s)
+−E(s,a)∼dU
+δ(s, a) 
+Q(s, a)−γEs′
+Vπ
+Q(s′)
++ (1−α)E(s,a)∼dU[δ(s, a)],
+where we recall that
+Vπ
+Q(s) =Ea∼π(·|s)
+Q(s, a)−βlogπ(a|s)
+µU(a|s)
+.
+Thus, we can observe that eL(Q, π)is linear in Q.
+Moreover, the function Vπ
+Q(s)is concave in π, since it is composed of the expectation over a linear
+function of π(through Q(s, a)) and the negative entropy-regularized KL-divergence term, which is
+convex in πand thus its negative is concave. That is,
+Vπ
+Q(s) =Ea∼π(·|s)
+Q(s, a)−βlogπ(a|s)
+µU(a|s)
+is concave in π.
+Furthermore, since δ(s, a)>0, the coefficients associated with Vπ
+Q(s)ineL(Q, π)are non-negative.
+This implies that the entire function eL(Q, π)is concave in π.
+Now, since eL(Q, π)is concave in πand linear in Q, we can apply the minimax theorem to swap the
+order of the max and min:
+max
+πmin
+QeL(Q, π) = min
+Qmax
+πeL(Q, π).
+This holds because the function eL(Q, π)satisfies the standard conditions of the minimax theorem: it
+is concave in π, convex (in fact, linear) in Q, and the optimization domains are convex.
+14Next, observe that in eL(Q, π), the variable πonly appears through the term Vπ
+Q(s), and all coeffi-
+cients multiplying Vπ
+Q(s)are non-negative. Therefore, maximizing eL(Q, π)overπis equivalent to
+maximizing Vπ
+Q(s)for each state sindependently. That is,
+max
+πeL(Q, π)≡max
+πX
+sc(s)Vπ
+Q(s),
+for some non-negative coefficients c(s)≥0, which implies it suffices to solve max πVπ
+Q(s)pointwise.
+Recall the definition:
+Vπ
+Q(s) =Ea∼π(·|s)
+Q(s, a)−βlogπ(a|s)
+µU(a|s)
+.
+The inner maximization over π(· |s)is a standard entropy-regularized problem, and the optimal
+policy has the closed-form solution:
+π∗(a|s) =µU(a|s) exp
+Q(s,a)
+β
+P
+a′µU(a′|s) exp
+Q(s,a′)
+β.
+This is a weighted softmax over Q(s, a)values, using the baseline distribution µU(a|s)as the
+reference. Substituting this back into Vπ
+Q(s)yields the closed-form maximized value:
+max
+πVπ
+Q(s) =βlog X
+aµU(a|s) expQ(s, a)
+β!
+.
+Thus:
+min
+Qmax
+πeL(Q, π) = min
+QeL(Q)
+where
+eL(Q) = (1 −γ)Es∼p0[VQ(s)]−E(s,a)∼dU
+expΨ(s, a)
+1−α
+(Q(s, a)−γEs′[VQ(s′)])
+,
+and
+VQ(s) =βlogX
+aµU(a|s) expQ(s, a)
+β
+.
+We can now see that eL(Q)is convex in Q, due to the following reasons:
+•The function Q(s, a)7→logP
+aµU(a|s) exp
+Q(s,a)
+β
+is a softmax (log-sum-exp), which
+is convex.
+•VQ(s), being a composition of a convex function with an affine transformation, is convex in
+Q.
+• Expectations over convex functions (e.g., Es∼p0[VQ(s)],Es′[VQ(s′)]) preserve convexity.
+•The remaining terms in eL(Q), such as Q(s, a), appear linearly and thus preserve convexity.
+Hence, the overall objective eL(Q)is convex in Q, which completes the proof.
+Proposition 5.1 The following Q-weighted behavior cloning (BC) objective yields the same optimal
+policy as the original advantage-weighted BC formulation in (7):
+max
+πX
+(s,a)∼BUexp1
+βQ(s, a)
+logπ(a|s). (11)
+15Proof. The Q-weighted BC objective can be written as:
+max
+πX
+(s,a)µU(s, a) exp1
+βQ(s, a)
+logπ(a|s).
+This represents a weighted maximum likelihood objective, where the weights are shaped by the
+exponential of the Q-values. For each state s, the optimal solution π∗(a|s)is given by:
+π∗(a|s) =µU(s, a) exp
+1
+βQ(s, a)
+P
+a′µU(s, a′) exp
+1
+βQ(s, a′).
+Moreover, we recall that:
+VQ(s) =βlog X
+a′µU(s, a′) exp1
+βQ(s, a′)!
+,
+which allows us to express the optimal policy in terms of the advantage Q(s, a)−VQ(s)as:
+π∗(a|s) =µU(s, a) exp1
+β(Q(s, a)−VQ(s))
+.
+This is precisely the optimal policy corresponding to the advantage-weighted BC objective defined in
+Equation (7). This completes the proof.
+B A Note on ContraDICE under f-Divergence
+We note that the convexity stated in Proposition 4.1 does not hold under arbitrary f-divergences, even
+under the same assumptions. To illustrate this, consider the following objective defined using an
+f-divergence:
+F(dπ) =Df(dπ∥dG)−α Df(dπ∥dB),
+which can be written as:
+F(dπ) =X
+(s,a)dG(s, a)fdπ(s, a)
+dG(s, a)
+−α dB(s, a)fdπ(s, a)
+dB(s, a)
+.
+Observe that each term
+dG(s, a)fdπ(s, a)
+dG(s, a)
+−α dB(s, a)fdπ(s, a)
+dB(s, a)
+is not necessarily convex for any α >0. Whether this expression is convex depends on the values of
+dG(s, a)anddB(s, a). In particular, if dG(s, a) = 0 —i.e., the state-action pair (s, a)is never visited
+by the expert policy—then the term may become concave. Therefore, in general, the objective F(dπ)
+defined under an f-divergence is not convex in dπfor arbitrary choices of α. Thus, the standard
+Lagrangian duality cannot be applied. For this reason, the KL divergence appears to be an ideal
+choice for our problem of learning from both expert and undesirable demonstrations.
+16C Experiment Settings
+C.1 Full Pseudo Code
+The detailed implementation are provided in Algorithm 2.
+Algorithm 2 ContraDICE: Offline Imitation Learning from Contrasting Behaviors (full)
+Require: Good dataset BG, Bad dataset BB, unlabeled dataset BU
+Require: Hyperparameters: α∈[0,1),β,γ,Nµ,N, target update rate τ, batch size B
+1:Initialize networks: Qwq(s, a),Vwv(s),πθ(a|s), classifiers cG
+wG(s, a),cB
+wB(s, a)
+2:Initialize target Q-network: Qtarget←Qwq
+3:
+4:Step 1: Estimate occupancy ratios
+5:fori= 1toNµdo
+6: Sample batch {(sG
+i)′}B
+i=1∼ BG;{(sB
+i)′}B
+i=1∼ BB;{(sU
+i)′}B
+i=1∼ BU
+7: Update cG
+wGby maximizing the objective in Equation (5).
+8: Update cB
+wBby maximizing an analogous objective to Equation (5) for the bad dataset.
+9:end for
+10:
+11:Step 2: Calculate Ψfunction
+12:Calculate Ψ(s, a) = log
+cG
+wG(s′)
+1−cGwG(s′)
+−αlog
+cB
+wB(s′)
+1−cBwB(s′)
+.
+13:
+14:Step 3: Train Q, V , and Policy
+15:fori= 1toNdo
+16: Sample batch {(si, ai, s′
+i,Ψi)}B
+i=1∼ BU
+17: Q-Update: Minimize the objective ˜L(Qwq|Vwv) +1
+2(Qwq(si, ai)−γVwv(s′
+i))2.
+18: (reference: ˜L(Q|V)from Sec 5/ Eq (6))
+19: V-Update: Minimize the Extreme-V objective:
+min
+wv1
+BBX
+i=1
+expQtarget(si, ai)−Vwv(si)
+β
+−Qtarget(si, ai)−Vwv(si)
+β−1
+.
+20: Policy Update: Maximize the policy by using Q-weighted Behavior Cloning.
+21: (reference: Sec 5/ Eq (8))
+22: Target Q-Update: Soft update: Qtarget←τQwq+ (1−τ)Qtarget
+23:end for
+24:
+25:return Trained policy πθ
+17C.2 Dataset Construction
+From the official D4RL dataset we use three different domains:
+• MuJoCo Locomotion[ CHEETAH ,ANT,HOPPER ,WALKER ] with three types of dataset:
+–EXPERT
+–MEDIUM
+–RANDOM
+• Adroit [ PEN,HAMMER ,DOOR ,RELOCATE ] with three types of dataset:
+–EXPERT
+–HUMAN
+–CLONED
+• FrankaKitchen [ KITCHEN ] with three types of dataset:
+–COMPLETE
+–MIXED
+–PARTIAL
+Following the approach of [ 35], we also provide several combinations across all three domains,
+as shown in Table 2. Notably, the unlabeled dataset BMIXis constructed by combining the entire
+suboptimal dataset with the expert dataset, resulting in an overlap between BBandBMIX. Nevertheless,
+this setup is practical: given an good dataset BGand an unlabeled dataset BMIX, users can randomly
+sample trajectories and assign them to either BGorBBwithout the need for any additional external
+data.
+Task Unlabeled name BGBBBMIX
+CHEETAHRANDOM +EXPERT 1EXPERT 10RANDOM Full RANDOM +30 EXPERT
+MEDIUM +EXPERT 1EXPERT 10MEDIUM Full MEDIUM +30 EXPERT
+ANTRANDOM +EXPERT 1EXPERT 10RANDOM Full RANDOM +30 EXPERT
+MEDIUM +EXPERT 1EXPERT 10MEDIUM Full MEDIUM +30 EXPERT
+HOPPERRANDOM +EXPERT 1EXPERT 10RANDOM Full RANDOM +30 EXPERT
+MEDIUM +EXPERT 1EXPERT 10MEDIUM Full MEDIUM +30 EXPERT
+WALKERRANDOM +EXPERT 1EXPERT 10RANDOM Full RANDOM +30 EXPERT
+MEDIUM +EXPERT 1EXPERT 10MEDIUM Full MEDIUM +30 EXPERT
+PENCLONED +EXPERT 1EXPERT 25CLONED Full CLONED +100 EXPERT
+HUMAN +EXPERT 1EXPERT 25HUMAN Full HUMAN +100 EXPERT
+HAMMERCLONED +EXPERT 1EXPERT 25CLONED Full CLONED +100 EXPERT
+HUMAN +EXPERT 1EXPERT 25HUMAN Full HUMAN +100 EXPERT
+DOORCLONED +EXPERT 1EXPERT 25CLONED Full CLONED +100 EXPERT
+HUMAN +EXPERT 1EXPERT 25HUMAN Full HUMAN +100 EXPERT
+RELOCATECLONED +EXPERT 1EXPERT 25CLONED Full CLONED +100 EXPERT
+HUMAN +EXPERT 1EXPERT 25HUMAN Full HUMAN +100 EXPERT
+KITCHENPARTIAL +COMPLETE 1COMPLETE 25PARTIAL Full PARTIAL +1COMPLETE
+MIXED +COMPLETE 1COMPLETE 25MIXED Full MIXED +1COMPLETE
+Table 2: Dataset Construction. The numbers in Table 2 indicate the number of trajectories drawn
+from each corresponding dataset. For the KITCHEN task, we follow the setting of [ 35], where only a
+single trajectory from the COMPLETE dataset is included in BMIX.
+18C.3 Baselines Implementation
+We compare our method against several established baselines. For methods with publicly available
+code, we utilized their official implementations without algorithmic modifications.
+C.3.1 Behavior Cloning (BC)
+We employ the standard Behavior Cloning (BC) objective, which aims to minimize the negative
+log-likelihood of the demonstrated actions under the learned policy:
+min
+π−E(s,a)∼Blogπ(a|s), (12)
+where Bdenotes the dataset of state-action pairs. Specifically, Bcorresponds to BMIXin the case of
+BC-MIX, or BGfor BC-G.
+C.3.2 Other Baselines with Official Implementations
+For the following baselines, we used their official, unmodified implementations:
+•SMODICE [27]: Applied to both the good dataset ( BG) and the mixed dataset ( BMIX). The
+official code is available at [GitHub].
+•ILID [41]: Applied to BGandBMIX. The official code is available at [GitHub].
+•ReCOIL [35]: Applied to BGandBMIX. The official code is available at [GitHub].
+•SafeDICE [17]: Applied to the bad dataset ( BB) and the mixed dataset ( BMIX). The official
+code is available at [GitHub].
+C.3.3 DWBC-GB
+DWBC-GB is our adaptation of DWBC [ 40] (original official implementation: [GitHub]). While the
+original DWBC is designed for scenarios involving BGandBMIX, our modified version, DWBC-GB,
+is extended to handle all three dataset types: BG,BB, andBMIX.
+This adaptation involves training two discriminators: cGfor good data and cBfor bad data. Their
+respective loss functions are:
+LcG=ηE(s,a)∼BG[−logcG(s, a,logπ(a|s))]
++E(s,a)∼BMIX[−log(1−cG(s, a,logπ(a|s)))]
+−ηE(s,a)∼BG[−log(1−cG(s, a,logπ(a|s)))], (13)
+LcB=ηE(s,a)∼BB[−logcB(s, a,logπ(a|s))]
++E(s,a)∼BMIX[−log(1−cB(s, a,logπ(a|s)))]
+−ηE(s,a)∼BB[−log(1−cB(s, a,logπ(a|s)))]. (14)
+The policy πis then learned by minimizing the objective:
+min
+π 
+E(s,a)∼BG
+−logπ(a|s)·
+α−η
+c(s, a) (1−c(s, a))
++E(s,a)∼BMIX
+−logπ(a|s)·1
+1−c(s, a)!
+, (15)
+where c(s, a) =cG(s, a)−cB(s, a). (Note: ηandαare hyperparameters.)
+19C.4 Hyper Parameters
+Our method features two primary hyperparameters: α(weighting for balancing positive and negative
+samples) and β(Extreme-V update). Sections 6.4, D.6, and D.8 present ablation studies detailing the
+sensitivity to these parameters.
+Specific parameters for all tasks are provided in Table 3 below:
+Task Unlabeled name α β
+CHEETAHRANDOM +EXPERT 0.6 20.0
+MEDIUM +EXPERT 0.6 15.0
+ANTRANDOM +EXPERT 0.6 15.0
+MEDIUM +EXPERT 0.6 15.0
+HOPPERRANDOM +EXPERT 0.4 30.0
+MEDIUM +EXPERT 0.4 30.0
+WALKERRANDOM +EXPERT 0.6 20.0
+MEDIUM +EXPERT 0.6 20.0
+PENCLONED +EXPERT 0.4 15.0
+HUMAN +EXPERT 0.4 10.0
+HAMMERCLONED +EXPERT 0.2 10.0
+HUMAN +EXPERT 0.6 20.0
+DOORCLONED +EXPERT 0.4 15.0
+HUMAN +EXPERT 0.4 10.0
+RELOCATECLONED +EXPERT 0.4 30.0
+HUMAN +EXPERT 0.8 3.0
+KITCHENPARTIAL +COMPLETE 0.3 10.0
+MIXED +COMPLETE 0.3 30.0
+Table 3: Hyper parameters.
+Beyond these, all other hyperparameters are consistently applied across all benchmarks and settings.
+The policy, Q-function, V-function, and discriminator all utilize a 2-layer feedforward neural network
+architecture with 256 hidden units and ReLU activation functions. For the policy, Tanh Gaussian
+outputs are used. The Adam optimizer is configured with a weight decay of 1×10−3, all learning
+rates are set to 3×10−4, mini batch size is 1024, and a soft critic update parameter τ= 0.005is
+used. These hyperparameters are summarized in Table 4:
+Hyperparameter Value
+Network Architecture2-layer Neural Network(Policy, Q-func, V-func, Discriminator)
+Hidden Units per Layer 256
+Batch size 1024
+Activation Function (Hidden Layers) ReLU
+Policy Output Activation Tanh Gaussian
+Optimizer Adam
+Learning Rate (all networks) 3×10−4
+Weight Decay (Adam) 1×10−3
+Soft Critic Update Rate ( τ) 0.005
+Table 4: Consistent hyperparameters used across all benchmarks and settings.
+C.5 Computational Resource
+Our experiments were conducted using a pool of 12 NVIDIA GPUs, including L40, A5000, and
+RTX 3090 models. For each experimental configuration, five training seeds were executed in
+parallel, sharing a single GPU, eight CPU cores, and 64 GB of RAM. Under these shared conditions,
+completing 1 million training steps across all five seeds took approximately 30 minutes. The software
+environment was based on JAX version 0.4.28 (with CUDA 12 support), running on CUDA version
+12.3.2 and cuDNN version 8.9.7.29.
+20D Additional Experiments
+D.1 Impact of the Size of the Bad Dataset: Full Details
+To support the experiment in Section 6.3, we present the complete results for all MuJoCo Locomotion
+and Adroit manipulation tasks. In particular, we progressively increase the size of the suboptimal
+dataset BBand evaluate the impact on each algorithm’s performance. The results, shown in Figure 3,
+demonstrate that ContraDICE consistently outperforms all other baselines across all tasks, effectively
+leveraging the bad data to achieve superior performance. Notably, the results indicate that with only a
+single good trajectory in BG, increasing the number of bad trajectories in BBto just 10 is sufficient
+for ContraDICE to achieve its highest performance across all tasks.
+expert SafeDICE DWBC-GB ContraDICEScore
+0 1 10 25 50 100
+# bad trajectories255075100
+CHEETAH
+(RANDOM + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+ANT
+(RANDOM + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+HOPPER
+(RANDOM + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+WALKER
+(RANDOM + EXPERT) Score
+0 1 10 25 50 100
+# bad trajectories255075100
+CHEETAH
+(MEDIUM + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+ANT
+(MEDIUM + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+HOPPER
+(MEDIUM + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+WALKER
+(MEDIUM + EXPERT) Score
+0 1 10 25 50 100
+# bad trajectories255075100
+PEN
+(CLONED + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+HAMMER
+(CLONED + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+DOOR
+(CLONED + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+RELOCATE
+(CLONED + EXPERT) Score
+0 1 10 25 50 100
+# bad trajectories255075100
+PEN
+(HUMAN + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+HAMMER
+(HUMAN + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+DOOR
+(HUMAN + EXPERT)
+0 1 10 25 50 100
+# bad trajectories255075100
+RELOCATE
+(HUMAN + EXPERT)
+Figure 3: Full bad dataset size effect. SafeDICE and DWBC-GB do not have version that learn from
+0 bad trajectory, we assign result 0.0 for them.
+21D.2 Impact of the Number of Expert Demonstrations in BG
+In this section, we investigate how many expert trajectories in the good dataset BGare sufficient to
+achieve optimal performance. To this end, the quantity of expert trajectories in BGwas incrementally
+increased through the set 1,3,5,10,25, while the composition of the unlabeled dataset ( BMIX) remained
+fixed, as specified in Table 1. The detailed results are presented in Figure 4 and 5.
+ILID performs well on the Mujoco locomotion tasks ( CHEETAH ,ANT,HOPPER ,WALKER ), but
+struggles in 3 out of 4 Adroit tasks ( HAMMER ,DOOR ,RELOCATE ). This indicates that ILID requires
+a sufficient number of expert trajectories to achieve stable expert performance, which is not met in the
+more complex Adroit tasks. In contrast, ReCOIL appears unable to effectively leverage the good data,
+as its performance does not improve significantly with more expert trajectories. Overall, ContraDICE
+demonstrates consistently strong performance, requiring only 3 to 5 expert trajectories to achieve
+near-optimal results in all tasks.
+**Discussion on the Use Cases of ILID and ContraDICE: ** Through this experiment, we observe
+that in the Mujoco tasks, ILID can outperform ContraDICE-G when the size of the good dataset is
+sufficiently large. This highlights a limitation of ContraDICE, where the policy extraction objective is
+defined as max πnP
+(s,a)∼BUexp(1
+βQ(s, a)) log π(a|s)o
+. This objective uses data from the union
+dataset BU, which may assign high weights to poor-quality transitions, potentially harming training.
+In contrast, ILID only retains transitions that are connected to good data and explicitly discards
+irrelevant or undesirable transitions (refer to the implementation details of ILID for more information).
+This targeted filtering strategy enables ILID to avoid the negative effects of poor transitions and scale
+more effectively with increasing amounts of good data.
+These observations suggest a potential direction for improving ContraDICE by incorporating similar
+data filtering mechanisms. Specifically, enhancing ContraDICE to better isolate high-quality transi-
+tions could help it perform competitively with ILID in scenarios where the good dataset is large. We
+leave this exploration for future work, as it requires a careful study of how to construct an optimal
+dataset using Q-based methods.
+In summary, ILID is a strong approach that scales well with the quality and size of the expert dataset.
+Practitioners may prefer discriminator-based methods like ILID when sufficient high-quality expert
+data is available, while ContraDICE remains a robust choice in settings where such data is limited
+and scalalbe with bad dataset.Score
+1 3 5 10 25
+# Expert trajectories255075100
+CHEETAH
+(RANDOM + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+ANT
+(RANDOM + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+HOPPER
+(RANDOM + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+WALKER
+(RANDOM + EXPERT) Score
+1 3 5 10 25
+# Expert trajectories255075100
+CHEETAH
+(MEDIUM + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+ANT
+(MEDIUM + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+HOPPER
+(MEDIUM + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+WALKER
+(MEDIUM + EXPERT)
+expert ReCOIL ILID ContraDICE-G
+Figure 4: Different of good dataset size without impact from bad dataset in MuJoCo Locomotion
+tasks.
+22Score
+1 3 5 10 25
+# Expert trajectories255075100
+PEN
+(CLONED + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+HAMMER
+(CLONED + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+DOOR
+(CLONED + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+RELOCATE
+(CLONED + EXPERT) Score
+1 3 5 10 25
+# Expert trajectories255075100
+PEN
+(HUMAN + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+HAMMER
+(HUMAN + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+DOOR
+(HUMAN + EXPERT)
+1 3 5 10 25
+# Expert trajectories255075100
+RELOCATE
+(HUMAN + EXPERT)
+expert ReCOIL ILID ContraDICE-G
+Figure 5: Different of good dataset size without impact from bad dataset in Adroit Manipulation
+tasks.
+D.3 Discussion: How Many Bad Trajectories in BBAre Sufficient to Replace a Good
+Trajectory in BGfor ContraDICE?
+Based on the previous experiments:
+•Section D.1 addresses the question: How does the size of the bad dataset BBaffect the
+performance of ContraDICE?
+•Section D.2 investigates an additional question: How does the size of the good dataset BG
+affect the performance of ContraDICE?
+From these experiments, we derive the following observations:
+•With only one good trajectory in BG, adding 10 bad trajectories in BBis sufficient for
+ContraDICE to achieve its best performance.
+•Without any bad data BB, 3 to 5 good trajectories in BGare enough to reach peak perfor-
+mance.
+These results suggest that ContraDICE can efficiently utilize bad data to reduce the need for good
+data, with an estimated ratio of 2 to 5 bad trajectories being roughly equivalent to one good trajectory
+across the benchmarks studied in this paper.
+23D.4 Comparison of Advantage-weighted BC and Q-weighted BC for the Policy Extraction
+In this paper, we propose a novel policy extraction method called QW-BC (Objective (8)), in contrast
+to prior approaches that rely on AW-BC (Objective (7)). In this section, we present a comparison
+between QW-BC and AW-BC, as illustrated in Figure 6. Overall, QW-BC demonstrates superior
+policy extraction performance, attributed to its stability derived from relying on a single network
+estimation. In contrast, AW-BC often exhibits oscillations and instability, frequently assigning
+inconsistent and overly high weights to bad transitions.Score
+0.0 0.5 1.0
+Train steps 1e6050100CHEETAH
+(RANDOM + EXPERT)
+expert
+AW-BC
+QW-BC
+0.0 0.5 1.0
+Train steps 1e6050100ANT
+(RANDOM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100HOPPER
+(RANDOM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100WALKER
+(RANDOM + EXPERT) Score
+0.0 0.5 1.0
+Train steps 1e6050100CHEETAH
+(MEDIUM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100ANT
+(MEDIUM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100HOPPER
+(MEDIUM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100WALKER
+(MEDIUM + EXPERT) Score
+0.0 0.5 1.0
+Train steps 1e6050100PEN
+(CLONED + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100HAMMER
+(CLONED + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100DOOR
+(CLONED + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100RELOCATE
+(CLONED + EXPERT) Score
+0.0 0.5 1.0
+Train steps 1e6050100PEN
+(HUMAN + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100HAMMER
+(HUMAN + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100DOOR
+(HUMAN + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100RELOCATE
+(HUMAN + EXPERT)
+Figure 6: AW-BC and QW-BC comparison.
+D.5 Performance Across Varying Quality Levels of the Unlabeled Dataset BMIX
+The performance of all methods is influenced by the quality of the unlabeled dataset BMIX. To evaluate
+the robustness of our method under varying dataset quality, we conduct experiments with different
+amounts of expert trajectories combined with the full set of undesirable trajectories in the unlabeled
+dataset. We compare our approach against ILID and ReCOIL—which leverage BGandBMIX—as
+well as SafeDICE, which learns from BBandBMIX. The detailed results of this study are presented in
+Figure 7.
+In the Mujoco locomotion tasks, increasing the quality of the unlabeled dataset has minimal effect on
+SafeDICE and ILID, and both methods continue to underperform on the Adroit hand manipulation
+tasks regardless of the number of expert trajectories included. In contrast, ReCOIL shows improved
+performance as the quality of the unlabeled dataset increases, successfully learning 4 out of 8
+tasks across both locomotion and manipulation domains. Overall, our method achieves near-expert
+24performance on 7 out of 8 tasks while requiring significantly lower-quality unlabeled datasets BMIX,
+demonstrating its superior data efficiency and robustness.
+Score
+10 30 50 100 400
+# expert in unlabeled dataset255075100CHEETAH
+(RANDOM + EXPERT)
+10 30 50 100 400
+# expert in unlabeled dataset255075100HOPPER
+(RANDOM + EXPERT)
+10 50 100 200 400
+# expert in unlabeled dataset255075100HAMMER
+(CLONED + EXPERT)
+10 50 100 200 400
+# expert in unlabeled dataset255075100RELOCATE
+(CLONED + EXPERT) Score
+10 30 50 100 400
+# expert in unlabeled dataset255075100CHEETAH
+(MEDIUM + EXPERT)
+10 30 50 100 400
+# expert in unlabeled dataset255075100HOPPER
+(MEDIUM + EXPERT)
+10 50 100 200 400
+# expert in unlabeled dataset255075100HAMMER
+(HUMAN + EXPERT)
+10 50 100 200 400
+# expert in unlabeled dataset255075100RELOCATE
+(HUMAN + EXPERT)
+expert SafeDICE ILID ReCOIL ContraDICE
+Figure 7: Effect of Unlabeled Dataset Quality on Performance: We evaluate the effect of increasing
+the number of expert trajectories in the unlabeled dataset BMIX. The results are calculated from 5
+different training seeds, reported in normalized score. Our method outperforms SafeDICE, ILID and
+ReCOIL across both locomotion and manipulation tasks, achieving near-expert performance on most
+environments even with a small number of expert demonstrations.
+D.6 Adaptations and Experiments with α >1
+From our objective function (1), we introduce a hyperparameter 0≤α < 1, which controls the
+weighting of the bad data objective—this corresponds to question (Q3) . To evaluate the sensitivity
+of our method to α, we conduct experiments by varying its value and observing its impact on final
+performance. Specifically, we perform a full sweep over α∈ {0,0.1,0.2, . . . , 0.9}to illustrate how
+this key hyperparameter influences learning outcomes.
+Interestingly, we observe that in some cases, settings with α≥1yield favorable performance,
+suggesting that avoiding bad data may, at times, be more critical than imitating good data. However,
+directly applying α≥1in our original formulation violates convexity conditions.
+To address this, we propose a naive modification of Objective (6)that accommodates α≥1while
+preserving practical applicability. The revised objective is defined as:
+eL(Q|V) = (1 −γ)Es∼p0[V(s)]−E(s,a)∼dU[exp (Ψ( s, a)) (Q(s, a)−γEs′[V(s′)])],(16)
+which enables empirical investigation into the high- αregime while sidestepping theoretical limitations.
+The experiment results are provided in Figure 8. Overall, α≥1does not provide good performance,
+which raises the limitation of the naive adaptation.
+250.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.010.0
+α50100Score
+HOPPER (RANDOM + EXPERT)
+0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.010.0
+α0100Score
+HAMMER (CLONED + EXPERT)
+0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0
+α255075Score
+KITCHEN (PARTIAL + COMPLETE)Figure 8: Performance of large α≥1.
+D.7 Comparison Between L(Q, π)and the Surrogate eL(Q, π)
+As shown in Proposition 4.3, the original objective L(Q|V)(Equation (3)) is transformed into a
+modified version eL(Q|V)(Equation (6)). This experiment investigates the performance differences
+between the two objectives.
+To improve the stability of the original objective L(Q|V), we need to address the issue of exponential
+terms producing extremely large values, which can lead to numerical instability. A practical approach
+is to clip the input to the exponential function to a bounded range [minR ,maxR ], resulting in the
+following formulation:
+L(Q, π) =(1−γ)Es∼p0
+Vπ
+Q(s)
++ (1−α)E(s,a)∼dU
+expΨ(s, a)− Tπ[Q](s, a)
+1−α
+.clip(minR ,maxR )
+,(17)
+where minR =−7and maxR = 7in our experiments.
+The results of this ablation study are presented in Figure 9, illustrating the performance impact of
+this stability-enhancing modification. In general, the clipping technique effectively mitigates the
+instability caused by the exponential term, successfully preventing NaN errors during training.
+However, this modification also leads to a drop in performance and, in some tasks, causes the method
+to fail to learn effectively.
+26Score
+0.00 0.25 0.50 0.75 1.00
+Train steps×106050100CHEETAH
+(RANDOM + EXPERT)
+expert
+L(Q|V)
+/tildewideL(Q|V)
+0.0 0.5 1.0
+Train steps 1e6050100ANT
+(RANDOM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100HOPPER
+(RANDOM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100WALKER
+(RANDOM + EXPERT) Score
+0.0 0.5 1.0
+Train steps 1e6050100CHEETAH
+(MEDIUM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100ANT
+(MEDIUM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100HOPPER
+(MEDIUM + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100WALKER
+(MEDIUM + EXPERT) Score
+0.0 0.5 1.0
+Train steps 1e6050100PEN
+(CLONED + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100HAMMER
+(CLONED + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100DOOR
+(CLONED + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100RELOCATE
+(CLONED + EXPERT) Score
+0.0 0.5 1.0
+Train steps 1e6050100PEN
+(HUMAN + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100HAMMER
+(HUMAN + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100DOOR
+(HUMAN + EXPERT)
+0.0 0.5 1.0
+Train steps 1e6050100RELOCATE
+(HUMAN + EXPERT)
+Figure 9: Exponetial ablation study.
+D.8 Sensitivity Analysis of β
+In this section, we explore how different values of the βparameter affect performance. The experiment
+results are provided in Table 5. The results show that while βsignificantly influences outcomes,
+performance remains consistent over a wide range of βvalues, implying that minimal tuning effort is
+needed for this hyperparameter.
+Task unlabeled BMIX βvalue
+1 3 5 10 15 20 30
+CHEETAHRANDOM +EXPERT 2.25±0.02.25±0.02.25±0.0 2.24±0.0 83.2±5.3 85.8±2.1 84.3±1.4
+MEDIUM +EXPERT 42.4±0.242.9±0.353.9±8.8 83.1±4.9 80.1±2.6 78.7±2.3 76.7±5.2
+ANTRANDOM +EXPERT 39.5±7.369.3±6.560.9±28.7115.6±4.6118.0±2.1114.5±1.7116.0±2.1
+MEDIUM +EXPERT 91.0±1.190.6±1.793.7±1.5 104.8±3.9106.5±2.4101.1±3.395.1±1.3
+HOPPERRANDOM +EXPERT 4.7±0.4 5.2±0.9 7.2±1.3 7.9±1.9 20.4±9.7 67.4±7.9 94.4±6.3
+MEDIUM +EXPERT 52.1±1.546.0±1.085.8±11.696.3±8.1 96.9±12.5 99.6±4.1 98.0±5.7
+WALKERRANDOM +EXPERT 2.9±2.6 3.5±2.9 6.4±4.6 32.5±27.7105.7±4.5106.2±2.0107.5±1.1
+MEDIUM +EXPERT 68.3±3.765.8±3.253.4±3.6 104.9±2.5108.1±0.1108.2±0.2 108.2±0.1
+Table 5: Performance of ContraDICE in different βvalue in MuJoCo locomotion tasks.
+27
